@@ -1318,9 +1318,28 @@
     const branchWrap = document.getElementById("ms-pd-branch");
     if (branchWrap) { branchWrap._refreshOptions ? branchWrap._refreshOptions(branchItems) : buildMultiSelect("ms-pd-branch", "ms-pd-branch-dd", branchItems, "All Branches"); }
 
-    const stockTypeItems = ["Q — 🟣 Special Stock (Q)", "RDF — 🔵 RDF"];
+    // FIX-SCOPED-FILTER-LIST: was hardcoded to both Q and RDF for every role,
+    // so a user whose data_scopes only grant e.g. Q_* (or only R_*) could
+    // still pick the type they can't see any rows of. Derived from STATE.rows
+    // (already scope-filtered via canAccessDispatchRow) and further narrowed
+    // to whichever prefixes the user's scopes actually allow — Admin still
+    // always sees both.
+    const stockTypeLabels = { "Q": "Q — 🟣 Special Stock (Q)", "RDF": "RDF — 🔵 RDF" };
+    const stockTypeCodes = (typeof stockTypeFilterOptions === "function")
+      // stockTypeFilterOptions' prefixOfRow contract wants "Q"/"R" (not
+      // "RDF") back per row — stockTypeOf() returns "Q"/"RDF", so map RDF -> R.
+      ? stockTypeFilterOptions(STATE.rows, (r) => stockTypeOf(r) === "Q" ? "Q" : "R")
+      : ["Q", "RDF"]; // permissions.js not loaded — fail open to old behavior
+    const stockTypeItems = stockTypeCodes.map(c => stockTypeLabels[c]).filter(Boolean);
     const stockTypeWrap = document.getElementById("ms-pd-stocktype");
-    if (stockTypeWrap && !stockTypeWrap._refreshOptions) buildMultiSelect("ms-pd-stocktype", "ms-pd-stocktype-dd", stockTypeItems, "All Stock Types");
+    if (stockTypeWrap) {
+      // Unlike Storage Location / Branch above, this list can legitimately
+      // change (not just grow) between uploads for a scoped user, so always
+      // refresh rather than only building once.
+      stockTypeWrap._refreshOptions
+        ? stockTypeWrap._refreshOptions(stockTypeItems)
+        : buildMultiSelect("ms-pd-stocktype", "ms-pd-stocktype-dd", stockTypeItems, "All Stock Types");
+    }
   }
 
   // ── Export ───────────────────────────────────────────────────
