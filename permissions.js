@@ -27,7 +27,7 @@ const ROLE_LABELS = {
 const VALID_VALUATION_SUFFIXES = ["ZME", "ZMS", "ZLC", "ZMD"];
 
 // ── BASIC ROLE CHECKS ───────────────────────────────────────────
-function isAdmin() {
+function computeIsAdmin() {
   return !!window.isAdmin;
 }
 
@@ -44,13 +44,13 @@ function isDirectorLike() {
 }
 
 function canManageRoles() {
-  return isAdmin() || isDirectorLike();
+  return computeIsAdmin() || isDirectorLike();
 }
 
 // True only for Admin — Directors can EDIT roles but not create/delete/
 // deactivate users or touch sidebar permissions/data scopes.
 function canManageUsersFully() {
-  return isAdmin();
+  return computeIsAdmin();
 }
 
 // ── SIDEBAR / MODULE PERMISSIONS ────────────────────────────────
@@ -59,7 +59,7 @@ function canManageUsersFully() {
 // is an empty map (nothing on), per the "minimal default, customize per
 // user" decision.
 function canAccessModule(moduleKey) {
-  if (isAdmin()) return true;
+  if (computeIsAdmin()) return true;
   if (!window.APP_USER) return false;
   const perms = window.APP_USER.sidebar_permissions || {};
   return perms[moduleKey] === true;
@@ -105,7 +105,7 @@ function getRowScopeCode(row) {
  * filterRowsByAccess() at call sites rather than canAccessRow() alone.
  */
 function canAccessRow(row) {
-  if (isAdmin()) return true;
+  if (computeIsAdmin()) return true;
   const scope = getRowScopeCode(row);
   if (!scope) return false;
   return getUserScopes().includes(scope);
@@ -148,7 +148,7 @@ function filterRowsByAccess(rows) {
 // "Admin · Full Access"
 function roleBadgeText() {
   if (!window.APP_USER) return "";
-  if (isAdmin()) return "Admin · Full Access";
+  if (computeIsAdmin()) return "Admin · Full Access";
   const roleLabel = ROLE_LABELS[currentRole()] || currentRole() || "User";
   const scopes = getUserScopes();
   if (scopes.length === 0) return `${roleLabel} · No Scopes Assigned`;
@@ -162,8 +162,7 @@ function roleBadgeTooltip() {
 }
 
 // ── EXPORTS ──────────────────────────────────────────────────────
-window.isAdmin              = window.isAdmin || false; // set by auth.js; keep var declared
-window.isAdminUser          = isAdmin;
+window.isAdminUser          = computeIsAdmin;
 window.currentRole          = currentRole;
 window.isDirectorLike       = isDirectorLike;
 window.canManageRoles       = canManageRoles;
