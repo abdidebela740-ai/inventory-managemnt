@@ -460,6 +460,17 @@ function applyRoleToUI() {
     if (allocBtn) allocBtn.style.display = canAccessModule("allocation-tool") ? "" : "none";
   }
 
+  // User Management — gated on canManageRoles() (Admin + Director + Deputy
+  // Director), not on sidebar_permissions like the modules above, since
+  // it's part of the Access Level matrix itself rather than a togglable module.
+  if (typeof canManageRoles === "function") {
+    const showUserMgmt = canManageRoles();
+    const umGroup = document.getElementById("user-mgmt-group");
+    const umDivider = document.getElementById("user-mgmt-divider");
+    if (umGroup) umGroup.style.display = showUserMgmt ? "" : "none";
+    if (umDivider) umDivider.style.display = showUserMgmt ? "" : "none";
+  }
+
   // Hide now-empty nav groups (all their buttons hidden) so the sidebar
   // doesn't show a bare section title with nothing under it.
   document.querySelectorAll(".nav-group[data-group]").forEach(group => {
