@@ -462,13 +462,20 @@ function applyRoleToUI() {
 
   // User Management — gated on canManageRoles() (Admin + Director + Deputy
   // Director), not on sidebar_permissions like the modules above, since
-  // it's part of the Access Level matrix itself rather than a togglable module.
+  // it's part of the Access Level matrix itself rather than a togglable
+  // module. The button carries data-page="user-management" (so it gets
+  // active-state highlighting and click-wiring like every other nav-btn),
+  // which means the generic canAccessModule() loop above also touches it
+  // and — since "user-management" isn't a real sidebar_permission key —
+  // sets its own display:none for everyone. We override that here.
   if (typeof canManageRoles === "function") {
     const showUserMgmt = canManageRoles();
     const umGroup = document.getElementById("user-mgmt-group");
     const umDivider = document.getElementById("user-mgmt-divider");
+    const umBtn = document.getElementById("user-mgmt-nav-btn");
     if (umGroup) umGroup.style.display = showUserMgmt ? "" : "none";
     if (umDivider) umDivider.style.display = showUserMgmt ? "" : "none";
+    if (umBtn) umBtn.style.display = showUserMgmt ? "" : "none";
   }
 
   // Hide now-empty nav groups (all their buttons hidden) so the sidebar
