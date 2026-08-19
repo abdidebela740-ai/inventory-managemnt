@@ -7,8 +7,8 @@
 // ════════════════════════════════════════════════════════════════
 
 // ── 1) FILL THESE IN from Supabase Dashboard → Project Settings → API ──
-const SUPABASE_URL      = "https://qcccdwossgrotjiosurg.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFjY2Nkd29zc2dyb3RqaW9zdXJnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3OTAxOTgsImV4cCI6MjA5ODM2NjE5OH0.pmDkCdQxAsh2f11MEe8MgdDy1vpTw6X6-R-gMiAEsq0";
+const SUPABASE_URL      = "https://wkmyruayzdiemvupllsu.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndrbXlydWF5emRpZW12dXBsbHN1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxMDY5NjEsImV4cCI6MjEwMjY4Mjk2MX0.gSGaNqxWda-7AsmtjmaU82CR_XJrB3r1KRq449x_ltM";
 
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 window.supabaseClient = supabaseClient; // used by storage-sync.js
