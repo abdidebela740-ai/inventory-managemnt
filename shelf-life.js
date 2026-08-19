@@ -726,20 +726,41 @@
       allowedCodes = getPersonFilteredCodes();
     }
 
+    // FIX-GR-MATCH: the uploaded Incoming GR.xlsx is a separate export from
+    // the main inventory file, so its "Material" column doesn't always match
+    // rawDf's raw "Material" field byte-for-byte — it may use a different
+    // case (SAP exports are inconsistent about this), or, when a material-
+    // standardization mapping is loaded, the GR file's codes may line up
+    // with the *mapped/target* code rather than the raw SAP one. Either
+    // mismatch silently broke every join here: rows still appeared (Plant /
+    // Storage Location / GR Posting Date come straight from the GR log
+    // itself), but Description and Material Type — which both require this
+    // rawDf lookup to succeed — came back blank / "—" for everything.
+    // Fix: normalize the join key to uppercase, and index each rawDf row
+    // under both its raw AND mapped material code (when mapping is active
+    // and the two differ) so a GR row keyed either way still finds it.
     const descByMaterial = new Map();
-    const stockByKey = new Map(); // "material|batch" → { qty, expiry, nonExpiring, prod, plants:Set }
+    const stockByKey = new Map(); // "MATERIAL|BATCH" (uppercased) → { qty, expiry, nonExpiring, prod, valType, plants:Set, storageLocs:Set }
     if (typeof rawDf !== "undefined") {
       for (const r of rawDf) {
-        const mat = String(r["Material"] || "").trim();
-        if (!mat) continue;
-        if (!descByMaterial.has(mat)) descByMaterial.set(mat, String(r["Material Description"] || "").trim());
+        const rawMat = String(r["Material"] || "").trim();
+        if (!rawMat) continue;
+
+        const isMapped  = typeof mappingTable !== "undefined" && mappingTable.size > 0 && r._isMapped;
+        const mappedMat = isMapped ? String(r._mappedMaterial || "").trim() : "";
+        const desc = (isMapped ? String(r._mappedDesc || "").trim() : "") || String(r["Material Description"] || "").trim();
+
+        const matKeys = new Set([rawMat.toUpperCase()]);
+        if (mappedMat) matKeys.add(mappedMat.toUpperCase());
+
+        matKeys.forEach(mUp => { if (!descByMaterial.has(mUp)) descByMaterial.set(mUp, desc); });
 
         const batch = String(r["Batch"] || "").trim();
         if (!batch || (r._phantomTransitQty > 0)) continue;
         const qty = Number(r["Total Qty"] || 0);
         if (!(qty > 0)) continue;
+        const batchUp = batch.toUpperCase();
 
-        const key = `${mat}|${batch}`;
         const expiry = r._expiry instanceof Date && !isNaN(r._expiry) ? r._expiry : null;
         const prod   = r._prodDate instanceof Date && !isNaN(r._prodDate) ? r._prodDate : null;
         const plant = String(r["Plant"] || "").trim().toUpperCase();
@@ -747,16 +768,20 @@
         const valType = (typeof getValuationType === "function"
           ? getValuationType(r)
           : String(r["Inventory Valuation Type"] || "").trim()) || null;
-        const existing = stockByKey.get(key);
-        if (existing) {
-          existing.qty += qty;
-          existing.plants.add(plant);
-          if (storageLoc) existing.storageLocs.add(storageLoc);
-          if (!existing.prod && prod) existing.prod = prod;
-          if (!existing.valType && valType) existing.valType = valType;
-        } else {
-          stockByKey.set(key, { qty, expiry, nonExpiring: isNonExpiring(expiry), prod, valType, plants: new Set([plant]), storageLocs: new Set(storageLoc ? [storageLoc] : []) });
-        }
+
+        matKeys.forEach(mUp => {
+          const key = `${mUp}|${batchUp}`;
+          const existing = stockByKey.get(key);
+          if (existing) {
+            existing.qty += qty;
+            existing.plants.add(plant);
+            if (storageLoc) existing.storageLocs.add(storageLoc);
+            if (!existing.prod && prod) existing.prod = prod;
+            if (!existing.valType && valType) existing.valType = valType;
+          } else {
+            stockByKey.set(key, { qty, expiry, nonExpiring: isNonExpiring(expiry), prod, valType, plants: new Set([plant]), storageLocs: new Set(storageLoc ? [storageLoc] : []) });
+          }
+        });
       }
     }
 
@@ -768,7 +793,7 @@
       if (isNonMedicalCode(material)) continue; // belt-and-suspenders vs. filters.js exclusions
       if (allowedCodes && !allowedCodes.has(material.toUpperCase())) continue;
 
-      const stock = stockByKey.get(key);
+      const stock = stockByKey.get(`${material.toUpperCase()}|${batch.toUpperCase()}`);
 
       // BUG FIX: a batch with a current stockByKey entry is proven clean —
       // rawDf itself is already filtered at parse time, so its presence there
@@ -804,7 +829,7 @@
 
       out.push({
         material,
-        materialDesc: descByMaterial.get(material) || "",
+        materialDesc: descByMaterial.get(material.toUpperCase()) || "",
         batch,
         plant: gr.plant || (stock ? [...stock.plants].join(", ") : "") || "—",
         storageLoc: gr.storageLoc || (stock ? [...stock.storageLocs].join(", ") : "") || "—",
