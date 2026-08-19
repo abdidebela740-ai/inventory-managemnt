@@ -3411,7 +3411,16 @@ function renderBranch() {
       // Material Type multi-select — was a single-select <select>; now supports
       // choosing more than one type (e.g. ZME + ZMS) at once, same UX as the
       // other filters on this tab.
-      buildMultiSelect("mat-type-ms-wrap", "mat-type-ms-dd", ["ZME", "ZMS", "ZLC", "ZMD"], "All Material Types");
+      // FIX-SCOPED-FILTER-LIST: was hardcoded to the full ZME/ZMS/ZLC/ZMD list
+      // for every role, so a scope-restricted user (e.g. Q_ZME only) could
+      // still pick ZMS/ZLC/ZMD here even though every row of those types is
+      // invisible to them. Now derived from baseDf (already access-filtered
+      // via applyPageFilter -> canAccessRow), narrowed further by the user's
+      // data_scopes — Admin still always sees the full static list.
+      const matTypeOptions = (typeof materialTypeFilterOptions === "function")
+        ? materialTypeFilterOptions(baseDf)
+        : ["ZME", "ZMS", "ZLC", "ZMD"]; // permissions.js not loaded — fail open to old behavior
+      buildMultiSelect("mat-type-ms-wrap", "mat-type-ms-dd", matTypeOptions, "All Material Types");
       ["mat-show-soh", "mat-show-mos", "mat-show-amc"].forEach(id => {
         const cb = document.getElementById(id);
         if (cb) cb.addEventListener("change", refreshMaterialView);
