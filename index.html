@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>EPSS Stock-Multiple — Inventory Management</title>
-  <link rel="icon" type="image/png" href="epss-favicon.png" />
+  <link rel="icon" type="image/png" href="epss-logo.png" />
   <script>
     // ── Apply saved appearance/font BEFORE first paint to avoid a flash ──
     (function () {
@@ -1631,6 +1631,11 @@
 
   <!-- ── USER MANAGEMENT (Admin full control; Director/Deputy Director role-only) ── -->
   <section id="page-user-management" class="page" style="display:none">
+    <div class="um-denied" id="um-denied" style="display:none;">
+      <div class="page-title">👥 User Management</div>
+      <div class="page-subtitle">You don't have permission to view this page. Contact an Admin if you believe this is a mistake.</div>
+    </div>
+    <div id="um-main" style="display:none;">
     <div class="page-header-row">
       <div>
         <div class="page-title">👥 User Management</div>
@@ -1683,6 +1688,7 @@
     <div class="um-empty" id="um-empty" style="display:none;">
       <div class="um-empty-icon">🗂️</div>
       <div>No users match your filters.</div>
+    </div>
     </div>
   </section>
 
