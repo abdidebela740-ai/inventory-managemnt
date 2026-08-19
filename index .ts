@@ -1,96 +1,157 @@
 // ════════════════════════════════════════════════════════════════
-// admin-create-user — Edge Function
+// admin-create-user — Supabase Edge Function
 //
-// Why this has to be an Edge Function and not a Postgres RPC:
-// creating an auth.users row with an email+password is a GoTrue
-// operation (supabase.auth.admin.createUser), not a SQL statement,
-// and it requires the SERVICE ROLE key — which must never reach the
-// browser. This function holds that key server-side, checks the
-// caller is really an Admin, creates the auth user, then calls the
-// admin_create_user() RPC (002_user_management.sql) to write the
-// matching profile row.
+// Called from user-management.js via:
+//   supabaseClient.functions.invoke("admin-create-user", {
+//     body: { email, password, full_name, role, data_scopes, sidebar_permissions }
+//   })
 //
-// Deploy: supabase functions deploy admin-create-user
-// Client call: supabaseClient.functions.invoke('admin-create-user', { body: {...} })
+// This is the ONLY place account creation happens, because it needs the
+// service-role key (auth.admin.createUser) — a key that must never reach
+// the browser. The caller's own JWT is re-checked here, server-side,
+// against the profiles table before anything is created: the UI hides the
+// "New User" button from non-Admins, but that's UX only, not security —
+// this check is the real boundary.
+//
+// Deploy with:
+//   supabase functions deploy admin-create-user
+//
+// Required secrets (Project Settings → Edge Functions → these are usually
+// already present by default in every Supabase project, but confirm they
+// exist under Settings → Edge Functions → Secrets):
+//   SUPABASE_URL
+//   SUPABASE_ANON_KEY
+//   SUPABASE_SERVICE_ROLE_KEY
 // ════════════════════════════════════════════════════════════════
+
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const SUPABASE_URL = Deno.env.get("wkmyruayzdiemvupllsu")!;
-const SERVICE_ROLE_KEY = Deno.env.get("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndrbXlydWF5emRpZW12dXBsbHN1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzEwNjk2MSwiZXhwIjoyMTAyNjgyOTYxfQ.bD7LFW05V_oWswadm5F8UdXazDFkoIR3ExCeDR77HKE")!;
-
-const VALID_ROLES = ["admin", "director", "deputy_director", "team_leader", "branch_demand_officer", "user"];
-const VALID_SCOPES = ["Q_ZME", "Q_ZMS", "Q_ZLC", "Q_ZMD", "R_ZME", "R_ZMS", "R_ZLC", "R_ZMD"];
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
   });
 }
 
-Deno.serve(async (req) => {
-  if (req.method !== "POST") return json({ error: "POST only" }, 405);
+const VALID_ROLES = ["admin", "director", "deputy_director", "team_leader", "branch_demand_officer", "user"];
 
-  // 1) Identify the caller from their JWT, using an anon-key client
-  //    scoped to their token — this never touches the service role.
-  const authHeader = req.headers.get("Authorization") ?? "";
-  const callerClient = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_ANON_KEY")!, {
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
+  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+
+  const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+  const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
+  const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!SUPABASE_URL || !ANON_KEY || !SERVICE_ROLE_KEY) {
+    console.error("Missing SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY env vars");
+    return json({ error: "Server misconfiguration — contact an admin." }, 500);
+  }
+
+  // ── 1) Identify the caller from their own JWT (anon client, RLS applies) ──
+  const authHeader = req.headers.get("Authorization") || "";
+  const callerClient = createClient(SUPABASE_URL, ANON_KEY, {
     global: { headers: { Authorization: authHeader } },
   });
-  const { data: { user: caller }, error: callerErr } = await callerClient.auth.getUser();
-  if (callerErr || !caller) return json({ error: "Not authenticated" }, 401);
 
-  const { data: callerProfile } = await callerClient
-    .from("profiles").select("role").eq("id", caller.id).single();
-  if (!callerProfile || callerProfile.role !== "admin") {
-    return json({ error: "Only Admin can create users" }, 403);
+  const { data: userData, error: userErr } = await callerClient.auth.getUser();
+  if (userErr || !userData?.user) {
+    return json({ error: "Not authenticated." }, 401);
   }
 
-  // 2) Validate input
-  let body: any;
-  try { body = await req.json(); } catch { return json({ error: "Invalid JSON body" }, 400); }
-  const { email, password, full_name, role, data_scopes, sidebar_permissions } = body ?? {};
+  const { data: callerProfile, error: callerProfileErr } = await callerClient
+    .from("profiles")
+    .select("role,status")
+    .eq("id", userData.user.id)
+    .single();
 
-  if (!email || typeof email !== "string") return json({ error: "email is required" }, 400);
-  if (!password || typeof password !== "string" || password.length < 8) {
-    return json({ error: "password must be at least 8 characters" }, 400);
+  if (callerProfileErr || !callerProfile) {
+    return json({ error: "Could not verify caller's profile." }, 403);
   }
-  if (!full_name || typeof full_name !== "string") return json({ error: "full_name is required" }, 400);
-  if (!VALID_ROLES.includes(role)) return json({ error: `role must be one of ${VALID_ROLES.join(", ")}` }, 400);
-  const scopes = Array.isArray(data_scopes) ? data_scopes : [];
-  if (scopes.some((s: string) => !VALID_SCOPES.includes(s))) {
-    return json({ error: `data_scopes must be a subset of ${VALID_SCOPES.join(", ")}` }, 400);
+  if (callerProfile.status === "inactive") {
+    return json({ error: "Your account is inactive." }, 403);
   }
-  if (role !== "admin" && scopes.length === 0) {
-    return json({ error: "Non-admin users need at least one data scope" }, 400);
+  // Only Admin can create users — matches canManageUsersFully() in permissions.js.
+  // Director/Deputy Director can edit roles but never create/delete accounts.
+  if (callerProfile.role !== "admin") {
+    return json({ error: "Only an Admin can create users." }, 403);
   }
 
-  // 3) Create the auth user with the service-role client.
+  // ── 2) Validate the request body ──
+  let body: Record<string, unknown>;
+  try {
+    body = await req.json();
+  } catch {
+    return json({ error: "Invalid request body." }, 400);
+  }
+
+  const email = String(body.email || "").trim().toLowerCase();
+  const password = String(body.password || "");
+  const full_name = String(body.full_name || "").trim();
+  const role = String(body.role || "user");
+  const data_scopes = Array.isArray(body.data_scopes) ? body.data_scopes.map(String) : [];
+  const sidebar_permissions =
+    body.sidebar_permissions && typeof body.sidebar_permissions === "object" ? body.sidebar_permissions : {};
+
+  if (!email || !password || !full_name) {
+    return json({ error: "Full name, email, and password are all required." }, 400);
+  }
+  if (password.length < 8) {
+    return json({ error: "Password must be at least 8 characters." }, 400);
+  }
+  if (!VALID_ROLES.includes(role)) {
+    return json({ error: `Invalid role: ${role}` }, 400);
+  }
+  if (role !== "admin" && data_scopes.length === 0) {
+    return json({ error: "Assign at least one data scope for non-Admin users." }, 400);
+  }
+
+  // ── 3) Create the auth user (service-role client — bypasses RLS) ──
   const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+
   const { data: created, error: createErr } = await adminClient.auth.admin.createUser({
     email,
     password,
-    email_confirm: true, // internal staff tool — skip the confirmation email flow
+    email_confirm: true, // skip email verification; this is an internally-provisioned account
+    user_metadata: { full_name },
   });
+
   if (createErr || !created?.user) {
-    return json({ error: createErr?.message ?? "Failed to create auth user" }, 400);
+    const msg = createErr?.message || "Could not create the account.";
+    // Supabase surfaces duplicate-email as a 422/"already registered" style message.
+    return json({ error: msg }, 400);
   }
 
-  // 4) Write the profile row via the RPC (re-checks Admin server-side too).
-  const { error: rpcErr } = await adminClient.rpc("admin_create_user", {
-    p_id: created.user.id,
-    p_email: email,
-    p_full_name: full_name,
-    p_role: role,
-    p_data_scopes: scopes,
-    p_sidebar_permissions: sidebar_permissions ?? null,
-  });
+  const newUserId = created.user.id;
 
-  if (rpcErr) {
-    // Roll back the orphaned auth user so retrying doesn't collide on email.
-    await adminClient.auth.admin.deleteUser(created.user.id);
-    return json({ error: rpcErr.message }, 400);
+  // ── 4) Upsert the profiles row for the new user ──
+  // Using upsert (not insert) in case a DB trigger on auth.users already
+  // created a skeleton profiles row for this id.
+  const { error: profileErr } = await adminClient
+    .from("profiles")
+    .upsert({
+      id: newUserId,
+      email,
+      full_name,
+      role,
+      status: "active",
+      data_scopes,
+      sidebar_permissions,
+    });
+
+  if (profileErr) {
+    // Roll back the auth user so we don't leave an orphaned login with no profile.
+    await adminClient.auth.admin.deleteUser(newUserId).catch((e) =>
+      console.error("Rollback deleteUser failed after profile insert error:", e)
+    );
+    console.error("profiles upsert failed:", profileErr);
+    return json({ error: "Account was not fully created (profile step failed). Please try again." }, 500);
   }
 
-  return json({ id: created.user.id, email, full_name, role, data_scopes: scopes });
+  return json({ success: true, id: newUserId });
 });
