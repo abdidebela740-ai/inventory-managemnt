@@ -319,7 +319,7 @@ async function createUser() {
     return;
   }
 
-  const { data, error } = await window.supabaseClient.functions.invoke("admin-create-user", {
+  const { data, error } = await window.supabaseClient.functions.invoke("create-user", {
     body: { email, password, full_name, role, data_scopes, sidebar_permissions },
   });
 
