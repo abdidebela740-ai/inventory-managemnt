@@ -691,20 +691,29 @@ function loadFile(file) {
           });
           console.log("── Stock-type visibility trace ──");
           console.log("window.isAdmin:", window.isAdmin, "| role:", window.APP_USER && window.APP_USER.role, "| data_scopes:", window.APP_USER && window.APP_USER.data_scopes);
-          console.log("Raw rows by Special Stock Type:", rawCounts);
-          console.log("Rows KEPT after filterRowsByAccess + valuation check:", keptCounts);
+          console.log("Raw Q:", rawCounts["Q"] || 0, "| Raw W:", rawCounts["W"] || 0, "| Raw blank/other:", rawCounts["(blank/other)"] || 0);
+          console.log("Kept Q:", keptCounts["Q"] || 0, "| Kept W:", keptCounts["W"] || 0, "| Kept blank/other:", keptCounts["(blank/other)"] || 0);
           if ((rawCounts["Q"] || 0) > 0 && (keptCounts["Q"] || 0) === 0) {
-            console.warn("All Q rows were dropped. If window.isAdmin is true above, the drop is happening in passesUniversalExclusions (isProjectStockDescription / isNonMedicalCode / isNonMedicalGroup / isExcludedStorageLocation) or the Inventory Valuation Type check — not the scope check. Inspect a raw Q row below:");
             const sampleQ = trimmed.find(r => String(r["Special Stock Type"] || "").trim().toUpperCase() === "Q");
             if (sampleQ) {
-              console.log("Sample raw Q row:", {
-                "Special Stock Type": sampleQ["Special Stock Type"],
-                "Special Stock Type Description": sampleQ["Special Stock Type Description"],
-                "Material": sampleQ["Material"],
-                "Material Group Name": sampleQ["Material Group Name"],
-                "Storage Location": sampleQ["Storage Location"],
-                "Inventory Valuation Type": sampleQ["Inventory Valuation Type"],
-              });
+              const desc     = sampleQ["Special Stock Type Description"];
+              const material = sampleQ["Material"];
+              const matGroup = sampleQ["Material Group Name"];
+              const storeLoc = sampleQ["Storage Location"];
+              const valType  = sampleQ["Inventory Valuation Type"];
+              console.log("── Checking sample Q row against each exclusion rule ──");
+              console.log("Special Stock Type Description:", JSON.stringify(desc),
+                "→ isProjectStockDescription:", typeof isProjectStockDescription === "function" ? isProjectStockDescription(desc) : "(fn missing)");
+              console.log("Material:", JSON.stringify(material),
+                "→ isNonMedicalCode:", typeof isNonMedicalCode === "function" ? isNonMedicalCode(material) : "(fn missing)");
+              console.log("Material Group Name:", JSON.stringify(matGroup),
+                "→ isNonMedicalGroup:", typeof isNonMedicalGroup === "function" ? isNonMedicalGroup(matGroup) : "(fn missing)");
+              console.log("Storage Location:", JSON.stringify(storeLoc),
+                "→ isExcludedStorageLocation:", typeof isExcludedStorageLocation === "function" ? isExcludedStorageLocation(storeLoc) : "(fn missing)");
+              console.log("Inventory Valuation Type:", JSON.stringify(valType),
+                "→ blank?", String(valType || "").trim() === "",
+                "| resolved suffix:", typeof getValuationType === "function" ? getValuationType(sampleQ) : "(fn missing)");
+              console.log("→ Whichever line above says 'true' (or 'blank? true') is the rule dropping this row. That rule needs its exclusion list/logic adjusted for Q-type stock, or the source data needs correcting.");
             }
           }
         })();
