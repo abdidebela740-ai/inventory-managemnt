@@ -88,8 +88,11 @@
     const el = document.getElementById("settings-account-info");
     if (!el) return;
     if (window.APP_USER) {
-      const roleLabel = window.isAdmin ? "🛡️ Admin" : "👁️ Viewer";
-      el.textContent = `${roleLabel} · ${window.APP_USER.email}`;
+      // roleBadgeText() (permissions.js) gives the real role + scope
+      // summary — e.g. "Team Leader · Q_ZME + Q_ZMS" — rather than the
+      // old blanket Admin/Viewer split.
+      const badge = (typeof roleBadgeText === "function") ? roleBadgeText() : (window.isAdmin ? "Admin" : "User");
+      el.textContent = `${badge} · ${window.APP_USER.email}`;
     } else {
       el.textContent = "Not signed in";
     }
