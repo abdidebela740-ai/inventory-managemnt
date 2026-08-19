@@ -670,6 +670,45 @@ function loadFile(file) {
         let df = filterRowsByAccess(trimmed)
           .filter(r => String(r["Inventory Valuation Type"] || "").trim() !== "");
 
+        // DEBUG: stock-type visibility trace. Logs, per Special Stock Type
+        // ("Q" / "W" / blank-other), how many rows existed in the raw upload
+        // vs how many survived filterRowsByAccess + the valuation-type check.
+        // Safe to remove once the "Admin only sees RDF" issue is confirmed
+        // fixed — this does not change any filtering behavior, it only reports it.
+        (function debugStockTypeTrace() {
+          const bucket = v => (v === "Q" ? "Q" : v === "W" ? "W" : "(blank/other)");
+          const rawCounts = {};
+          trimmed.forEach(r => {
+            const sst = String(r["Special Stock Type"] || "").trim().toUpperCase();
+            const b = bucket(sst);
+            rawCounts[b] = (rawCounts[b] || 0) + 1;
+          });
+          const keptCounts = {};
+          df.forEach(r => {
+            const sst = String(r["Special Stock Type"] || "").trim().toUpperCase();
+            const b = bucket(sst);
+            keptCounts[b] = (keptCounts[b] || 0) + 1;
+          });
+          console.log("── Stock-type visibility trace ──");
+          console.log("window.isAdmin:", window.isAdmin, "| role:", window.APP_USER && window.APP_USER.role, "| data_scopes:", window.APP_USER && window.APP_USER.data_scopes);
+          console.log("Raw rows by Special Stock Type:", rawCounts);
+          console.log("Rows KEPT after filterRowsByAccess + valuation check:", keptCounts);
+          if ((rawCounts["Q"] || 0) > 0 && (keptCounts["Q"] || 0) === 0) {
+            console.warn("All Q rows were dropped. If window.isAdmin is true above, the drop is happening in passesUniversalExclusions (isProjectStockDescription / isNonMedicalCode / isNonMedicalGroup / isExcludedStorageLocation) or the Inventory Valuation Type check — not the scope check. Inspect a raw Q row below:");
+            const sampleQ = trimmed.find(r => String(r["Special Stock Type"] || "").trim().toUpperCase() === "Q");
+            if (sampleQ) {
+              console.log("Sample raw Q row:", {
+                "Special Stock Type": sampleQ["Special Stock Type"],
+                "Special Stock Type Description": sampleQ["Special Stock Type Description"],
+                "Material": sampleQ["Material"],
+                "Material Group Name": sampleQ["Material Group Name"],
+                "Storage Location": sampleQ["Storage Location"],
+                "Inventory Valuation Type": sampleQ["Inventory Valuation Type"],
+              });
+            }
+          }
+        })();
+
         const numCols = [
           "Unrestricted Stock","Stock in Quality Inspection","Blocked Stock","Stock in Transit",
           "Value of Stock in Quality Inspection","Value of Stock in Transit","Value of Unrestricted Stock",
