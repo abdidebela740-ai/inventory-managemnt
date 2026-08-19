@@ -219,6 +219,7 @@ function modalBodyHtml(mode, user) {
   // the page works even before app_modules is queried; a live deployment
   // can swap this static list for a `SELECT key,label FROM app_modules`.
   const MODULE_GROUPS = {
+    "Dashboard": ["dashboard:Dashboard"],
     "Inventory Ops": ["pending-dispatch:Open Outbound", "transit:Stock in Transit", "branch:Branch Comparison"],
     "Quality & Risk": ["expiry:Expiry Watchlist", "qc:Quality Inspection", "expiry-risk:Overstock & Expiry Risk", "stockout-risk:Stockout Risk"],
     "Analytics": ["natl-table:National Stock & MOS", "concentration:Stock Concentration"],
