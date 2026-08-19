@@ -120,7 +120,17 @@ function passesUniversalExclusions(row) {
   if (!row) return false;
   const sst = String(row["Special Stock Type"] || "").trim().toUpperCase();
   if (sst === "W") return false;
-  if (typeof isProjectStockDescription === "function" &&
+  // BUGFIX: SAP always labels the "Special Stock Type Description" field as
+  // "Project Stock" for rows whose Special Stock Type code is "Q" — that's
+  // just SAP's generic text for any special-stock indicator, not a sign the
+  // row is genuinely project stock. This check is only meant to catch rows
+  // where the CODE isn't "Q" but the description still reads "Project Stock"
+  // (see filters.js comment on isProjectStockDescription). Without the
+  // `sst !== "Q"` guard below, every real Q row was being excluded here
+  // before the Q-scope logic in canAccessRow() ever got a chance to run —
+  // so Q rows never appeared even for Admin.
+  if (sst !== "Q" &&
+      typeof isProjectStockDescription === "function" &&
       isProjectStockDescription(row["Special Stock Type Description"])) return false;
   if (typeof isNonMedicalCode === "function" &&
       isNonMedicalCode(row["Material"])) return false;
