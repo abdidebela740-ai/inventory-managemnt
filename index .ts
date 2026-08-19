@@ -45,9 +45,9 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
-  const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-  const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
-  const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const SUPABASE_URL = Deno.env.get("wkmyruayzdiemvupllsu");
+  const ANON_KEY = Deno.env.get("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndrbXlydWF5emRpZW12dXBsbHN1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxMDY5NjEsImV4cCI6MjEwMjY4Mjk2MX0.gSGaNqxWda-7AsmtjmaU82CR_XJrB3r1KRq449x_ltM");
+  const SERVICE_ROLE_KEY = Deno.env.get("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndrbXlydWF5emRpZW12dXBsbHN1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzEwNjk2MSwiZXhwIjoyMTAyNjgyOTYxfQ.bD7LFW05V_oWswadm5F8UdXazDFkoIR3ExCeDR77HKE");
   if (!SUPABASE_URL || !ANON_KEY || !SERVICE_ROLE_KEY) {
     console.error("Missing SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY env vars");
     return json({ error: "Server misconfiguration — contact an admin." }, 500);
