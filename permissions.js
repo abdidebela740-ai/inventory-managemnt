@@ -152,6 +152,65 @@ function filterRowsByAccess(rows) {
   return rows.filter(r => passesUniversalExclusions(r) && canAccessRow(r));
 }
 
+// ── FILTER-OPTION LISTS (data-scope + upload-aware) ─────────────
+// Several pages show a "Material Type" (ZME/ZMS/ZLC/ZMD) or "Stock Type"
+// (Q/RDF) checklist. These used to be hardcoded to the full static list
+// everywhere, so e.g. a "Q_ZME"-scoped user would see ZMS/ZLC/ZMD and RDF
+// as choosable options in the filter bar even though every row of those
+// types is invisible to them (and, separately, even an Admin would see a
+// type in the list that has zero rows in whatever file is currently
+// loaded). The two helpers below fix both problems at once:
+//   - Admin/full-access: always the complete static list, regardless of
+//     what's in the current upload (spec: "Admin always sees full list").
+//   - Everyone else: the intersection of (a) types the user's data_scopes
+//     actually grant them, and (b) types with at least one row in the
+//     rows currently passed in. Passing an already access-filtered array
+//     (e.g. rawDf, baseDf, or a page's own scope-filtered STATE.rows)
+//     naturally satisfies both at once; the explicit scope check here is
+//     just defence-in-depth in case a caller passes unfiltered rows.
+
+/**
+ * Material Type (ZME/ZMS/ZLC/ZMD) options for a filter checklist.
+ * `rows` should be the rows currently available to build the list from
+ * (ideally already access-filtered, e.g. rawDf/baseDf).
+ */
+function materialTypeFilterOptions(rows) {
+  if (computeIsAdmin()) return [...VALID_VALUATION_SUFFIXES];
+  const scopedSuffixes = new Set(
+    getUserScopes().map(s => String(s).split("_")[1]).filter(Boolean)
+  );
+  const present = new Set(
+    (Array.isArray(rows) ? rows : []).map(r =>
+      (typeof getValuationType === "function")
+        ? getValuationType(r)
+        : String(r["Inventory Valuation Type"] || "").trim().toUpperCase()
+    )
+  );
+  return VALID_VALUATION_SUFFIXES.filter(t => scopedSuffixes.has(t) && present.has(t));
+}
+
+/**
+ * Stock Type (Q / RDF) options for a filter checklist, e.g. Pending
+ * Dispatch. `rows` should be the rows currently available (ideally already
+ * access-filtered). `prefixOfRow` optionally overrides how a row's Q/R
+ * prefix is derived — needed on pages whose row shape doesn't have a
+ * "Special Stock Type" field (e.g. pending-dispatch.js's parsed rows use
+ * `row.specialStock`); defaults to the standard SAP export field.
+ */
+function stockTypeFilterOptions(rows, prefixOfRow) {
+  if (computeIsAdmin()) return ["Q", "RDF"];
+  const getPrefix = typeof prefixOfRow === "function" ? prefixOfRow : (r) => {
+    const sst = String(r["Special Stock Type"] || "").trim().toUpperCase();
+    return sst === "Q" ? "Q" : "R";
+  };
+  const scopedPrefixes  = new Set(getUserScopes().map(s => String(s).split("_")[0]));
+  const presentPrefixes = new Set((Array.isArray(rows) ? rows : []).map(getPrefix));
+  const out = [];
+  if (scopedPrefixes.has("Q") && presentPrefixes.has("Q")) out.push("Q");
+  if (scopedPrefixes.has("R") && presentPrefixes.has("R")) out.push("RDF");
+  return out;
+}
+
 // ── ROLE BADGE TEXT (spec #4) ──────────────────────────────────
 // "Team Leader · Q_ZME"  |  "Team Leader · Q_ZME + Q_ZMS"  |
 // "Team Leader · 3 scopes" (tooltip should show scopes.join(", ") for this case)
@@ -183,6 +242,8 @@ window.getRowScopeCode      = getRowScopeCode;
 window.canAccessRow         = canAccessRow;
 window.passesUniversalExclusions = passesUniversalExclusions;
 window.filterRowsByAccess   = filterRowsByAccess;
+window.materialTypeFilterOptions = materialTypeFilterOptions;
+window.stockTypeFilterOptions    = stockTypeFilterOptions;
 window.roleBadgeText        = roleBadgeText;
 window.roleBadgeTooltip     = roleBadgeTooltip;
 window.ROLE_LABELS          = ROLE_LABELS;
