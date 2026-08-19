@@ -776,6 +776,15 @@
     </a>
   </div>
 
+  <!-- User Management — Admin/Director/Deputy Director only; hidden via
+       applyRoleToUI() in auth.js using canManageRoles() from permissions.js -->
+  <div class="sidebar-divider" id="user-mgmt-divider" style="display:none;"></div>
+  <div class="nav-group expanded" id="user-mgmt-group" style="display:none; margin-bottom:0;">
+    <a class="nav-btn" href="user-management.html" style="text-decoration:none;">
+      <span class="nav-icon">👥</span> User Management
+    </a>
+  </div>
+
   <!-- Upload controls — admin only; whole group (title + divider) hides for viewers -->
   <div class="sidebar-divider upload-admin-only viewer-hidden"></div>
   <div class="nav-group expanded upload-admin-only viewer-hidden" id="data-source-group">
