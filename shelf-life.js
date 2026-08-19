@@ -946,6 +946,24 @@
     showNewIncoming(fromDate, toDate, valTypeFilter);
   }
 
+  // Builds/refreshes the "New Received Stock" Material Type checklist from
+  // whatever's currently in rawDf (main inventory upload), narrowed to the
+  // signed-in user's data_scopes. Safe to call before rawDf exists (yields
+  // an empty list for non-admins, full static list for Admin) and again
+  // later once a file is loaded — see refreshIncomingValTypeOptions below.
+  function populateIncomingValTypeOptions() {
+    if (typeof buildMultiSelect !== "function" || !document.getElementById("ms-incoming-new-vt")) return;
+    const rows = (typeof rawDf !== "undefined" && Array.isArray(rawDf)) ? rawDf : [];
+    const options = (typeof materialTypeFilterOptions === "function")
+      ? materialTypeFilterOptions(rows)
+      : ["ZME", "ZMS", "ZLC", "ZMD"]; // permissions.js not loaded — fail open to old behavior
+    const vtWrap = document.getElementById("ms-incoming-new-vt");
+    vtWrap._refreshOptions
+      ? vtWrap._refreshOptions(options)
+      : buildMultiSelect("ms-incoming-new-vt", "ms-incoming-new-vt-dd", options, "All Material Types");
+  }
+  window.refreshIncomingValTypeOptions = populateIncomingValTypeOptions;
+
   // ── Wiring ─────────────────────────────────────────────────────────────────
   function wire() {
     const input = document.getElementById("shelf-input");
@@ -1031,11 +1049,15 @@
     if (incomingShowBtn) incomingShowBtn.addEventListener("click", runNewIncoming);
 
     // Material Type checklist (ZME/ZMS/ZLC/ZMD) for New Received Stock —
-    // same fixed set and multi-select control used for Material Type
-    // elsewhere in the app.
-    if (typeof buildMultiSelect === "function" && document.getElementById("ms-incoming-new-vt")) {
-      buildMultiSelect("ms-incoming-new-vt", "ms-incoming-new-vt-dd", ["ZME", "ZMS", "ZLC", "ZMD"], "All Material Types");
-    }
+    // same multi-select control used for Material Type elsewhere in the
+    // app. FIX-SCOPED-FILTER-LIST: this used to be the fixed ZME/ZMS/ZLC/
+    // ZMD set for every role; it's now derived from rawDf (already access-
+    // filtered) and the user's data_scopes, same rule as everywhere else —
+    // Admin still always sees the full static list. Since rawDf isn't
+    // populated yet the first time wire() runs (page loads before any file
+    // is uploaded), this is rebuilt via refreshIncomingValTypeOptions()
+    // once the main inventory file actually loads (see script.js).
+    populateIncomingValTypeOptions();
 
     // Picking an explicit date clears the "last N days" quick input so it's
     // obvious which mode will be used, and vice versa.
