@@ -1186,6 +1186,15 @@ function populateAllFilters() {
     buildMultiSelect(cfg.wrapId, cfg.ddId, materials, "All Materials");
   });
 
+  // New Received Stock (shelf-life.js) Material Type checklist. It's built
+  // once at initial page wiring — before any file is uploaded, so rawDf is
+  // empty and the checklist ends up with no options — and was never
+  // refreshed afterward. Rebuild it here too, same as every other filter,
+  // now that a file (and possibly a mapping) has just been loaded.
+  if (typeof window.refreshIncomingValTypeOptions === "function") {
+    window.refreshIncomingValTypeOptions();
+  }
+
 }
 
 // ── APPLY PAGE FILTER ──────────────────────────────────────────────────────
