@@ -593,6 +593,30 @@ body { display: flex; }
 /* Quick Lookup sidebar entry: acts as a single nav link (no chevron, no
    inline expansion) — its tools now live on the main screen. */
 .quick-lookup-group .nav-group-title::after { content: none; }
+
+/* Generic "no chevron" modifier for single-item header rows that don't
+   expand/collapse (Person Assigned, Allocation Tool, User Management). */
+.nav-group-title.no-chevron::after,
+.nav-header-item.no-chevron::after { content: none; }
+
+/* Single-item sidebar entries styled to match the bold uppercase
+   section-header look used by the grouped nav items above (Dashboard,
+   Inventory Ops, etc.) instead of plain lightweight nav-btn text — keeps
+   Allocation Tool / User Management / Person Assigned visually uniform
+   with the rest of the sidebar. */
+.nav-header-item {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.4rem 0.45rem;
+  margin: 0.1rem 0 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.nav-header-item:hover { background: var(--surface2); color: var(--text); }
+.nav-header-item .nav-group-icon { font-size: 0.85rem; }
 .nav-group-title.nav-group-title-active {
   background: var(--accent-glow);
   color: var(--blue);
