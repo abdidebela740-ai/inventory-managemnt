@@ -1134,9 +1134,16 @@ function populateAllFilters() {
   })();
 
   // Valuation Type multi-selects
-  const valTypes = [...new Set(rawDf.map(r => getValuationType(r)))]
-    .filter(v => v && v !== "(None)")
-    .sort();
+  // Use materialTypeFilterOptions(rawDf) rather than deriving the list
+  // inline: rawDf is already access-filtered, so for non-admins this is
+  // equivalent to the old inline logic, but for Admin it now always shows
+  // the full static ZME/ZMS/ZLC/ZMD list instead of only the types present
+  // in the current upload (matches Dispatch/Comparison/Received Stock).
+  const valTypes = (typeof materialTypeFilterOptions === "function")
+    ? materialTypeFilterOptions(rawDf)
+    : [...new Set(rawDf.map(r => getValuationType(r)))]
+        .filter(v => v && v !== "(None)")
+        .sort();
 
   const vtConfigs = [
     { wrapId:"ms-dash-vt",    ddId:"ms-dash-vt-dd",    page:"dashboard" },
