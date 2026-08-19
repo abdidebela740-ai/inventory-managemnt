@@ -517,16 +517,25 @@ async function loadProfileAndUnlock(session) {
     return;
   }
 
+  // FIX: normalize the role read from Supabase before comparing/storing it.
+  // profile.role === "admin" used to be a strict, case-sensitive match — a
+  // DB value of "Admin", "ADMIN", or "admin " (trailing space) would silently
+  // fail this check, leaving window.isAdmin false and dropping the account
+  // into scope-gated access (e.g. Q-type rows disappearing) with no error
+  // shown anywhere. Trim + lowercase once here so every downstream check
+  // (isAdmin, currentRole(), role-based UI) sees a clean value.
+  const normalizedRole = String(profile.role || "").trim().toLowerCase();
+
   window.APP_USER = {
     id: session.user.id,
     email: profile.email || session.user.email,
     full_name: profile.full_name || "",
-    role: profile.role,
+    role: normalizedRole,
     status: profile.status,
     data_scopes: profile.data_scopes || [],
     sidebar_permissions: profile.sidebar_permissions || {},
   };
-  window.isAdmin = profile.role === "admin";
+  window.isAdmin = normalizedRole === "admin";
 
   // Module catalog — needed by permissions.js (canAccessModule) and by the
   // sidebar renderer to know labels/icons/groups for every module key,
