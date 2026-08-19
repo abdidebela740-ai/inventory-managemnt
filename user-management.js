@@ -57,13 +57,23 @@ document.addEventListener("epss-auth-ready", async () => {
 
 // ── Data loading ──────────────────────────────────────────────
 async function loadUsers() {
-  const { data, error } = await window.supabaseClient.rpc("admin_list_users");
-  if (error) {
-    showAlert("error", "Could not load users: " + error.message);
-    return;
+  try {
+    const { data, error } = await window.supabaseClient.rpc("admin_list_users");
+    if (error) {
+      console.error("[user-management] admin_list_users RPC failed:", error);
+      showAlert("error", "Could not load users: " + error.message + " (open the console for full details)");
+      return;
+    }
+    allUsers = data || [];
+    console.log("[user-management] loaded", allUsers.length, "users");
+    renderTable();
+  } catch (err) {
+    // Catches network failures / thrown exceptions that the {data, error}
+    // pattern above wouldn't catch (e.g. CORS, RPC name typo throwing before
+    // Supabase can build a normal error response).
+    console.error("[user-management] loadUsers() threw:", err);
+    showAlert("error", "Could not load users — unexpected error, check the console.");
   }
-  allUsers = data || [];
-  renderTable();
 }
 
 // ── Toolbar (search / filter) ────────────────────────────────
