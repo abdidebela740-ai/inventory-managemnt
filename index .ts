@@ -15,8 +15,8 @@
 // ════════════════════════════════════════════════════════════════
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const SUPABASE_URL = Deno.env.get("wkmyruayzdiemvupllsu")!;
+const SERVICE_ROLE_KEY = Deno.env.get("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndrbXlydWF5emRpZW12dXBsbHN1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzEwNjk2MSwiZXhwIjoyMTAyNjgyOTYxfQ.bD7LFW05V_oWswadm5F8UdXazDFkoIR3ExCeDR77HKE")!;
 
 const VALID_ROLES = ["admin", "director", "deputy_director", "team_leader", "branch_demand_officer", "user"];
 const VALID_SCOPES = ["Q_ZME", "Q_ZMS", "Q_ZLC", "Q_ZMD", "R_ZME", "R_ZMS", "R_ZLC", "R_ZMD"];
