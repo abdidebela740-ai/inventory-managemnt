@@ -699,14 +699,16 @@
   </div>
 
   <div class="sidebar-divider"></div>
-  <div class="upload-label">👤 Person Assigned</div>
-  <div class="sidebar-person-filter">
-    <span class="person-filter-chip" id="pf-chip-global">
-      <select id="global-person-filter" class="person-filter-select" title="Filter by person assigned">
-        <option value="">👤 All Persons</option>
-      </select>
-      <button type="button" class="person-filter-clear" id="pf-clear-global" title="Clear person filter">✕</button>
-    </span>
+  <div class="nav-group expanded" data-group="person-assigned" style="margin-bottom:0.55rem;">
+    <div class="nav-group-title no-chevron"><span class="nav-group-icon">👤</span> Person Assigned</div>
+    <div class="sidebar-person-filter">
+      <span class="person-filter-chip" id="pf-chip-global">
+        <select id="global-person-filter" class="person-filter-select" title="Filter by person assigned">
+          <option value="">👤 All Persons</option>
+        </select>
+        <button type="button" class="person-filter-clear" id="pf-clear-global" title="Clear person filter">✕</button>
+      </span>
+    </div>
   </div>
 
   <nav id="nav">
@@ -771,8 +773,8 @@
 
   <div class="sidebar-divider"></div>
   <div class="nav-group expanded" data-group="AllocationTool" style="margin-bottom:0">
-    <a class="nav-btn" href="pharma-alloc.html" target="_blank" rel="noopener" style="text-decoration:none;">
-      <span class="nav-icon">🧮</span> Allocation tool <span style="margin-left:auto;font-size:0.7rem;opacity:0.55;">↗</span>
+    <a class="nav-btn nav-header-item no-chevron" href="pharma-alloc.html" target="_blank" rel="noopener" style="text-decoration:none;">
+      <span class="nav-group-icon">🧮</span> Allocation Tool <span style="margin-left:auto;font-size:0.7rem;opacity:0.55;">↗</span>
     </a>
   </div>
 
@@ -783,8 +785,8 @@
        sidebar permission, so it's wired up separately in auth.js. -->
   <div class="sidebar-divider" id="user-mgmt-divider" style="display:none;"></div>
   <div class="nav-group expanded" id="user-mgmt-group" style="display:none; margin-bottom:0;">
-    <button class="nav-btn" id="user-mgmt-nav-btn" data-page="user-management">
-      <span class="nav-icon">👥</span> User Management
+    <button class="nav-btn nav-header-item no-chevron" id="user-mgmt-nav-btn" data-page="user-management">
+      <span class="nav-group-icon">👥</span> User Management
     </button>
   </div>
 
