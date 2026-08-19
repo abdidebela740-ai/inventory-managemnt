@@ -77,6 +77,26 @@
     return v === "Q" ? "Q" : "RDF";
   }
 
+  // ── Data-scope access control ───────────────────────────────
+  // The Open Outbound file has no "Inventory Valuation Type" column, so
+  // unlike script.js/permissions.js's getRowScopeCode() we can't compute a
+  // full 4-way scope code (Q_ZME / R_ZLC / etc.) per row here — only the
+  // Q vs RDF split ("Special Stock"). So access is granted at the PREFIX
+  // level: a user needs at least one "Q_*" scope to see Special Stock (Q)
+  // rows, and at least one "R_*" scope to see RDF rows. Admin bypasses
+  // entirely, matching every other page's convention.
+  //
+  // Previously this page applied none of the app's scope filtering at all
+  // (unlike script.js/shelf-life.js), so a "user"-role account limited to
+  // e.g. Q_ZME still saw every RDF (R_*) row here too — this closes that gap.
+  function canAccessDispatchRow(row) {
+    if (typeof window.isAdminUser === "function" && window.isAdminUser()) return true;
+    if (typeof window.getUserScopes !== "function") return true; // permissions.js not loaded — fail open rather than break the page
+    const scopes = window.getUserScopes();
+    const wantPrefix = stockTypeOf(row) === "Q" ? "Q_" : "R_";
+    return scopes.some((s) => s.startsWith(wantPrefix));
+  }
+
   function stockBadge(type) {
     if (type === "Q")   return `<span class="badge pd-badge-q">Special Stock (Q)</span>`;
     if (type === "MIX") return `<span class="badge pd-badge-mix">Mixed</span>`;
@@ -1954,8 +1974,15 @@
         try {
           const data = new Uint8Array(ev.target.result);
           const workbook = XLSX.read(data, { type: "array", cellDates: true });
-          const rows = parseSheet(workbook);
-          if (!rows.length) throw new Error("No usable rows found — check column headers match the template.");
+          const parsedRows = parseSheet(workbook);
+          if (!parsedRows.length) throw new Error("No usable rows found — check column headers match the template.");
+
+          // Scope-filter BEFORE anything downstream (branch master, filter
+          // dropdown options, KPIs, exports) touches the rows, so a
+          // restricted user never sees stock-type totals, branch names, or
+          // counts derived from data outside their assigned scopes either.
+          const rows = parsedRows.filter(canAccessDispatchRow);
+          if (!rows.length) throw new Error("No rows in this file match your assigned data scopes.");
 
           STATE.rows = rows;
           STATE.branchMaster = buildBranchMaster(rows);
