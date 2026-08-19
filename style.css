@@ -1547,15 +1547,15 @@ table.um-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 .um-modal-footer { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 22px;
   border-top: 1px solid var(--border); }
 
-.um-field { margin-bottom: 16px; }
-.um-field label { display: block; font-size: 0.78rem; font-weight: 700; color: var(--muted);
+.field { margin-bottom: 16px; }
+.field label { display: block; font-size: 0.78rem; font-weight: 700; color: var(--muted);
   margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.03em; }
-.um-field input[type="text"], .um-field input[type="email"], .um-field input[type="password"], .um-field select {
+.field input[type="text"], .field input[type="email"], .field input[type="password"], .field select {
   width: 100%; padding: 9px 12px; border-radius: var(--radius-md); border: 1px solid var(--border2);
   background: var(--surface); color: var(--text); font-size: 0.88rem; }
-.um-field-hint { font-size: 0.74rem; color: var(--dim); margin-top: 5px; }
-.um-field-locked { opacity: 0.55; }
-.um-field-locked input, .um-field-locked select { cursor: not-allowed; }
+.field-hint { font-size: 0.74rem; color: var(--dim); margin-top: 5px; }
+.field-locked { opacity: 0.55; }
+.field-locked input, .field-locked select { cursor: not-allowed; }
 
 .scope-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .scope-check, .perm-check { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
