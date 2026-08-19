@@ -777,12 +777,15 @@
   </div>
 
   <!-- User Management — Admin/Director/Deputy Director only; hidden via
-       applyRoleToUI() in auth.js using canManageRoles() from permissions.js -->
+       applyRoleToUI() in auth.js using canManageRoles() from permissions.js.
+       No data-page attribute picked up by the generic canAccessModule()
+       gating loop below — this is gated on Access Level, not a togglable
+       sidebar permission, so it's wired up separately in auth.js. -->
   <div class="sidebar-divider" id="user-mgmt-divider" style="display:none;"></div>
   <div class="nav-group expanded" id="user-mgmt-group" style="display:none; margin-bottom:0;">
-    <a class="nav-btn" href="user-management.html" style="text-decoration:none;">
+    <button class="nav-btn" id="user-mgmt-nav-btn" data-page="user-management">
       <span class="nav-icon">👥</span> User Management
-    </a>
+    </button>
   </div>
 
   <!-- Upload controls — admin only; whole group (title + divider) hides for viewers -->
@@ -1626,7 +1629,83 @@
     </div>
   </section>
 
+  <!-- ── USER MANAGEMENT (Admin full control; Director/Deputy Director role-only) ── -->
+  <section id="page-user-management" class="page" style="display:none">
+    <div class="page-header-row">
+      <div>
+        <div class="page-title">👥 User Management</div>
+        <div class="page-subtitle" id="um-subtitle">Create, edit, and manage accounts, access levels, and data scopes.</div>
+      </div>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <div class="um-role-note" id="um-role-note" style="display:none;"></div>
+        <button class="btn btn-primary" id="um-create-btn" style="display:none;">＋ New User</button>
+      </div>
+    </div>
+
+    <div id="um-alert-slot"></div>
+
+    <div class="um-toolbar">
+      <div class="um-search"><input type="text" id="um-search-input" placeholder="Search by name or email…" /></div>
+      <select class="um-filter" id="um-role-filter">
+        <option value="">All Roles</option>
+        <option value="admin">Admin</option>
+        <option value="director">Director</option>
+        <option value="deputy_director">Deputy Director</option>
+        <option value="team_leader">Team Leader</option>
+        <option value="branch_demand_officer">Branch Demand Officer</option>
+        <option value="user">User</option>
+      </select>
+      <select class="um-filter" id="um-status-filter">
+        <option value="">All Statuses</option>
+        <option value="active">Active</option>
+        <option value="inactive">Inactive</option>
+      </select>
+    </div>
+
+    <div class="um-table-wrap">
+      <table class="um-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Role</th>
+            <th>Data Scopes</th>
+            <th>Status</th>
+            <th style="text-align:right;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="um-table-body">
+          <tr class="um-skeleton-row"><td colspan="5"><div class="um-skeleton-bar"></div></td></tr>
+          <tr class="um-skeleton-row"><td colspan="5"><div class="um-skeleton-bar"></div></td></tr>
+          <tr class="um-skeleton-row"><td colspan="5"><div class="um-skeleton-bar"></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="um-empty" id="um-empty" style="display:none;">
+      <div class="um-empty-icon">🗂️</div>
+      <div>No users match your filters.</div>
+    </div>
+  </section>
+
 </main>
+
+<!-- User Management create/edit modal — lives outside any .page container
+     (position:fixed, toggled via .open) so it isn't hidden along with
+     whichever .page happens to be off-screen. -->
+<div class="um-modal-backdrop" id="um-modal-backdrop">
+  <div class="um-modal">
+    <div class="um-modal-header">
+      <h2 id="um-modal-title">New User</h2>
+      <button class="um-modal-close" id="um-modal-close">✕</button>
+    </div>
+    <div class="um-modal-body" id="um-modal-body">
+      <!-- populated by user-management.js -->
+    </div>
+    <div class="um-modal-footer">
+      <button class="btn" id="um-modal-cancel">Cancel</button>
+      <button class="btn btn-primary" id="um-modal-save">Save</button>
+    </div>
+  </div>
+</div>
 
 <script>
 // ── THEME TOGGLE ─────────────────────────────────────────────
