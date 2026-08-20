@@ -251,19 +251,32 @@ let excludedMaterialCodes = new Set();
 // UNVERIFIED and excluded from every total across the app, exactly like the
 // old phantom-transit logic — just driven by the upload instead of a
 // hardcoded list.
-let TRANSIT_UPLOAD_LIST = [];   // [{materialCode, plantCode, qty}] — parsed rows from the uploaded file
+let TRANSIT_UPLOAD_LIST = [];   // [{materialCode, plantCode, qty, supplyingPlant, ...}] — parsed rows from the uploaded file
 let transitFileLoaded   = false; // gates the Transit page until a file is uploaded
 let transitFileName     = "";
 let transitFileStats    = null;  // {verifiedCount, unverifiedCount} — set after (re)stamping
 
 // Build a fast lookup Map keyed by "materialCode|plantCode" -> qty
 let _transitUploadLookup = new Map();
+// Second lookup keyed the same way -> full uploaded row (for Supplying Plant, etc.)
+let _transitUploadDetailsLookup = new Map();
 function _rebuildTransitUploadLookup() {
   _transitUploadLookup = new Map();
+  _transitUploadDetailsLookup = new Map();
   TRANSIT_UPLOAD_LIST.forEach(e => {
     const key = String(e.materialCode).trim().toUpperCase() + "|" + String(e.plantCode).trim().toUpperCase();
     _transitUploadLookup.set(key, e.qty);
+    _transitUploadDetailsLookup.set(key, e);
   });
+}
+
+// Returns the "Supplying Plant" value from the uploaded Stock-in-Transit file
+// for this row's material+plant, or "" if not available.
+function getSupplyingPlant(row) {
+  const mat = String(row["Material"] || "").trim().toUpperCase();
+  const plt = String(row["Plant"]    || "").trim().toUpperCase();
+  const hit = _transitUploadDetailsLookup.get(mat + "|" + plt);
+  return hit && hit.supplyingPlant ? hit.supplyingPlant : "";
 }
 
 // Returns {qty, val} of the UNVERIFIED portion of a row's Stock in Transit.
@@ -2060,6 +2073,7 @@ function loadTransitFile(file) {
         const colQty = gc("quantity","qty","stock in transit","quantity in transit","transit qty","transit quantity");
         const colDesc = gc("material description","description","material desc","desc");
         const colUom  = gc("base unit of measure","uom","unit of measure","unit","base unit");
+        const colSupPlant = gc("supplying plant","supplying plant code","supply plant","supplying plant name","source plant");
 
         if (!colMat || !colPlt || !colQty) {
           const missing = [!colMat && "Material Code", !colPlt && "Plant Code", !colQty && "Quantity"].filter(Boolean);
@@ -2084,6 +2098,7 @@ function loadTransitFile(file) {
             materialCode: mat, plantCode: plt, qty: qty,
             desc: colDesc ? String(row[colDesc] ?? "").trim() : "",
             uom:  colUom  ? String(row[colUom]  ?? "").trim() : "",
+            supplyingPlant: colSupPlant ? String(row[colSupPlant] ?? "").trim() : "",
           });
         });
 
@@ -2663,12 +2678,14 @@ function renderTransit() {
     {key:"Material Description", label:"Material Description", fmt:(val,r)=>renderMatDesc(val,r), raw:true, cellClass:"col-mat-desc-wrap"},
     {key:"Material Group Name",       label:"Material Group"},
     {key:"Plant Name",                label:"Plant"},
+    {key:"_supplyingPlant",           label:"Supplying Plant", raw:true, fmt:v=>v || "—"},
     {key:"Stock in Transit",          label:"Transit Qty",       fmt:fmtQty, rawKey:"Stock in Transit",          cellClass:"col-qty"},
     {key:"Value of Stock in Transit", label:"Transit Value (ETB)",fmt:fmtETB, rawKey:"Value of Stock in Transit", cellClass:"col-val"},
     {key:"_status",                   label:"Status", raw:true},
   ];
   const transitRows = sortBy([...df], "Value of Stock in Transit").map(r => ({
     ...r,
+    _supplyingPlant: getSupplyingPlant(r),
     _status: r["Value of Stock in Transit"] > 100000 ? "<span class='badge badge-red'>Critical</span>"
       : r["Value of Stock in Transit"] > 50000  ? "<span class='badge badge-amber'>High</span>"
       : r["Value of Stock in Transit"] > 10000  ? "<span class='badge badge-amber'>Medium</span>"
