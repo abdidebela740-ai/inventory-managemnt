@@ -64,6 +64,17 @@
 //   Σ alloc_b ≤ available_HO exactly, preferring to give partial > 0 over 0
 //   to branches with a real (if small) need whenever HO still has stock.
 //
+//   REQUEST ELIGIBILITY (Request Form tab only — Analysis still shows every
+//   branch × material line regardless): a branch may actually submit a
+//   request for a line if and only if
+//     (a) its current months of stock < REQUEST_ELIGIBILITY_MOS (3), AND
+//     (b) HO01 actually has stock for it (available_HO > 0).
+//   The fill TARGET stays TARGET_MOS (5) either way — eligibility only
+//   gates *whether* a line is offered for request, not how much is
+//   recommended once it is. Previously-approved/manually-edited lines stay
+//   visible even if they no longer meet the threshold, so nothing already
+//   in progress silently disappears. See brdIsRequestEligible().
+//
 // MAPPED vs SOURCE CODES
 // -----------------------
 //   All planning math above runs on the MAPPED/canonical code (same space as
@@ -86,6 +97,7 @@
 // =============================================================================
 
 const TARGET_MOS = 5; // constant for v1 — do not expose as user-editable yet
+const REQUEST_ELIGIBILITY_MOS = 3; // a branch may REQUEST a line only below this MOS — see file header
 
 // ── HO01 STOCK BREAKDOWN (Unrestricted vs Quality Inspection) ──────────────
 // buildMosSohMap() (mos.js) deliberately lumps Unrestricted + verified
@@ -288,6 +300,61 @@ function brdStorageLocationForBranch(mappedCode, plant, scopeCode) {
   return { loc: inferredLoc, inferred: !!inferredLoc };
 }
 
+// ── NEAREST EXPIRY DATE AT THE REQUESTING BRANCH (Request Form tab only) ───
+// A branch deciding how much to request also wants to know how soon its
+// OWN existing stock of that material expires, so it doesn't over-request
+// on top of stock that's about to lapse. This looks across every source
+// row for the material at that branch (with real quantity on hand) and
+// returns the soonest expiry date found. Tries several common SAP
+// column-name variants since the exact header can differ by export
+// template — extend EXPIRY_DATE_FIELDS if your data uses a different one
+// and this keeps showing "—".
+const EXPIRY_DATE_FIELDS = [
+  "SLED/BBD", "SLED", "Shelf Life Exp. Date", "Shelf Life Expiration Date",
+  "Expiration Date", "Expiry Date", "Best Before Date", "BBD", "Exp. Date",
+];
+function brdRowExpiryDate(row) {
+  for (const f of EXPIRY_DATE_FIELDS) {
+    const raw = row[f];
+    if (raw === undefined || raw === null || raw === "") continue;
+    const d = raw instanceof Date ? raw : new Date(raw);
+    if (!isNaN(d.getTime())) return d;
+  }
+  return null;
+}
+function brdNearestExpiryForBranch(mappedCode, plant) {
+  const src  = brdPrimarySource(mappedCode);
+  const base = (mappingTable && mappingTable.size > 0 ? mappedDf : rawDf) || [];
+  let nearest = null;
+  base.forEach(r => {
+    if (String(r["Plant"] || "").trim().toUpperCase() !== plant) return;
+    if (!src.allSourceCodes.includes(String(r["Material"] || "").trim().toUpperCase())) return;
+    const qty = (Number(r["Unrestricted Stock"]) || 0) + (Number(r["Stock in Quality Inspection"]) || 0);
+    if (qty <= 0) return; // only batches actually holding stock
+    const d = brdRowExpiryDate(r);
+    if (d && (!nearest || d < nearest)) nearest = d;
+  });
+  return nearest;
+}
+// Compact pill for the Nearest Expiry column — colour flags urgency the
+// same way the rest of the app does (red = critical, amber = watch).
+function brdFmtExpiry(d) {
+  if (!d) return `<span class="brd-status-pill brd-status-muted">—</span>`;
+  const days = Math.round((d - new Date()) / 86400000);
+  let cls = "brd-status-green";
+  if (days <= 90) cls = "brd-status-red";
+  else if (days <= 180) cls = "brd-status-amber";
+  const label = d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
+  return `<span class="brd-status-pill ${cls}" title="${days} day(s) from today">${escHtml(label)}</span>`;
+}
+
+// ── REQUEST ELIGIBILITY (see file header) ───────────────────────────────────
+function brdIsRequestEligible(line) {
+  return !!line.hasAmc && line.mosNow !== null && line.mosNow !== undefined
+      && line.mosNow < REQUEST_ELIGIBILITY_MOS
+      && (line.availableHo || 0) > 0;
+}
+
 // ── ROUNDING: largest-remainder method ──────────────────────────────────────
 // Rounds a set of ideal (float) allocations to whole units so their sum never
 // exceeds capTotal, without ever pushing any single value above its own cap.
@@ -475,6 +542,7 @@ function brdBuildLines(sohMap) {
         : [];
 
       const storageInfo = brdStorageLocationForBranch(row.code, b.plant, matScope.scope);
+      const nearestExpiry = brdNearestExpiryForBranch(row.code, b.plant);
 
       lines.push({
         plant: b.plant, code: row.code, desc: row.desc, origCodes: row.origCodes,
@@ -486,6 +554,7 @@ function brdBuildLines(sohMap) {
         surplusPlants,
         stockPrefix: matScope.prefix, stockTypeLabel, purchGroup, purchOrg,
         storageLoc: storageInfo.loc, storageLocInferred: storageInfo.inferred,
+        nearestExpiry,
       });
     });
   });
@@ -654,24 +723,20 @@ function renderBranchDemand() {
         ? `<input type="number" min="0" step="1" class="brd-alloc-input" data-plant="${escHtml(r.plant)}" data-code="${escHtml(r.code)}" value="${Number(v || 0)}" />`
         : `<b>${fmtQty(v)}</b>` },
     { key: "mosAfter", label: "MOS After", fmt: v => `<span style="${mosCellStyle(v)}">${fmtMosVal(v)}</span>`, raw: true },
-    { key: "status", label: "Status", fmt: v => brdStatusBadge(v), raw: true },
-    { key: "stockTypeLabel", label: "Stock Type", fmt: (v, r) => v
-        ? `<span class="brd-status-pill brd-status-${r.stockPrefix === "Q" ? "purple" : "blue"}">${escHtml(v)}</span>`
-        : `<span class="brd-status-pill brd-status-muted">Unclassified</span>`, raw: true },
-    { key: "purchGroup", label: "Purch. Group", fmt: v => v ? escHtml(v) : "—", raw: true },
-    { key: "purchOrg", label: "Purch. Org", fmt: v => v ? escHtml(v) : "—", raw: true },
-    { key: "storageLoc", label: "Storage Location", raw: true,
-      fmt: (v, r) => v
-        ? `${escHtml(v)}${r.storageLocInferred ? ' <span title="No existing stock record for this material at this branch — inferred from other materials of the same type at this plant. Double-check before approving." class="brd-note-noamc">≈ inferred</span>' : ""}`
-        : `<span class="brd-note-scale">— none found</span>` },
-    { key: "_notes", label: "Notes", raw: true, cellClass: "col-mat-desc-wrap",
+    // NOTE: Status / Stock Type / Purch. Group / Purch. Org / Storage
+    // Location are deliberately left off Analysis — they're SAP-header /
+    // requisition detail, not stock analysis, and belong on the Request
+    // Form tab instead (see reqCols below), which keeps this table on one
+    // screen width. Notes is compacted to short hover-badges for the same
+    // reason — the old full-sentence version made rows very tall.
+    { key: "_notes", label: "Notes", raw: true, cellClass: "brd-notes-cell",
       fmt: (v, r) => {
         const bits = [];
-        if (r.qcOnly) bits.push(`<span class="brd-note-qc">🧪 HO01 stock in QC (${fmtQty(r.qcHo)}) — not yet releasable</span>`);
-        if (r.isPartial) bits.push(`<span class="brd-note-scale">HO01 short — scaled to ${Math.round(r.scalePct * 100)}% of need across ${escHtml(brdSelectedPlant ? "all requesting branches" : "shown branches")}</span>`);
-        if (r.surplusPlants && r.surplusPlants.length) bits.push(`<span class="brd-note-redist">⚠️ Check redistribution — surplus (>8mo) at: ${r.surplusPlants.map(escHtml).join(", ")}</span>`);
-        if (!r.hasAmc) bits.push(`<span class="brd-note-noamc">No AMC — enter quantity manually</span>`);
-        return bits.join("<br>");
+        if (r.qcOnly) bits.push(`<span class="brd-status-pill brd-status-amber" title="HO01 stock (${fmtQty(r.qcHo)}) is still in Quality Inspection — not yet releasable">🧪 QC</span>`);
+        if (r.isPartial) bits.push(`<span class="brd-status-pill brd-status-amber" title="HO01 short — scaled to ${Math.round(r.scalePct * 100)}% of need across ${escHtml(brdSelectedPlant ? "all requesting branches" : "shown branches")}">⚖️ ${Math.round(r.scalePct * 100)}%</span>`);
+        if (r.surplusPlants && r.surplusPlants.length) bits.push(`<span class="brd-status-pill brd-status-blue" title="Surplus (>8mo) at: ${r.surplusPlants.map(escHtml).join(", ")}">↔️ ${r.surplusPlants.length}</span>`);
+        if (!r.hasAmc) bits.push(`<span class="brd-status-pill brd-status-muted" title="No AMC on file — enter quantity manually">✏️ Manual</span>`);
+        return bits.length ? `<span class="brd-notes-badges">${bits.join("")}</span>` : "—";
       } },
   );
 
@@ -679,6 +744,57 @@ function renderBranchDemand() {
     lines, cols,
     (row) => row.status === "none" ? "row-critical" : (row.qcOnly ? "row-qc" : "")
   );
+
+  // ── Request Form tab — same lines, but ONE quantity column instead of
+  // SOH/AMC/Need/Allocated all sitting side by side. Analysis mixes several
+  // quantity-shaped numbers together (branch SOH, branch AMC, HO01 SOH,
+  // need, allocated, MOS before/after) which is exactly right for judging
+  // *why* a number is what it is, but is ambiguous the moment someone just
+  // wants "how much do I request for this line" — several columns look
+  // similar at a glance and it's easy to check/export the wrong one. This
+  // tab drops everything except identity + the one quantity that actually
+  // gets requested, editable in place exactly like Analysis's Allocated
+  // column (same class, same delegated listener — see wireBrdModule).
+  // Request Form only offers lines that meet REQUEST ELIGIBILITY (see file
+  // header): branch MOS < REQUEST_ELIGIBILITY_MOS AND HO01 actually has
+  // stock to give. Lines a supervisor already approved or hand-edited stay
+  // visible even if they've since fallen outside that window, so nothing
+  // in progress silently vanishes off the tab.
+  const requestLines = lines.filter(l => (brdIsRequestEligible(l) && l.alloc > 0) || l.approved || l.manual);
+  const reqCountEl = document.getElementById("brd-tab-count-request");
+  if (reqCountEl) reqCountEl.textContent = requestLines.length.toLocaleString();
+
+  const reqCols = [];
+  if (canEdit) {
+    reqCols.push({ key: "_sel", label: "", raw: true,
+      fmt: (v, r) => `<input type="checkbox" class="brd-approve-cb" data-plant="${escHtml(r.plant)}" data-code="${escHtml(r.code)}" ${r.approved ? "checked" : ""} />` });
+  }
+  reqCols.push(
+    { key: "code", label: "Mapped Code", fmt: (v, r) => `<span class="col-mat-code">${escHtml(v)}</span>`, raw: true, cellClass: "col-mat-code-wrap" },
+    { key: "desc", label: "Description", cellClass: "col-mat-desc-wrap" },
+    { key: "plant", label: "Branch" },
+    { key: "alloc", label: "Quantity to Request", raw: true,
+      fmt: (v, r) => canEdit
+        ? `<input type="number" min="0" step="1" class="brd-alloc-input" data-plant="${escHtml(r.plant)}" data-code="${escHtml(r.code)}" value="${Number(v || 0)}" />`
+        : `<b>${fmtQty(v)}</b>` },
+    // Nearest expiry of the branch's OWN existing stock of this item —
+    // Request Form only (not Analysis, see file header / cols above).
+    { key: "nearestExpiry", label: "Nearest Expiry", raw: true, fmt: v => brdFmtExpiry(v) },
+    { key: "storageLoc", label: "Storage Location", raw: true,
+      fmt: (v, r) => v
+        ? `${escHtml(v)}${r.storageLocInferred ? ' <span title="No existing stock record for this material at this branch — inferred from other materials of the same type at this plant. Double-check before approving." class="brd-note-noamc">≈ inferred</span>' : ""}`
+        : `<span class="brd-note-scale">— none found</span>` },
+    { key: "purchGroup", label: "Purch. Group", fmt: v => v ? escHtml(v) : "—", raw: true },
+    { key: "purchOrg", label: "Purch. Org", fmt: v => v ? escHtml(v) : "—", raw: true },
+    { key: "status", label: "Status", fmt: v => brdStatusBadge(v), raw: true },
+  );
+
+  const reqTableEl = document.getElementById("brd-request-table");
+  if (reqTableEl) {
+    reqTableEl.innerHTML = requestLines.length
+      ? buildTable(requestLines, reqCols, (row) => row.status === "none" ? "row-critical" : (row.qcOnly ? "row-qc" : ""))
+      : `<div class="alert-info" style="margin:0.5rem 0">Nothing to request yet on the current filters — switch to Analysis to see stock/AMC detail, or adjust the Branch / Stock Type filters above.</div>`;
+  }
 }
 
 // ── EXPORT (SAP_Paste + Working, two-sheet Excel) ───────────────────────────
@@ -813,7 +929,11 @@ function brdExportTemplate() {
 
     const approveSelBtn = document.getElementById("brd-approve-selected");
     if (approveSelBtn) approveSelBtn.addEventListener("click", () => {
-      document.querySelectorAll("#brd-table .brd-approve-cb").forEach(cb => {
+      // Scoped to both tabs' tables (not just whichever is currently
+      // visible) — Analysis and Request Form show the same underlying
+      // lines, just with different columns, so "Approve Visible" should
+      // approve every row currently on screen either way.
+      document.querySelectorAll("#brd-table .brd-approve-cb, #brd-request-table .brd-approve-cb").forEach(cb => {
         const key = brdDraftKey(cb.dataset.plant, cb.dataset.code);
         const d = brdDraft.get(key) || {};
         d.approved = true;
@@ -826,12 +946,24 @@ function brdExportTemplate() {
     if (exportBtn) exportBtn.addEventListener("click", brdExportTemplate);
 
     // Event delegation for dynamically-rebuilt table content (chips remove,
-    // per-row approve checkbox, per-row allocation edit).
+    // per-row approve checkbox, per-row allocation edit) — and the
+    // Analysis / Request Form tab switcher. Both tab tables are already
+    // rebuilt on every renderBranchDemand(), so switching tabs is just a
+    // visibility toggle, no recompute needed.
     document.body.addEventListener("click", (e) => {
       const chipX = e.target.closest(".brd-chip-remove");
       if (chipX) {
         brdCodes = brdCodes.filter(c => c !== chipX.dataset.code);
         renderBranchDemand();
+        return;
+      }
+      const tabBtn = e.target.closest(".brd-tab-btn");
+      if (tabBtn) {
+        const tab = tabBtn.dataset.tab;
+        document.querySelectorAll(".brd-tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+        document.querySelectorAll(".brd-tab-panel").forEach(p => {
+          p.style.display = p.id === "brd-tab-" + tab ? "block" : "none";
+        });
       }
     });
     document.body.addEventListener("change", (e) => {
