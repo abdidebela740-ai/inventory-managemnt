@@ -119,6 +119,46 @@ function showPasteMatchToast(matchedCount, totalCount, unmatchedCodes) {
   setTimeout(() => { if (toast.parentElement) toast.remove(); }, 5000);
 }
 
+// SEC-ACCESS-GATE: Shown only when a signed-in user has literally zero
+// accessible modules (firstAccessibleModule() found nothing to redirect
+// them to) — everyone else with at least one permitted module gets
+// silently redirected there instead of ever seeing a denial message.
+function showNoModulesAssignedToast() {
+  const existing = document.getElementById("access-denied-toast");
+  if (existing) existing.remove();
+
+  const toast = document.createElement("div");
+  toast.id = "access-denied-toast";
+  toast.innerHTML = `
+    <span style="font-size:1.1em">🔒</span>
+    <span>Your account doesn't have any modules assigned yet — contact your administrator</span>
+    <button onclick="this.parentElement.remove()" style="margin-left:auto;background:none;border:none;color:inherit;cursor:pointer;font-size:1rem;opacity:0.7;padding:0 0.25rem" title="Dismiss">✕</button>
+  `;
+  Object.assign(toast.style, {
+    position:       "fixed",
+    bottom:         "1.5rem",
+    left:           "50%",
+    transform:      "translateX(-50%)",
+    background:     "var(--red, #d94040)",
+    color:          "#fff",
+    padding:        "0.65rem 1.1rem",
+    borderRadius:   "8px",
+    boxShadow:      "0 4px 18px rgba(0,0,0,0.35)",
+    display:        "flex",
+    alignItems:     "flex-start",
+    gap:            "0.6rem",
+    fontSize:       "0.82rem",
+    fontFamily:     "Inter, sans-serif",
+    lineHeight:     "1.45",
+    zIndex:         "9999",
+    maxWidth:       "560px",
+    animation:      "fadeInUp 0.25s ease",
+    pointerEvents:  "auto",
+  });
+  document.body.appendChild(toast);
+  setTimeout(() => { if (toast.parentElement) toast.remove(); }, 5000);
+}
+
 // SEC-ACCESS-GATE: Shows a brief toast when navigation to a module is
 // blocked because the signed-in user lacks permission for it. Used by the
 // central renderPage() gate and by every other jump point (overview cards,
@@ -311,14 +351,10 @@ let _materialDrilldownCode = null; // material code to auto-filter to | null, co
 function goToMaterialConcentration(code) {
   const c = String(code || "").trim();
   if (!c) return;
-  // SEC-ACCESS-GATE: drillNavigate() ultimately calls the gated renderPage()
-  // and will refuse to open the page either way, but checking here too
-  // avoids pushing a stale entry onto _drillNavStack for a jump that's
-  // about to be denied, and gives immediate feedback via toast.
-  if (typeof canAccessModule === "function" && !canAccessModule("concentration")) {
-    if (typeof showAccessDeniedToast === "function") showAccessDeniedToast();
-    return;
-  }
+  // SEC-ACCESS-GATE: no early guard here anymore — drillNavigate() ->
+  // renderPage() is the single enforcement point, and renderPage() now
+  // redirects a denied jump to the user's own accessible module rather
+  // than blocking it, so there's nothing left to duplicate here.
   _materialDrilldownCode = c;
   drillNavigate("concentration");
 }
@@ -336,13 +372,9 @@ let _expiryDrilldownMatCode = null; // material code to auto-filter Expiry Watch
 function goToMaterialExpiry(code) {
   const c = String(code || "").trim();
   if (!c) return;
-  // SEC-ACCESS-GATE: see goToMaterialConcentration() above for why this
-  // check is duplicated here even though drillNavigate() → renderPage()
-  // enforces it centrally.
-  if (typeof canAccessModule === "function" && !canAccessModule("expiry")) {
-    if (typeof showAccessDeniedToast === "function") showAccessDeniedToast();
-    return;
-  }
+  // SEC-ACCESS-GATE: see goToMaterialConcentration() above — enforcement
+  // (including the redirect-to-accessible-module behavior) lives centrally
+  // in renderPage() now, so there's no separate guard to keep here.
   _expiryDrilldownMatCode = c;
   drillNavigate("expiry");
 }
@@ -4033,8 +4065,28 @@ function renderPage(id) {
   // for Admin). If the check fails: don't touch currentPage, don't show
   // or render the page, just toast and bail out.
   if (typeof canAccessModule === "function" && !canAccessModule(id)) {
-    if (typeof showAccessDeniedToast === "function") showAccessDeniedToast();
-    console.warn(`Blocked navigation to "${id}" — user lacks module permission.`);
+    // REDIRECT-NOT-DENY: instead of blocking with an "access denied"
+    // message, send the user straight to the first module their role /
+    // sidebar_permissions actually grant. This is what makes login (which
+    // defaults to "dashboard") work for a role that doesn't include
+    // Dashboard — they land on their own module instead of a denial.
+    // Guard against redirecting to the same id (shouldn't happen, since
+    // firstAccessibleModule() only returns ids canAccessModule() allows,
+    // but this keeps renderPage() from ever recursing on itself).
+    const fallback = (typeof firstAccessibleModule === "function") ? firstAccessibleModule() : null;
+    if (fallback && fallback !== id) {
+      console.warn(`Redirecting "${id}" → "${fallback}" — user lacks permission for "${id}".`);
+      renderPage(fallback);
+      return;
+    }
+    // No accessible module at all — nothing to redirect to, so this is the
+    // one case that still needs a message rather than a silent no-op.
+    if (typeof showNoModulesAssignedToast === "function") {
+      showNoModulesAssignedToast();
+    } else if (typeof showAccessDeniedToast === "function") {
+      showAccessDeniedToast();
+    }
+    console.warn(`Blocked navigation to "${id}" — user has no accessible modules.`);
     return;
   }
   // Pending Dispatch, MOS by Plant, National Stock & MOS, and Request
