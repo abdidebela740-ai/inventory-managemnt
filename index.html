@@ -769,6 +769,9 @@
     <button class="nav-btn" data-page="request-analysis">
       <span class="nav-icon">🧾</span> Request Analysis
     </button>
+    <button class="nav-btn" data-page="branch-demand">
+      <span class="nav-icon">🧭</span> Branch Demand
+    </button>
     <a class="nav-btn" href="pharma-alloc.html" target="_blank" rel="noopener" style="text-decoration:none;">
       <span class="nav-icon">🧮</span> Allocation Tool <span style="margin-left:auto;font-size:0.7rem;opacity:0.55;">↗</span>
     </a>
@@ -1705,6 +1708,52 @@
     </div>
   </section>
 
+  <!-- ── BRANCH DEMAND (Branch Request Helper) ── -->
+  <section id="page-branch-demand" class="page" style="display:none">
+    <div class="page-header-row">
+      <div>
+        <div class="page-title">🧭 Branch Demand</div>
+        <div class="page-subtitle">Recommends branch requisitions against Head Office (HO01) stock — targets 5 months of stock per branch, and splits HO01 fairly when it can't cover everyone.</div>
+      </div>
+    </div>
+
+    <div id="brd-no-inventory" class="alert-info" style="margin:1rem 0">
+      Upload the main inventory Excel (sidebar → Data Source) to provide branch and HO01 stock-on-hand.
+    </div>
+    <div id="brd-no-amc" class="alert-info" style="margin:1rem 0;display:none">
+      Upload the AMC file (sidebar → Data Source) to provide average monthly consumption — Branch Demand needs both stock and AMC to compute requests.
+    </div>
+
+    <div id="brd-content" style="display:none">
+      <div id="brd-mapping-banner"></div>
+
+      <div class="filter-bar" style="gap:0.6rem;flex-wrap:wrap;align-items:center">
+        <select id="brd-plant" class="filter-select"></select>
+        <select id="brd-stocktype" class="filter-select" title="RDF and Health Program (Q) requisitions use different Purchasing Group / Purch. Organization codes — filter to one at a time before exporting so the SAP paste sheet doesn't mix them."></select>
+        <span class="brd-target-label">🎯 Target: 5 MOS</span>
+        <label class="brd-buffer-label">HO01 Buffer
+          <input type="number" id="brd-buffer" min="0" step="1" value="0" class="filter-input" style="width:90px;min-width:0" />
+        </label>
+        <button class="apply-btn small" id="brd-recalc">🔄 Recalculate</button>
+        <button class="apply-btn secondary small" id="brd-approve-selected" style="display:none">✅ Approve Visible</button>
+        <button class="apply-btn secondary small" id="brd-export" style="display:none">⬇ Export Template</button>
+      </div>
+
+      <div class="brd-material-input">
+        <textarea id="brd-codes-input" rows="2" placeholder="Paste material codes (comma, space, or newline separated) — leave blank to load every AMC-committed material for the selected branch"></textarea>
+        <div class="brd-material-input-btns">
+          <button class="apply-btn small" id="brd-codes-add">➕ Add Codes</button>
+          <button class="apply-btn secondary small" id="brd-codes-clear">✕ Clear List</button>
+        </div>
+        <div id="brd-codes-chips" class="brd-chips"></div>
+      </div>
+
+      <div class="kpi-row" id="brd-kpis" style="margin:1rem 0"></div>
+
+      <div id="brd-table"></div>
+    </div>
+  </section>
+
   <!-- ── USER MANAGEMENT (Admin full control; Director/Deputy Director role-only) ── -->
   <section id="page-user-management" class="page" style="display:none">
     <div class="um-denied" id="um-denied" style="display:none;">
@@ -1988,6 +2037,7 @@ document.querySelectorAll('.overview-card[data-goto]').forEach(card => {
 <script src="user-management.js" defer></script>
 <script src="script.js" defer></script>
 <script src="mos.js" defer></script>
+<script src="branch-demand.js" defer></script>
 <script src="request-analysis.js" defer></script>
 <script src="national-table.js" defer></script>
 <script src="expiry-risk.js" defer></script>
