@@ -769,12 +769,8 @@
     <button class="nav-btn" data-page="request-analysis">
       <span class="nav-icon">🧾</span> Request Analysis
     </button>
-  </div>
-
-  <div class="sidebar-divider"></div>
-  <div class="nav-group expanded" data-group="AllocationTool" style="margin-bottom:0">
-    <a class="nav-btn nav-header-item no-chevron" href="pharma-alloc.html" target="_blank" rel="noopener" style="text-decoration:none;">
-      <span class="nav-group-icon">🧮</span> Allocation Tool <span style="margin-left:auto;font-size:0.7rem;opacity:0.55;">↗</span>
+    <a class="nav-btn" href="pharma-alloc.html" target="_blank" rel="noopener" style="text-decoration:none;">
+      <span class="nav-icon">🧮</span> Allocation Tool <span style="margin-left:auto;font-size:0.7rem;opacity:0.55;">↗</span>
     </a>
   </div>
 
@@ -790,116 +786,14 @@
     </button>
   </div>
 
-  <!-- Upload controls — admin only; whole group (title + divider) hides for viewers -->
+  <!-- Upload controls — admin only; whole group (button + divider) hides for
+       viewers. Clicking the button opens the Data Source modal (see
+       #data-source-modal-backdrop below) instead of expanding inline. -->
   <div class="sidebar-divider upload-admin-only viewer-hidden"></div>
-  <div class="nav-group expanded upload-admin-only viewer-hidden" id="data-source-group">
-    <div class="nav-group-title" id="data-source-title" role="button" tabindex="0" aria-expanded="true" aria-controls="admin-upload-section">
+  <div class="nav-group expanded upload-admin-only viewer-hidden" id="data-source-group" style="margin-bottom:0">
+    <button type="button" class="nav-btn nav-header-item no-chevron" id="data-source-title" aria-haspopup="dialog" aria-expanded="false" aria-controls="data-source-modal-backdrop">
       <span class="nav-group-icon">📁</span> Data Source
-    </div>
-    <div id="admin-upload-section">
-      <div class="upload-label">📂 Inventory</div>
-      <label class="upload-btn upload-admin-only viewer-hidden" for="fileInput">
-        <span id="uploadBtnText">📂 Upload Inventory Excel</span>
-        <input type="file" id="fileInput" accept=".xlsx,.xls" />
-      </label>
-      <div id="fileStatus"></div>
-
-      <div class="sidebar-divider"></div>
-      <div class="upload-label">⚗️ Material Standardization</div>
-      <label class="upload-btn mapping-upload-btn upload-admin-only viewer-hidden" for="mappingFileInput">
-        <span id="mappingUploadBtnText">🗺️ Upload Mapping Excel</span>
-        <input type="file" id="mappingFileInput" accept=".xlsx,.xls" />
-      </label>
-      <div id="mappingFileStatus"></div>
-
-      <div class="sidebar-divider"></div>
-      <div class="upload-label">📐 AMC (for MOS)</div>
-      <label class="upload-btn upload-admin-only viewer-hidden" style="background:var(--card-bg);border:1.5px solid var(--blue)" for="mosAmcFileInput">
-        <span id="mosAmcUploadBtnText">📐 Upload AMC.xlsx</span>
-        <input type="file" id="mosAmcFileInput" accept=".xlsx,.xls" />
-      </label>
-      <div id="mosAmcFileStatus"></div>
-
-      <div class="sidebar-divider"></div>
-      <div class="upload-label">🚚 Goods Receipt Log</div>
-      <label class="upload-btn incoming-upload-btn upload-admin-only viewer-hidden" for="incomingFileInput">
-        <span id="incomingUploadBtnText">🚚 Upload Incoming GR.xlsx</span>
-        <input type="file" id="incomingFileInput" accept=".xlsx,.xls" />
-      </label>
-      <div id="incomingFileStatus"></div>
-
-      <div class="sidebar-divider"></div>
-      <div class="upload-label">🚚 Stock in Transit</div>
-      <label class="upload-btn upload-admin-only viewer-hidden" for="transitFileInput">
-        <span id="transitUploadBtnText">🚚 Upload Stock-in-Transit File</span>
-        <input type="file" id="transitFileInput" accept=".xlsx,.xls,.csv" />
-      </label>
-      <div id="transitFileStatus"></div>
-      <div style="font-size:var(--fs-2xs);color:var(--muted);padding:2px 2px 0">Temporary — re-upload each session. Columns: Material Code, Plant Code, Quantity.</div>
-
-      <div class="sidebar-divider"></div>
-      <div class="upload-label">📦Open Outbound</div>
-      <label class="upload-btn pd-upload-btn upload-admin-only viewer-hidden" for="pendingDispatchFileInput">
-        <span id="pendingDispatchUploadBtnText">📦 UploadOpen Outbound Excel</span>
-        <input type="file" id="pendingDispatchFileInput" accept=".xlsx,.xls" />
-      </label>
-      <div id="pendingDispatchFileStatus"></div>
-    </div>
-  </div>
-
-  <!-- Sidebar Settings — Appearance + Font (moved out of the old top-right
-       ⚙️ menu; that control is now a Profile menu — see #profile-menu-wrap
-       below). Same field IDs as before so settings-menu.js's localStorage
-       keys (epss-theme, epss-font-family, epss-font-size) and the pre-paint
-       <head> script keep working unchanged. Visible to every role. -->
-  <div class="sidebar-divider"></div>
-  <div class="nav-group expanded" data-group="sidebar-settings" id="sidebar-settings-group" style="margin-bottom:0;">
-    <div class="nav-group-title no-chevron"><span class="nav-group-icon">🎨</span> Settings</div>
-    <div class="sidebar-settings-body">
-
-      <label class="settings-quick-toggle" for="settings-dark-light-switch">
-        <span>🌙 Dark</span>
-        <span class="settings-switch">
-          <input type="checkbox" id="settings-dark-light-switch">
-          <span class="settings-switch-track"><span class="settings-switch-thumb"></span></span>
-        </span>
-        <span>☀️ Light</span>
-      </label>
-
-      <div>
-        <label class="settings-field-label" for="settings-theme-select">Theme</label>
-        <select id="settings-theme-select" class="settings-select">
-          <option value="belize-deep">Belize Deep</option>
-          <option value="belize">Belize</option>
-          <option value="hc-black">High Contrast Black</option>
-          <option value="hc-white">High Contrast White</option>
-          <option value="horizon">Horizon (default)</option>
-          <option value="quartz-dark">Quartz Dark</option>
-        </select>
-      </div>
-
-      <div>
-        <label class="settings-field-label" for="settings-font-family">Font style</label>
-        <select id="settings-font-family" class="settings-select">
-          <option value="jakarta">Plus Jakarta Sans (default)</option>
-          <option value="inter">Inter</option>
-          <option value="system">System UI</option>
-          <option value="georgia">Georgia (serif)</option>
-          <option value="mono">IBM Plex Mono</option>
-        </select>
-      </div>
-
-      <div>
-        <label class="settings-field-label" for="settings-font-size">Font size</label>
-        <select id="settings-font-size" class="settings-select">
-          <option value="small">Small</option>
-          <option value="medium">Medium (default)</option>
-          <option value="large">Large</option>
-          <option value="xlarge">Extra Large</option>
-        </select>
-      </div>
-
-    </div>
+    </button>
   </div>
 
 </aside>
@@ -913,9 +807,9 @@
   <div id="global-search-results"></div>
 </div>
 
-<!-- Profile Menu — replaces the old ⚙️ "everything" menu. Theme/font now
-     live in the sidebar (#sidebar-settings-group); this is account-only:
-     who's signed in, their role, change password, sign out. -->
+<!-- Profile Menu — account-only: who's signed in, their role, change
+     password, sign out. Appearance/font controls live in the separate
+     Settings dropdown (#settings-menu-wrap) just to the left. -->
 <div id="profile-menu-wrap">
   <button id="profile-menu-btn" type="button" title="Profile" aria-haspopup="true" aria-expanded="false">
     <span id="profile-avatar">–</span>
@@ -953,6 +847,140 @@
     <div class="settings-panel-divider"></div>
 
     <button type="button" id="profile-signout-btn" class="settings-signout-btn">🚪 Sign out</button>
+  </div>
+</div>
+
+<!-- Settings Menu — top-right dropdown (moved out of the sidebar). Same
+     field IDs as before so settings-menu.js's localStorage keys
+     (epss-theme, epss-font-family, epss-font-size) and the pre-paint
+     <head> script keep working unchanged. Visible to every role. -->
+<div id="settings-menu-wrap">
+  <button id="settings-menu-btn" type="button" title="Settings" aria-haspopup="true" aria-expanded="false">
+    <span id="settings-menu-icon">🎨</span>
+  </button>
+
+  <div id="settings-menu-panel" role="menu" aria-label="Settings">
+
+    <div class="settings-panel-title">🎨 Appearance</div>
+
+    <div class="settings-panel-divider"></div>
+
+    <label class="settings-quick-toggle" for="settings-dark-light-switch">
+      <span>🌙 Dark</span>
+      <span class="settings-switch">
+        <input type="checkbox" id="settings-dark-light-switch">
+        <span class="settings-switch-track"><span class="settings-switch-thumb"></span></span>
+      </span>
+      <span>☀️ Light</span>
+    </label>
+
+    <div>
+      <label class="settings-field-label" for="settings-theme-select">Theme</label>
+      <select id="settings-theme-select" class="settings-select">
+        <option value="belize-deep">Belize Deep</option>
+        <option value="belize">Belize</option>
+        <option value="hc-black">High Contrast Black</option>
+        <option value="hc-white">High Contrast White</option>
+        <option value="horizon">Horizon (default)</option>
+        <option value="quartz-dark">Quartz Dark</option>
+      </select>
+    </div>
+
+    <div>
+      <label class="settings-field-label" for="settings-font-family">Font style</label>
+      <select id="settings-font-family" class="settings-select">
+        <option value="jakarta">Plus Jakarta Sans (default)</option>
+        <option value="inter">Inter</option>
+        <option value="system">System UI</option>
+        <option value="georgia">Georgia (serif)</option>
+        <option value="mono">IBM Plex Mono</option>
+      </select>
+    </div>
+
+    <div>
+      <label class="settings-field-label" for="settings-font-size">Font size</label>
+      <select id="settings-font-size" class="settings-select">
+        <option value="small">Small</option>
+        <option value="medium">Medium (default)</option>
+        <option value="large">Large</option>
+        <option value="xlarge">Extra Large</option>
+      </select>
+    </div>
+
+  </div>
+</div>
+
+<!-- Data Source Modal — large popup window with all upload controls
+     (admin only). Opened by clicking the "📁 Data Source" sidebar button
+     (#data-source-title). Same field IDs as before so auth.js /
+     storage-sync.js's admin-visibility gating (#admin-upload-section,
+     .upload-admin-only) keeps working unchanged. -->
+<div class="um-modal-backdrop" id="data-source-modal-backdrop">
+  <div class="um-modal ds-modal" role="dialog" aria-modal="true" aria-labelledby="data-source-modal-title">
+    <div class="um-modal-header">
+      <h2 id="data-source-modal-title">📁 Data Source</h2>
+      <button type="button" class="um-modal-close" id="data-source-modal-close" aria-label="Close">✕</button>
+    </div>
+    <div class="um-modal-body ds-modal-body" id="admin-upload-section">
+      <div class="ds-modal-grid">
+
+        <div class="ds-upload-block">
+          <div class="upload-label">📂 Inventory</div>
+          <label class="upload-btn upload-admin-only viewer-hidden" for="fileInput">
+            <span id="uploadBtnText">📂 Upload Inventory Excel</span>
+            <input type="file" id="fileInput" accept=".xlsx,.xls" />
+          </label>
+          <div id="fileStatus"></div>
+        </div>
+
+        <div class="ds-upload-block">
+          <div class="upload-label">⚗️ Material Standardization</div>
+          <label class="upload-btn mapping-upload-btn upload-admin-only viewer-hidden" for="mappingFileInput">
+            <span id="mappingUploadBtnText">🗺️ Upload Mapping Excel</span>
+            <input type="file" id="mappingFileInput" accept=".xlsx,.xls" />
+          </label>
+          <div id="mappingFileStatus"></div>
+        </div>
+
+        <div class="ds-upload-block">
+          <div class="upload-label">📐 AMC (for MOS)</div>
+          <label class="upload-btn upload-admin-only viewer-hidden" style="background:var(--card-bg);border:1.5px solid var(--blue)" for="mosAmcFileInput">
+            <span id="mosAmcUploadBtnText">📐 Upload AMC.xlsx</span>
+            <input type="file" id="mosAmcFileInput" accept=".xlsx,.xls" />
+          </label>
+          <div id="mosAmcFileStatus"></div>
+        </div>
+
+        <div class="ds-upload-block">
+          <div class="upload-label">🚚 Goods Receipt Log</div>
+          <label class="upload-btn incoming-upload-btn upload-admin-only viewer-hidden" for="incomingFileInput">
+            <span id="incomingUploadBtnText">🚚 Upload Incoming GR.xlsx</span>
+            <input type="file" id="incomingFileInput" accept=".xlsx,.xls" />
+          </label>
+          <div id="incomingFileStatus"></div>
+        </div>
+
+        <div class="ds-upload-block">
+          <div class="upload-label">🚚 Stock in Transit</div>
+          <label class="upload-btn upload-admin-only viewer-hidden" for="transitFileInput">
+            <span id="transitUploadBtnText">🚚 Upload Stock-in-Transit File</span>
+            <input type="file" id="transitFileInput" accept=".xlsx,.xls,.csv" />
+          </label>
+          <div id="transitFileStatus"></div>
+          <div class="ds-hint">Temporary — re-upload each session. Columns: Material Code, Plant Code, Quantity.</div>
+        </div>
+
+        <div class="ds-upload-block">
+          <div class="upload-label">📦Open Outbound</div>
+          <label class="upload-btn pd-upload-btn upload-admin-only viewer-hidden" for="pendingDispatchFileInput">
+            <span id="pendingDispatchUploadBtnText">📦 UploadOpen Outbound Excel</span>
+            <input type="file" id="pendingDispatchFileInput" accept=".xlsx,.xls" />
+          </label>
+          <div id="pendingDispatchFileStatus"></div>
+        </div>
+
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1915,22 +1943,36 @@ document.querySelectorAll('.overview-card[data-goto]').forEach(card => {
   });
 })();
 
-// ── DATA SOURCE GROUP → collapsible upload section (sidebar) ───
+// ── DATA SOURCE MODAL → large popup window (opened from sidebar button) ───
 (function() {
-  const group = document.getElementById('data-source-group');
-  if (!group) return;
-  const title = document.getElementById('data-source-title');
-  if (!title) return;
+  const trigger  = document.getElementById('data-source-title');
+  const backdrop = document.getElementById('data-source-modal-backdrop');
+  if (!trigger || !backdrop) return;
 
-  function toggle() {
-    const willExpand = !group.classList.contains('expanded');
-    group.classList.toggle('expanded', willExpand);
-    title.setAttribute('aria-expanded', String(willExpand));
+  function openModal() {
+    backdrop.classList.add('open');
+    trigger.setAttribute('aria-expanded', 'true');
+  }
+  function closeModal() {
+    backdrop.classList.remove('open');
+    trigger.setAttribute('aria-expanded', 'false');
   }
 
-  title.addEventListener('click', toggle);
-  title.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+  trigger.addEventListener('click', openModal);
+  trigger.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openModal(); }
+  });
+
+  const closeBtn = document.getElementById('data-source-modal-close');
+  if (closeBtn) closeBtn.addEventListener('click', closeModal);
+
+  // Click on the dimmed backdrop itself (not the modal card) closes it.
+  backdrop.addEventListener('click', (e) => {
+    if (e.target === backdrop) closeModal();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && backdrop.classList.contains('open')) closeModal();
   });
 })();
 
