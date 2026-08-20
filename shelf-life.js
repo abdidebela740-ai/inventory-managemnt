@@ -57,8 +57,10 @@
   let grMap = new Map();
   let grLoaded = false;
 
-  // FEAT-QC-DAYS-QTY-MATCH: a second, stricter index used ONLY by the "Days in
-  // Quality" panel (script.js's _renderQCDaysPanel). That panel needs a GR
+  // FEAT-QC-DAYS-QTY-MATCH: a second, stricter index that was used by the
+  // now-removed QC "Days in Quality" panel. Kept for now since other code
+  // may still reference getIncomingGrPostingDateByQty(), but it's no longer
+  // consumed by anything in script.js. That panel needed a GR
   // receipt to match on Material + Batch + Quantity all at once (a batch can
   // be split across multiple GR line items / multiple QC holds with different
   // quantities, and only the line with the matching quantity is the right
@@ -376,9 +378,9 @@
   function buildBatchRows(code) {
     // Exclude phantom/unverified-transit rows (same convention used app-wide:
     // r._phantomTransitQty > 0, stamped by stampUnverifiedTransit() in script.js
-    // from the hardcoded UNVERIFIED_TRANSIT_LIST). These are unverified stock-in-
-    // transit amounts, not confirmed on-hand batches, so they have no place in
-    // a shelf-life lookup.
+    // from the uploaded Stock-in-Transit verification file). These are unverified
+    // stock-in-transit amounts, not confirmed on-hand batches, so they have no
+    // place in a shelf-life lookup.
     const rows = rawDf.filter(r =>
       String(r["Material"] || "").trim() === code &&
       !(r._phantomTransitQty > 0) &&
