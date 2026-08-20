@@ -17,6 +17,7 @@ const FILE_SLOTS = {
   mapping:         { inputId: "mappingFileInput",         path: "mapping/latest.xlsx",           statusId: "mappingFileStatus" },
   amc:             { inputId: "mosAmcFileInput",          path: "amc/latest.xlsx",               statusId: "mosAmcFileStatus" },
   incoming:        { inputId: "incomingFileInput",        path: "incoming/latest.xlsx",          statusId: "incomingFileStatus" },
+  transit:         { inputId: "transitFileInput",         path: "transit/latest.xlsx",           statusId: "transitFileStatus" },
   pendingDispatch: { inputId: "pendingDispatchFileInput", path: "pending-dispatch/latest.xlsx",  statusId: "pendingDispatchFileStatus" },
 };
 
