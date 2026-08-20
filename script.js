@@ -4107,7 +4107,7 @@ function renderPage(id) {
   // its own unguarded copy of this function — which also bypassed the
   // canAccessModule() check above. Listing them here instead means they
   // stay covered by the single gated renderPage.)
-  const RAWDF_EXEMPT_PAGES = ["pending-dispatch", "mos-plant", "natl-table", "request-analysis"];
+  const RAWDF_EXEMPT_PAGES = ["pending-dispatch", "mos-plant", "natl-table", "request-analysis", "branch-demand"];
   if (!rawDf.length && !RAWDF_EXEMPT_PAGES.includes(id)) return;
   currentPage = id;
   // BUG-MOS-STALE-FIX: drop the Branch-Comparison-material-tab refresh hook
