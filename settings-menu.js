@@ -1,11 +1,10 @@
 // ════════════════════════════════════════════════════════════════
-// settings-menu.js — sidebar Settings (theme/font) + top-right Profile menu
+// settings-menu.js — top-right Settings menu (theme/font) + Profile menu
 //
-// • Sidebar Settings (#sidebar-settings-group) — 6 named themes (Belize,
-//   Belize Deep, High Contrast Black, High Contrast White, Horizon, Quartz
-//   Dark) as a single dropdown, a quick Dark/Light switch for the common
-//   case, and whole-app font family / font size. Lives in the sidebar so
-//   it's reachable without covering the account menu.
+// • Settings menu (#settings-menu-wrap, top-right, next to Profile) — 6
+//   named themes (Belize, Belize Deep, High Contrast Black, High Contrast
+//   White, Horizon, Quartz Dark) as a single dropdown, a quick Dark/Light
+//   switch for the common case, and whole-app font family / font size.
 // • Profile menu (#profile-menu-wrap, top-right) — who's signed in (name,
 //   with an email fallback), their role badge, Change password, Sign out.
 //
@@ -135,7 +134,7 @@
     if (sc && sc.auth && typeof sc.auth.signOut === "function") {
       try { await sc.auth.signOut(); } catch (e) { console.error("[settings-menu] sign-out failed:", e); }
     }
-    closePanel();
+    profileDropdown.close();
   }
 
   // ── Change password ─────────────────────────────────────────────────────
@@ -209,52 +208,62 @@
   }
 
   // ── Panel open/close ─────────────────────────────────────────────────
-  function openPanel() {
-    const panel = document.getElementById("profile-menu-panel");
-    const btn   = document.getElementById("profile-menu-btn");
-    if (!panel || !btn) return;
-    panel.classList.add("open");
-    btn.classList.add("open");
-    btn.setAttribute("aria-expanded", "true");
-    document.addEventListener("click", onOutsideClick, true);
-    document.addEventListener("keydown", onEscape);
+  // Generic dropdown factory — used for both the Profile menu and the
+  // Settings menu, which are independent, separately-triggered panels
+  // that share the same open/close/outside-click/Escape mechanics.
+  function makeDropdown(wrapId, btnId, panelId, onClose) {
+    function onOutsideClick(e) {
+      const wrap = document.getElementById(wrapId);
+      if (wrap && !wrap.contains(e.target)) close();
+    }
+    function onEscape(e) {
+      if (e.key === "Escape") close();
+    }
+    function open() {
+      const panel = document.getElementById(panelId);
+      const btn   = document.getElementById(btnId);
+      if (!panel || !btn) return;
+      panel.classList.add("open");
+      btn.classList.add("open");
+      btn.setAttribute("aria-expanded", "true");
+      document.addEventListener("click", onOutsideClick, true);
+      document.addEventListener("keydown", onEscape);
+    }
+    function close() {
+      const panel = document.getElementById(panelId);
+      const btn   = document.getElementById(btnId);
+      if (!panel || !btn) return;
+      panel.classList.remove("open");
+      btn.classList.remove("open");
+      btn.setAttribute("aria-expanded", "false");
+      document.removeEventListener("click", onOutsideClick, true);
+      document.removeEventListener("keydown", onEscape);
+      if (onClose) onClose();
+    }
+    function toggle() {
+      const panel = document.getElementById(panelId);
+      if (!panel) return;
+      if (panel.classList.contains("open")) close();
+      else open();
+    }
+    return { open, close, toggle };
   }
 
-  function closePanel() {
-    const panel = document.getElementById("profile-menu-panel");
-    const btn   = document.getElementById("profile-menu-btn");
-    if (!panel || !btn) return;
-    panel.classList.remove("open");
-    btn.classList.remove("open");
-    btn.setAttribute("aria-expanded", "false");
-    document.removeEventListener("click", onOutsideClick, true);
-    document.removeEventListener("keydown", onEscape);
-    toggleChangePasswordPanel(false);
-  }
-
-  function togglePanel() {
-    const panel = document.getElementById("profile-menu-panel");
-    if (!panel) return;
-    if (panel.classList.contains("open")) closePanel();
-    else openPanel();
-  }
-
-  function onOutsideClick(e) {
-    const wrap = document.getElementById("profile-menu-wrap");
-    if (wrap && !wrap.contains(e.target)) closePanel();
-  }
-
-  function onEscape(e) {
-    if (e.key === "Escape") closePanel();
-  }
+  const profileDropdown  = makeDropdown("profile-menu-wrap", "profile-menu-btn", "profile-menu-panel",
+    () => toggleChangePasswordPanel(false));
+  const settingsDropdown = makeDropdown("settings-menu-wrap", "settings-menu-btn", "settings-menu-panel");
 
   // ── Wiring ─────────────────────────────────────────────────────────────
   function wire() {
     // Profile menu open/close
     const avatarBtn = document.getElementById("profile-menu-btn");
-    if (avatarBtn) avatarBtn.addEventListener("click", (e) => { e.stopPropagation(); togglePanel(); });
+    if (avatarBtn) avatarBtn.addEventListener("click", (e) => { e.stopPropagation(); profileDropdown.toggle(); });
 
-    // Theme select (now in the sidebar)
+    // Settings menu open/close (top-right, next to Profile)
+    const settingsBtn = document.getElementById("settings-menu-btn");
+    if (settingsBtn) settingsBtn.addEventListener("click", (e) => { e.stopPropagation(); settingsDropdown.toggle(); });
+
+    // Theme select
     const themeSelect = document.getElementById("settings-theme-select");
     if (themeSelect) {
       themeSelect.addEventListener("change", () => applyTheme(themeSelect.value, true));
