@@ -1780,15 +1780,11 @@ document.querySelectorAll('.overview-card[data-goto]').forEach(card => {
     const key = card.dataset.goto;
     // SEC-ACCESS-GATE: the card's underlying nav-btn may be hidden
     // (display:none) rather than removed, and .click() on a hidden button
-    // still fires — so this check has to happen here too, before we ever
-    // dispatch the click. renderPage() itself is the real enforcement
-    // point, but bailing out here also avoids the pointless nav-btn click
-    // (sidebar highlight flash, mobile sidebar close, etc.) for a page the
-    // user is about to be denied anyway.
-    if (typeof canAccessModule === "function" && !canAccessModule(key)) {
-      if (typeof showAccessDeniedToast === "function") showAccessDeniedToast();
-      return;
-    }
+    // still fires. renderPage() (reached via the click -> navReset chain)
+    // is the real enforcement point and now redirects a denied jump to the
+    // user's own accessible module rather than just blocking it, so we
+    // still dispatch the click here and let that central logic decide
+    // where the user actually ends up.
     const btn = document.querySelector(`.nav-btn[data-page="${key}"]`);
     if (btn) btn.click();
   }
@@ -1852,10 +1848,11 @@ document.querySelectorAll('.overview-card[data-goto]').forEach(card => {
 
   function open() {
     // SEC-ACCESS-GATE: the title stays in the DOM (just display:none) when
-    // the user lacks the "quick-lookup" permission, so guard the handler
-    // itself too — matches the overview-card `go()` gate above.
+    // the user lacks the "quick-lookup" permission, so a real user can't
+    // click it — nothing to redirect to here since Quick Lookup isn't a
+    // renderPage() page, so if this ever fires for a denied user it's a
+    // no-op by omission rather than showing a stale "denied" message.
     if (typeof canAccessModule === "function" && !canAccessModule("quick-lookup")) {
-      if (typeof showAccessDeniedToast === "function") showAccessDeniedToast();
       return;
     }
     // Collapse any expanded page-nav group and clear its active highlight
