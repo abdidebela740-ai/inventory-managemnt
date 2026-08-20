@@ -238,25 +238,50 @@ let currentPage = "dashboard";
 // shelf-life.js's Look-up suggestions and "New Incoming Stock" table.
 let excludedMaterialCodes = new Set();
 
-// Stock-in-Transit separate file state (detail file removed; phantom/verified logic retained)
-// ── HARDCODED UNVERIFIED TRANSIT LIST ─────────────────────────────────────
-// Source: unverified_transit_items.csv — specific qty/value per material+plant
-// These amounts are subtracted from transit figures across ALL pages.
-const UNVERIFIED_TRANSIT_LIST = [{"materialCode":"303-GLSU-0704-02","plantCode":"AA02","qty":5000.0,"val":5550947.6},{"materialCode":"104-CEFR-0303","plantCode":"AA02","qty":95985.0,"val":3957729.79},{"materialCode":"104-CEFR-0303","plantCode":"HA01","qty":115990.0,"val":3493156.24},{"materialCode":"104-CEFR-0303","plantCode":"JI01","qty":80964.0,"val":2427668.18},{"materialCode":"208-VETB-1601","plantCode":"JI01","qty":3500.0,"val":1858141.89},{"materialCode":"303-GLEX-0702","plantCode":"AA01","qty":2629.0,"val":1807184.28},{"materialCode":"105-PARA-0102-01","plantCode":"DE01","qty":3097.0,"val":1049387.48},{"materialCode":"402-VENM-0101","plantCode":"AA01","qty":1.0,"val":1042735.42},{"materialCode":"202-GLUC-0502","plantCode":"AA01","qty":1500.0,"val":739384.83},{"materialCode":"208-VETB-1601","plantCode":"AD01","qty":850.0,"val":560008.86},{"materialCode":"204-SYPH-0401-01","plantCode":"DE01","qty":810.0,"val":545309.8},{"materialCode":"103-SALB-2401","plantCode":"DE01","qty":2600.0,"val":410349.11},{"materialCode":"113-DEXT-0304-02","plantCode":"DI01","qty":3756.0,"val":301827.46},{"materialCode":"101-OMEP-0202","plantCode":"SE01","qty":2080.0,"val":283032.5},{"materialCode":"206-LIOD-0101-01","plantCode":"JJ01","qty":20.0,"val":232860.8},{"materialCode":"104-CLOT-0101","plantCode":"AA02","qty":5700.0,"val":208486.93},{"materialCode":"104-GRIS-0102","plantCode":"AD01","qty":400.0,"val":178784.0},{"materialCode":"104-AMOX-0602","plantCode":"AA02","qty":2000.0,"val":162781.67},{"materialCode":"203-SNFL-0701","plantCode":"NK01","qty":2.0,"val":156592.96},{"materialCode":"202-CHNC-0721","plantCode":"AA02","qty":5.0,"val":148165.7},{"materialCode":"115-PACL-0302","plantCode":"DE01","qty":200.0,"val":146614.42},{"materialCode":"207-ADWL-0801","plantCode":"NK01","qty":6.0,"val":132136.92},{"materialCode":"115-CYPH-0303","plantCode":"DE01","qty":100.0,"val":129565.95},{"materialCode":"105-BENZ-0102-02","plantCode":"AA01","qty":400.0,"val":120019.05},{"materialCode":"105-SODI-0101","plantCode":"AA02","qty":200.0,"val":119364.0},{"materialCode":"206-ULGE-1001","plantCode":"DE01","qty":91.0,"val":100100.0},{"materialCode":"105-BENZ-0101-02","plantCode":"AA01","qty":400.0,"val":96034.11},{"materialCode":"115-RITU-0302","plantCode":"BD01","qty":10.0,"val":87318.1},{"materialCode":"203-SNCP-0701","plantCode":"NK01","qty":15.0,"val":78187.8},{"materialCode":"203-SNLY-0701","plantCode":"NK01","qty":3.0,"val":63896.46},{"materialCode":"203-SNLY-0701","plantCode":"HA01","qty":3.0,"val":60270.42},{"materialCode":"115-DACA-0303","plantCode":"AA01","qty":50.0,"val":56804.13},{"materialCode":"303-GLGY-0701","plantCode":"AD01","qty":2578.0,"val":52797.44},{"materialCode":"202-CMAG-0701","plantCode":"AA02","qty":5.0,"val":43096.83},{"materialCode":"203-SNSL-0701","plantCode":"NK01","qty":2.0,"val":25171.16},{"materialCode":"115-ETOP-0303","plantCode":"DE01","qty":50.0,"val":24800.0},{"materialCode":"203-SNSL-0701","plantCode":"HA01","qty":2.0,"val":23880.92},{"materialCode":"202-CIDL-0801","plantCode":"AA02","qty":90.0,"val":23280.35},{"materialCode":"202-UDIP-0501","plantCode":"AD01","qty":50.0,"val":20354.36},{"materialCode":"115-FOLI-0301-03","plantCode":"GO01","qty":104.0,"val":19000.8},{"materialCode":"117-TIMO-1202","plantCode":"AA01","qty":574.0,"val":18368.0},{"materialCode":"115-FOLI-0301-03","plantCode":"AA01","qty":100.0,"val":18270.0},{"materialCode":"110-METF-0101-02","plantCode":"AA02","qty":96.0,"val":15112.65},{"materialCode":"102-ENAL-0102-02","plantCode":"AS01","qty":100.0,"val":14700.0},{"materialCode":"209-HPER-0102","plantCode":"AA02","qty":100.0,"val":14398.61},{"materialCode":"209-HPER-0102","plantCode":"JJ01","qty":96.0,"val":12770.7},{"materialCode":"115-ONDA-0102","plantCode":"DE01","qty":100.0,"val":9330.0},{"materialCode":"202-CECO-0801","plantCode":"AA02","qty":3.0,"val":8980.1},{"materialCode":"203-SNCL-0701","plantCode":"NK01","qty":1.0,"val":8014.84},{"materialCode":"105-AMIT-0101-01","plantCode":"AS01","qty":100.0,"val":7879.82},{"materialCode":"402-DIAS-0101","plantCode":"HA01","qty":2.0,"val":6420.0},{"materialCode":"201-METH-0102","plantCode":"JJ01","qty":10.0,"val":2150.0},{"materialCode":"201-PKOH-0102","plantCode":"JJ01","qty":4.0,"val":562.0},{"materialCode":"401-POTC-0101","plantCode":"HA01","qty":1.0,"val":488.82},{"materialCode":"202-CIIN-0801","plantCode":"BD01","qty":1.0,"val":363.92},{"materialCode":"208-FUNG-1702","plantCode":"HA01","qty":3.0,"val":245.04},{"materialCode":"202-CACT-0801","plantCode":"BD01","qty":1.0,"val":171.04},{"materialCode":"202-CIDL-0801","plantCode":"BD01","qty":1.0,"val":109.53},{"materialCode":"202-CSCL-0801","plantCode":"BD01","qty":1.0,"val":73.24}];
+// Stock-in-Transit VERIFICATION file state ─────────────────────────────────
+// Replaces the old hardcoded unverified-transit list. The user uploads a
+// Stock-in-Transit file (Material + Plant + Quantity) each session — it is
+// held in memory only and is NOT persisted (re-upload required every
+// session/page load, matching the app's session-only data model).
+//
+// Matching rule: for a given material+plant that has "Stock in Transit" > 0
+// in the main inventory file, that row is VERIFIED only if the uploaded file
+// contains the SAME material+plant with the EXACT SAME quantity. Anything
+// that doesn't match (or isn't present at all in the uploaded file) is
+// UNVERIFIED and excluded from every total across the app, exactly like the
+// old phantom-transit logic — just driven by the upload instead of a
+// hardcoded list.
+let TRANSIT_UPLOAD_LIST = [];   // [{materialCode, plantCode, qty}] — parsed rows from the uploaded file
+let transitFileLoaded   = false; // gates the Transit page until a file is uploaded
+let transitFileName     = "";
+let transitFileStats    = null;  // {verifiedCount, unverifiedCount} — set after (re)stamping
 
-// Build a fast lookup Map keyed by "materialCode|plantCode"
-const _unverifiedLookup = new Map();
-UNVERIFIED_TRANSIT_LIST.forEach(e => {
-  const key = e.materialCode + "|" + e.plantCode;
-  _unverifiedLookup.set(key, { qty: e.qty, val: e.val });
-});
+// Build a fast lookup Map keyed by "materialCode|plantCode" -> qty
+let _transitUploadLookup = new Map();
+function _rebuildTransitUploadLookup() {
+  _transitUploadLookup = new Map();
+  TRANSIT_UPLOAD_LIST.forEach(e => {
+    const key = String(e.materialCode).trim().toUpperCase() + "|" + String(e.plantCode).trim().toUpperCase();
+    _transitUploadLookup.set(key, e.qty);
+  });
+}
 
-// Returns {qty, val} of unverified transit for a given row, or {qty:0,val:0}
+// Returns {qty, val} of the UNVERIFIED portion of a row's Stock in Transit.
+//   - No transit file uploaded yet → the entire amount is unverified.
+//   - Transit file uploaded, but this material+plant is absent, or its
+//     quantity doesn't exactly match → the entire amount is unverified.
+//   - Transit file uploaded AND quantity matches exactly → nothing is
+//     unverified (fully verified).
 function getUnverifiedTransit(row) {
-  const mat = String(row["Material"] || "").trim();
+  const total = row["Stock in Transit"] || 0;
+  if (total <= 0) return { qty: 0, val: 0 };
+  if (!transitFileLoaded) return { qty: total, val: row["Value of Stock in Transit"] || 0 };
+
+  const mat = String(row["Material"] || "").trim().toUpperCase();
   const plt = String(row["Plant"]    || "").trim().toUpperCase();
-  const hit = _unverifiedLookup.get(mat + "|" + plt);
-  return hit || { qty: 0, val: 0 };
+  const uploadedQty = _transitUploadLookup.get(mat + "|" + plt);
+  const isVerified  = (uploadedQty !== undefined) && (Number(uploadedQty) === Number(total));
+  return isVerified ? { qty: 0, val: 0 } : { qty: total, val: row["Value of Stock in Transit"] || 0 };
 }
 
 // Incoming Shelf Life state (feature removed)
@@ -873,7 +898,7 @@ function loadFile(file) {
         // fields would never make it onto mappedDf. Since getReconciledBase() reads
         // from mappedDf whenever a mapping is loaded, the Unverified Transit tab
         // would silently show nothing for any dataset loaded alongside a mapping file.
-        stampUnverifiedTransit(); // stamp unverified amounts from hardcoded list
+        stampUnverifiedTransit(); // stamp unverified amounts using the uploaded Stock-in-Transit verification file
 
         // Apply material standardization mapping if already loaded
         if (mappingTable.size > 0) applyMaterialMapping();
@@ -1574,7 +1599,7 @@ function renderDashboard() {
   const dashPhantomEl = document.getElementById("dash-phantom-alert");
   if (dashPhantomEl) dashPhantomEl.innerHTML = "";
 
-  // Exclude unverified transit amounts (hardcoded list) from Dashboard totals.
+  // Exclude unverified transit amounts (from the uploaded verification file) from Dashboard totals.
   const transitVal = df.reduce((s,r) => s + getVerifiedTransitVal(r), 0);
   const transitQty = df.reduce((s,r) => s + getVerifiedTransitQty(r), 0);
   const qcVal      = df.reduce((s,r) => s + getMappedVal(r,"Value of Stock in Quality Inspection"), 0);
@@ -1981,6 +2006,128 @@ function loadMappingFile(file) {
   reader.readAsArrayBuffer(file);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// STOCK-IN-TRANSIT VERIFICATION FILE LOADER
+// ═══════════════════════════════════════════════════════════════════════════
+/**
+ * loadTransitFile(file)
+ *   Parses the uploaded Stock-in-Transit verification file and populates
+ *   TRANSIT_UPLOAD_LIST. Expected columns (case-insensitive, flexible names):
+ *     Material Code  → material code
+ *     Plant Code     → plant code
+ *     Quantity       → quantity currently in transit for that material+plant
+ *
+ *   This file is held in memory only for the current session — it is never
+ *   written to sessionStorage/localStorage, so it must be re-uploaded after
+ *   a page reload or in a new session, matching the app's existing
+ *   session-only data model for hardcoded/derived state.
+ *
+ *   After parsing, re-stamps rawDf (stampUnverifiedTransit) and re-renders
+ *   the current page so verified/unverified totals update everywhere.
+ */
+function loadTransitFile(file) {
+  const statusEls = [document.getElementById("transitFileStatus"), document.getElementById("transitGateFileStatus")].filter(Boolean);
+  const setStatus = html => statusEls.forEach(el => { el.style.display = "block"; el.innerHTML = html; });
+  setStatus(`<div class="status-ok">⏳ LOADING…</div><div class="status-name">Parsing ${escHtml(file.name)}</div>`);
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    setTimeout(() => {
+      try {
+        let data;
+        if (/\.csv$/i.test(file.name)) {
+          const text = new TextDecoder("utf-8").decode(new Uint8Array(e.target.result));
+          const wb   = XLSX.read(text, { type: "string" });
+          data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+        } else {
+          const wb = XLSX.read(new Uint8Array(e.target.result), { type: "array" });
+          data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+        }
+        if (!data.length) { setStatus(`<div class="status-ok" style="color:var(--red)">✗ Stock-in-Transit file is empty.</div>`); return; }
+
+        // Case-insensitive, flexible column lookup (same pattern as loadMappingFile)
+        const colMap = {};
+        Object.keys(data[0]).forEach(k => { colMap[k.toLowerCase().trim()] = k; });
+        const gc = (...names) => {
+          for (const n of names) {
+            const k = colMap[n.toLowerCase()];
+            if (k) return k;
+          }
+          return null;
+        };
+        const colMat = gc("material code","material","material code (source)","mat code","mat. code","code");
+        const colPlt = gc("plant code","plant","plant  code");
+        const colQty = gc("quantity","qty","stock in transit","quantity in transit","transit qty","transit quantity");
+        const colDesc = gc("material description","description","material desc","desc");
+        const colUom  = gc("base unit of measure","uom","unit of measure","unit","base unit");
+
+        if (!colMat || !colPlt || !colQty) {
+          const missing = [!colMat && "Material Code", !colPlt && "Plant Code", !colQty && "Quantity"].filter(Boolean);
+          const actualCols = Object.keys(data[0]).map(k => k.trim()).join(", ");
+          setStatus(`
+            <div class="status-ok" style="color:var(--red)">✗ Missing required columns: ${missing.join(", ")}</div>
+            <div style="font-size:0.65rem;margin-top:4px;color:var(--muted)">
+              <b>Expected:</b> "Material Code", "Plant Code", "Quantity"<br>
+              <b style="color:var(--amber)">Columns found in your file:</b> ${escHtml(actualCols)}
+            </div>`);
+          return;
+        }
+
+        const newList = [];
+        let skipped = 0;
+        data.forEach(row => {
+          const mat = String(row[colMat] ?? "").trim();
+          const plt = String(row[colPlt] ?? "").trim();
+          const qty = parseFloat(row[colQty]);
+          if (!mat || !plt || isNaN(qty)) { skipped++; return; }
+          newList.push({
+            materialCode: mat, plantCode: plt, qty: qty,
+            desc: colDesc ? String(row[colDesc] ?? "").trim() : "",
+            uom:  colUom  ? String(row[colUom]  ?? "").trim() : "",
+          });
+        });
+
+        if (!newList.length) {
+          setStatus(`<div class="status-ok" style="color:var(--red)">✗ No valid rows found (${skipped} skipped).</div>`);
+          return;
+        }
+
+        TRANSIT_UPLOAD_LIST = newList;
+        transitFileLoaded   = true;
+        transitFileName     = file.name;
+        _rebuildTransitUploadLookup();
+
+        // Re-stamp rawDf with fresh verified/unverified amounts and re-render
+        if (rawDf.length) {
+          stampUnverifiedTransit();
+          const phantomAllTransit = rawDf.filter(r => r["Stock in Transit"] > 0);
+          const unverifiedCount   = phantomAllTransit.filter(r => r._phantomTransitQty > 0).length;
+          const verifiedCount     = phantomAllTransit.length - unverifiedCount;
+          transitFileStats = { verifiedCount, unverifiedCount };
+        }
+
+        const statsLine = transitFileStats
+          ? `<div class="status-stats">${transitFileStats.verifiedCount.toLocaleString()} verified · ${transitFileStats.unverifiedCount.toLocaleString()} unverified (material+plant rows)</div>`
+          : "";
+        setStatus(`
+          <div class="status-ok">✓ FILE LOADED</div>
+          <div class="status-name">${escHtml(file.name)}</div>
+          <div class="status-stats">${newList.length.toLocaleString()} row${newList.length!==1?"s":""}${skipped ? ` · ${skipped} skipped` : ""}</div>
+          ${statsLine}`);
+        const btnTextEl = document.getElementById("transitUploadBtnText");
+        if (btnTextEl) btnTextEl.textContent = "🚚 Change Stock-in-Transit File";
+
+        if (rawDf.length && currentPage === "transit") renderTransit();
+        // Other pages (dashboard, branch, flow) fold verified/unverified totals
+        // in automatically the next time they're rendered/navigated to.
+      } catch (err) {
+        setStatus(`<div class="status-ok" style="color:var(--red)">✗ ${escHtml(err.message)}</div>`);
+      }
+    }, 30);
+  };
+  reader.readAsArrayBuffer(file);
+}
+
 /**
  * applyMaterialMapping()
  *   Walks rawDf and stamps every row with:
@@ -2168,7 +2315,8 @@ function getMappedVal(row, field) {
  * getVerifiedTransitVal(row, field)
  *   Return transit qty/value MINUS any phantom (unverified) portion.
  *   A transit row is "phantom" when it has Stock in Transit > 0 but no
- *   Unverified amounts (from hardcoded list) are subtracted from every
+ *   Unverified amounts (rows not matched by the uploaded verification file)
+ *   are subtracted from every
  *   aggregate shown to the user across all pages.
  */
 function getVerifiedTransitQty(row) {
@@ -2275,23 +2423,26 @@ function getTransitInfo(material, plantCode) {
 }
 
 // ─── Phantom Transit Detection ────────────────────────────────────────────
-// A transit row is "phantom" (not physically available / unverifiable) when:
+// A transit row is "phantom" (unverified / not confirmed available) when:
 //   • The main data has Stock in Transit > 0, AND
-//   • The hardcoded unverified transit list has a non-zero qty for this material+plant.
+//   • The uploaded Stock-in-Transit verification file has NO exact quantity
+//     match for this material+plant (including when no file has been
+//     uploaded at all yet — everything is unverified until proven otherwise).
 //
 // Phantom rows are EXCLUDED from all aggregate values (Total Value, Total Qty,
 // Value of Stock in Transit, Stock in Transit) on Dashboard, Branch Comparison,
 // and Inventory Flow. They are flagged with a warning badge on the Transit page.
 
 function isPhantomTransit(row) {
-  // A row is (partially) phantom when the hardcoded unverified list has
-  // a non-zero qty for this material+plant combination.
+  // A row is phantom when it isn't backed by an exact match in the uploaded
+  // Stock-in-Transit verification file for this material+plant combination.
   const { qty } = getUnverifiedTransit(row);
   return qty > 0 && (row["Stock in Transit"] > 0);
 }
 
 // Stamps each rawDf row with _phantomTransitQty / _phantomTransitVal using
-// the hardcoded unverified transit list, then recomputes Total Value / Total Qty.
+// the uploaded Stock-in-Transit verification file, then recomputes Total
+// Value / Total Qty.
 function stampUnverifiedTransit() {
   rawDf.forEach(row => {
     const { qty: uqty, val: uval } = getUnverifiedTransit(row);
@@ -2369,7 +2520,7 @@ function renderPhantomAlert(containerId, df) {
       <div class="phantom-alert-body">
         <strong>Unverified Transit Stock Excluded</strong>
         <span>${count.toLocaleString()} item${count!==1?"s":""} (${fmtQty(qty)} units · ${fmtETB(val)}) have <em>Stock in Transit</em> but
-        are in the unverified transit list and excluded from all totals.
+        ${transitFileLoaded ? "don't have a matching quantity in the uploaded Stock-in-Transit file" : "no Stock-in-Transit file has been uploaded yet to verify them"}.
         These items are <strong>excluded from all totals</strong> — verify first.</span>
         <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-top:0.35rem">
           ${actionHtml}
@@ -2422,15 +2573,16 @@ function renderPhantomTable(df) {
         <div>
           <div class="section-header" style="margin:0;color:#d29922">⚠️ Unverified Transit Items</div>
           <div style="font-size:0.76rem;color:var(--muted);margin-top:3px">
-            These items appear in the SAP <em>Stock in Transit</em> column but <strong>do not have a detail document</strong>
-            (PO / supplying-plant confirmation) on file. They are <strong>excluded from all inventory totals</strong> until verified.
+            ${transitFileLoaded
+              ? `These items appear in the SAP <em>Stock in Transit</em> column but their quantity <strong>does not exactly match</strong> the uploaded Stock-in-Transit file (or the material+plant wasn't found in it). They are <strong>excluded from all inventory totals</strong> until verified.`
+              : `No Stock-in-Transit verification file has been uploaded yet, so <strong>every</strong> item with <em>Stock in Transit</em> is treated as unverified and excluded from all inventory totals. Upload the file above to verify matching items.`}
           </div>
         </div>
         <button class="dl-btn" id="${dlId}">⬇ Download CSV</button>
       </div>
       <div class="kpi-row" style="margin-bottom:0.9rem">
         ${[
-          ["Unverified Items",    sorted.length.toLocaleString(),    "SAP rows without PO/plant",      "amber"],
+          ["Unverified Items",    sorted.length.toLocaleString(),    "Rows without a verified match",  "amber"],
           ["Unique Materials",    uniqMats.toLocaleString(),          "Distinct SKUs",                  "amber"],
           ["Affected Plants",     uniqPlants.toLocaleString(),        "Locations with unverified stock","amber"],
           ["Unverified Qty",      fmtQty(totalPhantomQty),           "Units not confirmed",            "amber"],
@@ -2459,10 +2611,23 @@ let _transitColsCache = [];
 // _ho01RowsCache removed — was declared but never populated or read (dead code)
 
 function renderTransit() {
+  // UPLOAD GATE: block the page behind an upload prompt until a
+  // Stock-in-Transit verification file has been uploaded this session.
+  const gateEl = document.getElementById("transit-upload-gate");
+  const bodyEl = document.getElementById("transit-page-body");
+  if (!transitFileLoaded) {
+    if (gateEl) gateEl.style.display = "block";
+    if (bodyEl) bodyEl.style.display = "none";
+    return;
+  }
+  if (gateEl) gateEl.style.display = "none";
+  if (bodyEl) bodyEl.style.display = "block";
+
   // rawDf is pre-filtered at parse time — no need to re-apply isNonMedical* guards here.
   // Simply restrict to rows with positive transit qty and value.
-  // FIX-PHANTOM-HIDE: phantom transit rows (no PO / no supplying plant) are excluded
-  // from the main table entirely; they only appear in the transit detail file section.
+  // FIX-PHANTOM-HIDE: phantom transit rows (unverified against the uploaded file)
+  // are excluded from the main table entirely; they only appear in the
+  // unverified-items section.
   const df = applyPageFilter("transit").filter(r =>
     r["Stock in Transit"] > 0 &&
     r["Value of Stock in Transit"] > 0 &&
@@ -2829,10 +2994,8 @@ function renderQC() {
   const df          = aggregateByMappedMaterial(rawFiltered).filter(r => r["Stock in Quality Inspection"] > 0);
 
   const totalQCVal = df.reduce((s,r) => s + r["Value of Stock in Quality Inspection"], 0);
-  const totalQCQty = df.reduce((s,r) => s + r["Stock in Quality Inspection"], 0);
   setKpis("qc-kpis", [
     ["Total Value in QC", fmtETB(totalQCVal), "Across all plants",      "red"],
-    ["Total QC Quantity", fmtQty(totalQCQty), "Units under inspection", "amber"],
     ["Unique Materials",  String(new Set(df.map(r=>r["Material"])).size),"Distinct SKUs","blue"],
   ]);
 
@@ -2896,209 +3059,6 @@ function renderQC() {
   document.getElementById("qc-table-wrap").innerHTML = buildTable(qcRows, qcCols, r => r["Value of Stock in Quality Inspection"] > 10000 ? "row-red" : "", "", {id:"qc-export", title:"Quality Inspection"});
   wireTableExport("qc-export", qcRows, qcCols, "qc_inspection");
 
-  // ── DAYS IN QUALITY PANEL ─────────────────────────────────────────────────
-  _renderQCDaysPanel(qcRows);
-}
-
-/**
- * Builds the "Days in Quality — HO01" side panel.
- * Shows HO01 QC items. Days in QC is calculated from the Incoming GR.xlsx
- * data uploaded via shelf-life.js (window.getIncomingGrPostingDate), when
- * available. Deliberately HO01-only — the GR log isn't a reliable receipt
- * source for other plants, so this panel doesn't attempt it for them.
- */
-function _renderQCDaysPanel(qcRows) {
-  const wrap = document.getElementById("qc-days-wrap");
-  if (!wrap) return;
-
-  // ── Step 0: restrict to HO01 plant ONLY ─────────────────────────────────
-  // qcRows come from aggregateByMaterial() which collapses all plants into one
-  // row per material. We use rawDf to get the true HO01-only QC rows so the
-  // days calculation is accurate and not mixed with other branches.
-  const ho01QCRaw = (rawDf || []).filter(r => {
-    const plant = String(r["Plant"] || "").trim().toUpperCase();
-    const qcQty = Number(r["Stock in Quality Inspection"]) || 0;
-    return plant === "HO01" && qcQty > 0;
-  });
-
-  // If there are no HO01 QC items, say so and exit.
-  if (!ho01QCRaw.length) {
-    wrap.innerHTML = `<div class="alert-info" style="font-size:0.78rem">
-      ℹ️ No Quality Inspection stock found for <strong>HO01</strong>.
-      This panel only shows HO01 items — other plants are excluded.
-    </div>`;
-    const dlRow = document.getElementById("qc-days-dl-row");
-    if (dlRow) dlRow.innerHTML = "";
-    return;
-  }
-
-  // ── Step 1: posting-date lookup, sourced from shelf-life.js's Incoming GR
-  // data. shelf-life.js keeps its GR map private (keyed on trimmed,
-  // original-case Material + Batch) and exposes window.getIncomingGrPostingDate()
-  // for exactly this kind of lookup — see shelf-life.js for details.
-  const grAvailable = typeof window.isIncomingGrLoaded === "function" && window.isIncomingGrLoaded();
-  const lookupPostingDate = (mat, batch) =>
-    (grAvailable && typeof window.getIncomingGrPostingDate === "function" && batch)
-      ? (window.getIncomingGrPostingDate(mat, batch) || null)
-      : null;
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const MS_PER_DAY = 86400000;
-
-  // ── Step 2: annotate each HO01 QC row with days-in-QC ──────────────────
-  // Use raw HO01 rows directly — each row has its own Batch field so the
-  // posting-date lookup is accurate per batch, not per aggregated material.
-  const daysRows = ho01QCRaw.map(r => {
-    const mat   = String(r["Material"] || r._mappedMaterial || "").trim();
-    const batch = String(r["Batch"]    || "").trim();
-
-    // Direct match on material + batch
-    let postingDate = lookupPostingDate(mat, batch);
-
-    // If no direct batch hit, try every source batch in _sourceBatches (mapped rows)
-    if (!postingDate && Array.isArray(r._sourceBatches)) {
-      for (const sb of r._sourceBatches) {
-        const d = lookupPostingDate(mat, String(sb || "").trim());
-        if (d) { postingDate = d; break; }
-      }
-    }
-
-    // Also try original material code if the row was standardized
-    if (!postingDate && r._origMaterial) {
-      postingDate = lookupPostingDate(String(r._origMaterial).trim(), batch);
-    }
-
-    let daysInQC = null;
-    if (postingDate instanceof Date && !isNaN(postingDate)) {
-      daysInQC = Math.floor((today.getTime() - postingDate.getTime()) / MS_PER_DAY);
-      if (daysInQC < 0) daysInQC = null; // posting date in the future → data error
-    }
-
-    return {
-      ...r,
-      _postingDate: postingDate,
-      _daysInQC:    daysInQC,
-    };
-  });
-
-  // Sort: rows with a known days count first (oldest = most days at top),
-  // then rows with no match (posting date unknown) at the bottom.
-  daysRows.sort((a, b) => {
-    if (a._daysInQC !== null && b._daysInQC !== null) return b._daysInQC - a._daysInQC;
-    if (a._daysInQC !== null) return -1;
-    if (b._daysInQC !== null) return  1;
-    return 0;
-  });
-
-  // ── Step 3: render ───────────────────────────────────────────────────────
-  if (!daysRows.length) {
-    wrap.innerHTML = `<div class="alert-info" style="font-size:0.78rem">No QC items to display.</div>`;
-    const dlRow = document.getElementById("qc-days-dl-row");
-    if (dlRow) dlRow.innerHTML = "";
-    return;
-  }
-
-  // Only bail out to a blanket message when there's no GR data loaded at
-  // all — that's the one case where showing a table full of "—" wouldn't
-  // tell the user anything they could act on. If GR data IS loaded but a
-  // particular HO01 batch just has no matching receipt (e.g. it predates
-  // the uploaded GR log, or a data-entry mismatch), still render the table
-  // below with "—" for that row — that's more informative than hiding it.
-  if (!grAvailable) {
-    wrap.innerHTML = `<div class="alert-info" style="font-size:0.78rem">
-      ℹ️ Days in Quality Inspection needs the <strong>Incoming GR.xlsx</strong> file to calculate receipt dates.
-      Upload it via <strong>🚚 Upload Incoming GR.xlsx</strong> in the sidebar to enable this panel.
-    </div>`;
-    const dlRow = document.getElementById("qc-days-dl-row");
-    if (dlRow) dlRow.innerHTML = "";
-    return;
-  }
-
-  // Badge colour helper: green ≤14d, amber 15–30d, red >30d
-  function daysBadge(days) {
-    if (days === null) return `<span style="color:var(--dim);font-size:0.8rem">—</span>`;
-    const color = days <= 14 ? "var(--green)" : days <= 30 ? "var(--amber)" : "var(--red)";
-    return `<span style="
-      display:inline-block;
-      background:${color}22;
-      color:${color};
-      border:1px solid ${color}66;
-      border-radius:4px;
-      padding:1px 7px;
-      font-size:0.78rem;
-      font-weight:600;
-      font-family:'IBM Plex Mono',monospace;
-      min-width:40px;
-      text-align:center;
-    ">${days}d</span>`;
-  }
-
-  let html = `
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.5rem">
-      <div style="font-size:0.68rem;color:var(--muted);display:flex;gap:0.8rem;flex-wrap:wrap">
-        <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--green);margin-right:3px"></span>≤14 days</span>
-        <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--amber);margin-right:3px"></span>15–30 days</span>
-        <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--red);margin-right:3px"></span>&gt;30 days</span>
-      </div>
-      <div class="tbl-export-btns"><button class="dl-btn" id="qc-days-export-csv">⬇ CSV</button><button class="dl-btn" id="qc-days-export-xlsx">⬇ Excel</button></div>
-    </div>
-    <div class="tbl-wrap" style="max-height:520px;overflow-y:auto">
-    <table style="font-size:0.76rem;width:100%">
-      <thead>
-        <tr>
-          <th style="text-align:left;padding:5px 8px;white-space:nowrap">Material</th>
-          <th style="text-align:left;padding:5px 8px;white-space:nowrap">Batch</th>
-          <th style="text-align:left;padding:5px 8px;white-space:nowrap">Posting Date</th>
-          <th style="text-align:center;padding:5px 8px;white-space:nowrap">Days in QC</th>
-        </tr>
-      </thead>
-      <tbody>`;
-
-  daysRows.forEach(r => {
-    const mat   = escHtml(String(r["Material"] || r._mappedMaterial || "").trim());
-    const batch = escHtml(String(r["Batch"]    || "").trim() || "—");
-    const pd    = r._postingDate ? fmtLocalDate(r._postingDate) : "—";
-    const badge = daysBadge(r._daysInQC);
-    html += `<tr>
-      <td style="padding:5px 8px;font-family:'IBM Plex Mono',monospace;font-size:0.73rem;color:var(--purple)">${mat}</td>
-      <td style="padding:5px 8px;font-size:0.73rem;color:var(--muted)">${batch}</td>
-      <td style="padding:5px 8px;font-size:0.73rem;color:var(--muted);white-space:nowrap">${pd}</td>
-      <td style="padding:5px 8px;text-align:center">${badge}</td>
-    </tr>`;
-  });
-
-  html += `</tbody></table></div>`;
-
-  // Summary line
-  const matched  = daysRows.filter(r => r._daysInQC !== null).length;
-  const total    = daysRows.length;
-  const avgDays  = matched
-    ? Math.round(daysRows.filter(r => r._daysInQC !== null).reduce((s,r) => s + r._daysInQC, 0) / matched)
-    : null;
-
-  html += `<div style="margin-top:0.5rem;font-size:0.68rem;color:var(--muted);display:flex;gap:1rem;flex-wrap:wrap">
-    <span>Matched: <strong style="color:var(--text)">${matched}/${total}</strong></span>
-    ${avgDays !== null ? `<span>Avg days: <strong style="color:var(--amber)">${avgDays}d</strong></span>` : ""}
-  </div>`;
-
-  wrap.innerHTML = html;
-
-  // ── Export wiring ────────────────────────────────────────────────────────
-  const exportRows = daysRows.map(r => ({
-    Material:     String(r["Material"] || r._mappedMaterial || "").trim(),
-    Batch:        String(r["Batch"] || "").trim(),
-    PostingDate:  r._postingDate ? fmtLocalDate(r._postingDate) : "",
-    DaysInQC:     r._daysInQC !== null ? r._daysInQC : "",
-  }));
-  const exportCols = [
-    {key:"Material",    label:"Material"},
-    {key:"Batch",       label:"Batch"},
-    {key:"PostingDate", label:"Posting Date"},
-    {key:"DaysInQC",    label:"Days in QC"},
-  ];
-  // Wire export buttons rendered inline in the table header above.
-  wireTableExport("qc-days-export", exportRows, exportCols, "days_in_quality_inspection");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -4158,6 +4118,12 @@ document.addEventListener("DOMContentLoaded", () => {
     e.target.value = "";
   });
 
+  // Stock-in-Transit verification file upload (session-only; gates the Transit page)
+  document.getElementById("transitFileInput").addEventListener("change", e => {
+    const f = e.target.files[0]; if (f) loadTransitFile(f);
+    e.target.value = "";
+  });
+
 
 
   // Expiry window radio
@@ -4340,23 +4306,31 @@ document.addEventListener("DOMContentLoaded", () => {
       { key: "Value of Unrestricted Stock", label: "Value (ETB)" },
     ];
 
-    // ── Transit results (from separate transit file) ──
+    // ── Transit results (from uploaded Stock-in-Transit verification file) ──
     const transitCols = [
       { key: "_st_material", label: "Material Code", fmt:(val,r)=>renderMatCode(val,r), raw:true, cellClass:"col-mat-code-wrap" },
       { key: "_st_desc",     label: "Material Description", fmt:(val,r)=>renderMatDesc(val,r), raw:true, cellClass:"col-mat-desc-wrap" },
+      { key: "_st_plant",    label: "Plant" },
       { key: "_st_qty",      label: "Qty", cls: "col-qty" },
       { key: "_st_uom",      label: "UoM" },
     ];
     const transitExportCols = [
       { key: "_st_material", label: "Material Code" },
       { key: "_st_desc",     label: "Material Description" },
+      { key: "_st_plant",    label: "Plant" },
       { key: "_st_qty",      label: "Qty" },
       { key: "_st_uom",      label: "UoM" },
     ];
-    const transitRows = UNVERIFIED_TRANSIT_LIST.filter(r => {
+    const transitRows = TRANSIT_UPLOAD_LIST.filter(r => {
       const q = String(query).toUpperCase();
       return r.materialCode.toUpperCase().includes(q);
-    });
+    }).map(r => ({
+      _st_material: r.materialCode,
+      _st_desc:     r.desc || "",
+      _st_plant:    r.plantCode,
+      _st_qty:      r.qty,
+      _st_uom:      r.uom || "",
+    }));
 
     // ── Also search "Stock in Transit" column in main data ──
     // FIX-PHANTOM-SEARCH: exclude phantom rows (no PO/supplying plant) from search results
@@ -4377,10 +4351,10 @@ document.addEventListener("DOMContentLoaded", () => {
     </div>`;
     html += gsrBuildTable(stockRows, stockCols, "search_results_stock.csv", stockExportCols);
 
-    // Transit from separate file (if uploaded)
-    if (UNVERIFIED_TRANSIT_LIST.length > 0) {
+    // Transit from uploaded Stock-in-Transit verification file (if uploaded)
+    if (transitFileLoaded && TRANSIT_UPLOAD_LIST.length > 0) {
       html += `<div class="gsr-section-title" style="margin-top:1.2rem">
-        <span class="gsr-badge gsr-badge-transit">In Transit (Transit File)</span>
+        <span class="gsr-badge gsr-badge-transit">In Transit (Uploaded File)</span>
         ${transitRows.length} record${transitRows.length !== 1 ? "s" : ""} found
       </div>`;
       html += gsrBuildTable(transitRows, transitCols, "search_results_transit.csv", transitExportCols);
