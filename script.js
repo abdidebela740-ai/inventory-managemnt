@@ -4067,6 +4067,26 @@ function renderPage(id) {
       renderPage(fallback);
       return;
     }
+    // BUGFIX-QUICK-LOOKUP-ONLY: firstAccessibleModule() only knows about
+    // renderPage() targets (NAVIGABLE_MODULE_KEYS) — Quick Lookup and its
+    // three sub-tools (Who's Responsible / Shelf Life Look-up / New
+    // Received Stock) are deliberately excluded from that list because
+    // they navigate through showGroupOverview() (index.html) instead of
+    // renderPage(). That meant a user whose ONLY granted module was Quick
+    // Lookup (or just one of its sub-tools) fell straight through to the
+    // "no modules assigned" toast below, even though they do have an
+    // accessible module — renderPage() just didn't know how to reach it.
+    // Before giving up, try sending them to Quick Lookup by clicking its
+    // sidebar title, which already re-checks canAccessModule("quick-lookup")
+    // itself and applies the correct highlighting/expansion.
+    if (typeof canAccessModule === "function" && canAccessModule("quick-lookup")) {
+      const qlTitle = document.querySelector('#quick-lookup-group .nav-group-title');
+      if (qlTitle) {
+        console.warn(`Redirecting "${id}" → "quick-lookup" — user has no renderPage() module but does have Quick Lookup.`);
+        qlTitle.click();
+        return;
+      }
+    }
     // No accessible module at all — nothing to redirect to, so this is the
     // one case that still needs a message rather than a silent no-op.
     if (typeof showNoModulesAssignedToast === "function") {
