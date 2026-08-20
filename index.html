@@ -829,6 +829,15 @@
       <div id="incomingFileStatus"></div>
 
       <div class="sidebar-divider"></div>
+      <div class="upload-label">🚚 Stock in Transit</div>
+      <label class="upload-btn upload-admin-only viewer-hidden" for="transitFileInput">
+        <span id="transitUploadBtnText">🚚 Upload Stock-in-Transit File</span>
+        <input type="file" id="transitFileInput" accept=".xlsx,.xls,.csv" />
+      </label>
+      <div id="transitFileStatus"></div>
+      <div style="font-size:0.65rem;color:var(--muted);padding:2px 2px 0">Temporary — re-upload each session. Columns: Material Code, Plant Code, Quantity.</div>
+
+      <div class="sidebar-divider"></div>
       <div class="upload-label">📦Open Outbound</div>
       <label class="upload-btn pd-upload-btn upload-admin-only viewer-hidden" for="pendingDispatchFileInput">
         <span id="pendingDispatchUploadBtnText">📦 UploadOpen Outbound Excel</span>
@@ -1226,6 +1235,24 @@
         <div class="page-subtitle">Tracking pharmaceutical goods moving through the supply chain</div>
       </div>
     </div>
+
+    <!-- Upload gate — shown until a Stock-in-Transit verification file is uploaded this session -->
+    <div id="transit-upload-gate" style="display:none">
+      <div style="border:1.5px dashed var(--border2);border-radius:10px;padding:2.5rem 1.5rem;text-align:center;background:var(--card-bg)">
+        <div style="font-size:2rem;margin-bottom:0.5rem">🚚</div>
+        <div style="font-weight:700;font-size:1rem;color:var(--text);margin-bottom:0.4rem">Upload a Stock-in-Transit file to continue</div>
+        <div style="font-size:0.82rem;color:var(--muted);max-width:480px;margin:0 auto 1.2rem">
+          This page needs a Stock-in-Transit file (Material Code, Plant Code, Quantity) to verify what's genuinely
+          in transit. Nothing is shown until it's uploaded — the file is not saved and must be re-uploaded each session.
+        </div>
+        <label class="upload-btn" for="transitFileInput" style="display:inline-flex">
+          <span id="transitGateUploadBtnText">🚚 Upload Stock-in-Transit File</span>
+        </label>
+        <div id="transitGateFileStatus" style="margin-top:0.8rem"></div>
+      </div>
+    </div>
+
+    <div id="transit-page-body" style="display:none">
     <div class="filter-bar">
       <div class="ms-wrap" id="ms-transit-plant"><button class="ms-btn" type="button">All Plants <span class="ms-arrow">▾</span></button><div class="ms-dropdown" id="ms-transit-plant-dd"></div></div>
       <div class="ms-wrap" id="ms-transit-mg"><button class="ms-btn" type="button">All Material Groups <span class="ms-arrow">▾</span></button><div class="ms-dropdown" id="ms-transit-mg-dd"></div></div>
@@ -1257,6 +1284,7 @@
     <div id="transit-tab-unverified" class="transit-tab-panel" style="display:none;padding-top:1rem">
       <div id="transit-phantom-section" style="display:none;margin-top:0"></div>
     </div>
+    </div><!-- /transit-page-body -->
 
   </section>
 
@@ -1339,18 +1367,9 @@
       <div class="section-header">QC Quantity &amp; Value by Plant</div>
       <div id="chart-qc-plant"></div>
     </div>
-    <!-- QC Tab Bar -->
-    <div class="qc-tab-bar" style="display:flex;gap:0.5rem;margin-top:1.5rem;margin-bottom:0;border-bottom:2px solid var(--border2);overflow-x:auto;-webkit-overflow-scrolling:touch">
-      <button class="qc-tab-btn" data-tab="items" style="padding:0.5rem 1.1rem;border:none;border-bottom:2px solid var(--blue);background:transparent;color:var(--blue);font-weight:700;font-size:0.82rem;cursor:pointer;margin-bottom:-2px;font-family:inherit;white-space:nowrap;flex-shrink:0">📋 Detailed QC Items</button>
-      <button class="qc-tab-btn" data-tab="days"  style="padding:0.5rem 1.1rem;border:none;border-bottom:2px solid transparent;background:transparent;color:var(--muted);font-weight:500;font-size:0.82rem;cursor:pointer;margin-bottom:-2px;font-family:inherit;white-space:nowrap;flex-shrink:0">⏱ Days in Quality</button>
-    </div>
-    <div id="qc-tab-items" class="qc-tab-panel" style="display:block;padding-top:1rem">
+    <div id="qc-tab-items" style="padding-top:1.5rem">
       <div id="qc-dl-row" style="display:flex;gap:0.6rem;justify-content:flex-end;margin-bottom:0.5rem"></div>
       <div id="qc-table-wrap"></div>
-    </div>
-    <div id="qc-tab-days" class="qc-tab-panel" style="display:none;padding-top:1rem">
-      <div id="qc-days-dl-row" style="display:flex;gap:0.6rem;justify-content:flex-end;margin-bottom:0.5rem"></div>
-      <div id="qc-days-wrap"></div>
     </div>
   </section>
 
@@ -1922,21 +1941,6 @@ document.addEventListener("DOMContentLoaded", function() {
       });
       document.querySelectorAll(".transit-tab-panel").forEach(p => {
         p.style.display = p.id === "transit-tab-" + tab ? "block" : "none";
-      });
-      return;
-    }
-
-    const qcBtn = e.target.closest(".qc-tab-btn");
-    if (qcBtn) {
-      const tab = qcBtn.dataset.tab;
-      document.querySelectorAll(".qc-tab-btn").forEach(b => {
-        const active = b.dataset.tab === tab;
-        b.style.color       = active ? "var(--blue)" : "var(--muted)";
-        b.style.fontWeight  = active ? "700" : "500";
-        b.style.borderBottom= active ? "2px solid var(--blue)" : "2px solid transparent";
-      });
-      document.querySelectorAll(".qc-tab-panel").forEach(p => {
-        p.style.display = p.id === "qc-tab-" + tab ? "block" : "none";
       });
       return;
     }
