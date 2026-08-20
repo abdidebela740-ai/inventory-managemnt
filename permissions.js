@@ -230,6 +230,44 @@ function roleBadgeTooltip() {
   return getUserScopes().join(", ");
 }
 
+// ── FIRST ACCESSIBLE MODULE (auto-redirect target) ─────────────────
+// Module keys that map to a real renderPage() page, in a sensible
+// fallback order. Keep this in sync with PAGE_RENDERERS / RAWDF_EXEMPT_PAGES
+// in script.js — those are the only ids renderPage() actually knows how to
+// display. ("user-management", "quick-lookup", "allocation-tool", etc. are
+// deliberately excluded: they aren't renderPage() targets, they navigate
+// through their own separate flow.)
+const NAVIGABLE_MODULE_KEYS = [
+  "dashboard", "pending-dispatch", "transit", "branch", "expiry", "qc",
+  "expiry-risk", "stockout-risk", "natl-table", "concentration",
+  "request-analysis", "mos-plant",
+];
+
+/**
+ * Returns the first module key the signed-in user actually has permission
+ * to open, or null if they have none at all.
+ *
+ * Used to send a user straight to a module they're allowed to see instead
+ * of showing an "access denied" message — e.g. right after login, when the
+ * app defaults to "dashboard" but that user's role doesn't include it, or
+ * whenever navigation would otherwise land on a page their
+ * sidebar_permissions don't grant.
+ *
+ * Order preference: the DB-driven app_modules.sort_order (so it reflects
+ * however the org has configured module ordering) when window.APP_MODULES
+ * has loaded, falling back to the static NAVIGABLE_MODULE_KEYS order
+ * otherwise. Either way, only keys renderPage() can actually display are
+ * considered.
+ */
+function firstAccessibleModule() {
+  const dbOrder = Array.isArray(window.APP_MODULES)
+    ? window.APP_MODULES.filter(m => m.active !== false).map(m => m.key)
+    : [];
+  const candidates = [...new Set([...dbOrder, ...NAVIGABLE_MODULE_KEYS])]
+    .filter(k => NAVIGABLE_MODULE_KEYS.includes(k));
+  return candidates.find(k => canAccessModule(k)) || null;
+}
+
 // ── EXPORTS ──────────────────────────────────────────────────────
 window.isAdminUser          = computeIsAdmin;
 window.currentRole          = currentRole;
@@ -246,4 +284,5 @@ window.materialTypeFilterOptions = materialTypeFilterOptions;
 window.stockTypeFilterOptions    = stockTypeFilterOptions;
 window.roleBadgeText        = roleBadgeText;
 window.roleBadgeTooltip     = roleBadgeTooltip;
+window.firstAccessibleModule = firstAccessibleModule;
 window.ROLE_LABELS          = ROLE_LABELS;
