@@ -592,7 +592,7 @@ function brdKpiRow(lines) {
     ["Total Need", fmtQty(totalNeed), `to reach ${TARGET_MOS} MOS`, "amber"],
     ["Total Allocated", fmtQty(totalAlloc), "across shown lines", "green"],
     ["Short / Zero Lines", partialCount.toLocaleString(), "HO01 couldn't fully cover", "red"],
-    ["HO01 Stock in QC", qcOnlyCount.toLocaleString(), "materials, not yet releasable", "amber"],
+    ["HO01 Stock in Quality Inspection", qcOnlyCount.toLocaleString(), "materials, not yet releasable", "amber"],
     ["No AMC", noAmcCount.toLocaleString(), "manual entry needed", "muted"],
     ["Approved", approvedCount.toLocaleString(), `of ${lines.length.toLocaleString()} shown`, "purple"],
     ["Hidden — No HO01 Stock", hiddenNoStock.toLocaleString(), "materials with nothing at HO01", "muted"],
@@ -715,7 +715,7 @@ function renderBranchDemand() {
     { key: "amc", label: "Branch AMC", fmt: (v, r) => r.hasAmc ? fmtQty(v) : mosNABadge(), raw: true },
     { key: "mosNow", label: "MOS Now", fmt: v => `<span style="${mosCellStyle(v)}">${fmtMosVal(v)}</span>`, raw: true },
     { key: "sohHo", label: "SOH HO01", fmt: (v, r) => r.qcOnly
-        ? `<span class="brd-note-qc" title="No unrestricted (usable) HO01 stock — the quantity below is still sitting in Quality Inspection">0 <span class="brd-status-pill brd-status-amber">🧪 in QC</span></span>`
+        ? `<span class="brd-note-qc" title="No unrestricted (usable) HO01 stock. Total quantity in Quality Inspection: ${fmtQty(r.qcHo)}">0 <span class="brd-status-pill brd-status-amber">🧪 ${fmtQty(r.qcHo)} in Quality Inspection</span></span>`
         : fmtQty(v) },
     { key: "need", label: `Need (to ${TARGET_MOS})`, fmt: v => fmtQty(v) },
     { key: "alloc", label: "Allocated", raw: true,
@@ -732,7 +732,7 @@ function renderBranchDemand() {
     { key: "_notes", label: "Notes", raw: true, cellClass: "brd-notes-cell",
       fmt: (v, r) => {
         const bits = [];
-        if (r.qcOnly) bits.push(`<span class="brd-status-pill brd-status-amber" title="HO01 stock (${fmtQty(r.qcHo)}) is still in Quality Inspection — not yet releasable">🧪 QC</span>`);
+        if (r.qcOnly) bits.push(`<span class="brd-status-pill brd-status-amber" title="HO01 stock (${fmtQty(r.qcHo)}) is still in Quality Inspection — not yet releasable">🧪 ${fmtQty(r.qcHo)} Quality Inspection</span>`);
         if (r.isPartial) bits.push(`<span class="brd-status-pill brd-status-amber" title="HO01 short — scaled to ${Math.round(r.scalePct * 100)}% of need across ${escHtml(brdSelectedPlant ? "all requesting branches" : "shown branches")}">⚖️ ${Math.round(r.scalePct * 100)}%</span>`);
         if (r.surplusPlants && r.surplusPlants.length) bits.push(`<span class="brd-status-pill brd-status-blue" title="Surplus (>8mo) at: ${r.surplusPlants.map(escHtml).join(", ")}">↔️ ${r.surplusPlants.length}</span>`);
         if (!r.hasAmc) bits.push(`<span class="brd-status-pill brd-status-muted" title="No AMC on file — enter quantity manually">✏️ Manual</span>`);
@@ -822,7 +822,7 @@ function brdExportTemplate() {
 
   const approved = lines.filter(l => l.approved);
 
-  const workingRows = lines.map(l => {
+  const workingRows = approved.map(l => {
     const src = brdPrimarySource(l.code);
     return {
       code: l.code, desc: l.desc, plant: l.plant,
@@ -881,7 +881,7 @@ function brdExportTemplate() {
   XLSX.writeFile(wb, "branch_demand_requisition.xlsx");
 
   if (!approved.length && typeof showError === "function") {
-    showError("Exported — but SAP_Paste is empty because no lines are approved yet. Check the boxes and re-export, or use the Working sheet.");
+    showError("Exported — but both sheets are empty because no lines are checked/approved yet. Check the boxes for the lines you want, then re-export.");
   } else if (unclassified.length && typeof showError === "function") {
     showError(`Exported — but ${unclassified.length} approved line(s) couldn't be classified as RDF or Health Program (Purchasing Group / Purch. Organization left blank for those rows). Check the Stock Type column on the Working sheet before submitting.`);
   }
