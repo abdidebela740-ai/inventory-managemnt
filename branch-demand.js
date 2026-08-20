@@ -714,7 +714,7 @@ function renderBranchDemand() {
     { key: "soh", label: "Branch SOH", fmt: v => fmtQty(v) },
     { key: "amc", label: "Branch AMC", fmt: (v, r) => r.hasAmc ? fmtQty(v) : mosNABadge(), raw: true },
     { key: "mosNow", label: "MOS Now", fmt: v => `<span style="${mosCellStyle(v)}">${fmtMosVal(v)}</span>`, raw: true },
-    { key: "sohHo", label: "SOH HO01", fmt: (v, r) => r.qcOnly
+    { key: "sohHo", label: "SOH HO01", raw: true, fmt: (v, r) => r.qcOnly
         ? `<span class="brd-note-qc" title="No unrestricted (usable) HO01 stock. Total quantity in Quality Inspection: ${fmtQty(r.qcHo)}">0 <span class="brd-status-pill brd-status-amber">🧪 ${fmtQty(r.qcHo)} in Quality Inspection</span></span>`
         : fmtQty(v) },
     { key: "need", label: `Need (to ${TARGET_MOS})`, fmt: v => fmtQty(v) },
