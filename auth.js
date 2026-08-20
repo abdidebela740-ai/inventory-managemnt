@@ -530,7 +530,8 @@ function applyRoleToUI() {
   });
 
   // Sidebar user badge (role/email) removed — that info already lives in
-  // ⚙️ Settings (see settings-menu.js), no need to duplicate it here.
+  // the top-right Profile menu (see settings-menu.js), no need to
+  // duplicate it here.
 }
 
 function escapeHtml(s) {

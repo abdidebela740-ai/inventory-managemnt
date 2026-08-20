@@ -1,18 +1,16 @@
 // ════════════════════════════════════════════════════════════════
-// settings-menu.js — top-right ⚙️ Settings dropdown
+// settings-menu.js — sidebar Settings (theme/font) + top-right Profile menu
 //
-// Sections:
-//   • Appearance  — 6 named themes (Belize, Belize Deep, High Contrast
-//                   Black, High Contrast White, Horizon, Quartz Dark) as
-//                   a single dropdown, plus a quick Dark/Light switch for
-//                   the common case.
-//   • Font style & size — applies to the whole app (root font-family /
-//                   font-size; nearly everything else uses `inherit`
-//                   or rem units, so this cascades everywhere).
-//   • Account     — shows the signed-in user and a Sign out button.
+// • Sidebar Settings (#sidebar-settings-group) — 6 named themes (Belize,
+//   Belize Deep, High Contrast Black, High Contrast White, Horizon, Quartz
+//   Dark) as a single dropdown, a quick Dark/Light switch for the common
+//   case, and whole-app font family / font size. Lives in the sidebar so
+//   it's reachable without covering the account menu.
+// • Profile menu (#profile-menu-wrap, top-right) — who's signed in (name,
+//   with an email fallback), their role badge, Change password, Sign out.
 //
 // A tiny blocking script in <head> already applies the saved theme/font
-// before first paint (to avoid a flash); this file wires up the menu's
+// before first paint (to avoid a flash); this file wires up both panels'
 // interactivity and keeps everything in sync afterwards.
 //
 // Runs standalone — only reaches into auth.js's window.supabaseClient /
@@ -83,19 +81,53 @@
     if (sel) sel.value = key;
   }
 
-  // ── Account info ───────────────────────────────────────────────────────
-  function refreshAccountInfo() {
-    const el = document.getElementById("settings-account-info");
-    if (!el) return;
-    if (window.APP_USER) {
-      // roleBadgeText() (permissions.js) gives the real role + scope
-      // summary — e.g. "Team Leader · Q_ZME + Q_ZMS" — rather than the
-      // old blanket Admin/Viewer split.
-      const badge = (typeof roleBadgeText === "function") ? roleBadgeText() : (window.isAdmin ? "Admin" : "User");
-      el.textContent = `${badge} · ${window.APP_USER.email}`;
-    } else {
-      el.textContent = "Not signed in";
+  // ── Profile info (name / email / role badge / avatar initials) ─────────
+  function initialsFor(user) {
+    const name = (user && user.full_name || "").trim();
+    if (name) {
+      const parts = name.split(/\s+/).filter(Boolean);
+      const first = parts[0] ? parts[0][0] : "";
+      const last  = parts.length > 1 ? parts[parts.length - 1][0] : "";
+      const initials = (first + last).toUpperCase();
+      if (initials) return initials;
     }
+    const email = (user && user.email || "").trim();
+    return email ? email[0].toUpperCase() : "?";
+  }
+
+  function refreshAccountInfo() {
+    const nameEl  = document.getElementById("profile-name");
+    const emailEl = document.getElementById("profile-email");
+    const badgeEl = document.getElementById("profile-role-badge");
+    const avatarBtnEl = document.getElementById("profile-avatar");
+    const avatarLgEl  = document.getElementById("profile-avatar-lg");
+    const user = window.APP_USER;
+
+    if (!user) {
+      if (nameEl)  nameEl.textContent  = "Not signed in";
+      if (emailEl) emailEl.textContent = "";
+      if (badgeEl) { badgeEl.textContent = ""; badgeEl.style.display = "none"; }
+      if (avatarBtnEl) avatarBtnEl.textContent = "–";
+      if (avatarLgEl)  avatarLgEl.textContent  = "–";
+      return;
+    }
+
+    // Display name prefers full_name; falls back to email when empty.
+    const displayName = (user.full_name && user.full_name.trim()) ? user.full_name.trim() : user.email;
+    if (nameEl) nameEl.textContent = displayName || "Signed in";
+
+    // Only show a separate email line when it isn't already the display name.
+    if (emailEl) emailEl.textContent = (displayName === user.email) ? "" : (user.email || "");
+
+    if (badgeEl) {
+      const badge = (typeof roleBadgeText === "function") ? roleBadgeText() : (window.isAdmin ? "Admin" : "User");
+      badgeEl.textContent = badge || "";
+      badgeEl.style.display = badge ? "" : "none";
+    }
+
+    const initials = initialsFor(user);
+    if (avatarBtnEl) avatarBtnEl.textContent = initials;
+    if (avatarLgEl)  avatarLgEl.textContent  = initials;
   }
 
   async function handleSignOut() {
@@ -106,10 +138,80 @@
     closePanel();
   }
 
+  // ── Change password ─────────────────────────────────────────────────────
+  function setCpMessage(text, kind) {
+    const el = document.getElementById("profile-cp-message");
+    if (!el) return;
+    el.textContent = text || "";
+    el.classList.remove("is-error", "is-success");
+    if (kind) el.classList.add(kind === "error" ? "is-error" : "is-success");
+  }
+
+  function toggleChangePasswordPanel(forceOpen) {
+    const panel = document.getElementById("profile-change-password-panel");
+    const btn   = document.getElementById("profile-change-password-btn");
+    if (!panel || !btn) return;
+    const shouldOpen = typeof forceOpen === "boolean" ? forceOpen : panel.hidden;
+    panel.hidden = !shouldOpen;
+    btn.setAttribute("aria-expanded", String(shouldOpen));
+    if (!shouldOpen) {
+      setCpMessage("");
+      const pw1 = document.getElementById("profile-new-password");
+      const pw2 = document.getElementById("profile-new-password-confirm");
+      if (pw1) pw1.value = "";
+      if (pw2) pw2.value = "";
+    }
+  }
+
+  async function handleChangePasswordSubmit() {
+    const pw1El = document.getElementById("profile-new-password");
+    const pw2El = document.getElementById("profile-new-password-confirm");
+    const submitBtn = document.getElementById("profile-cp-submit");
+    if (!pw1El || !pw2El) return;
+
+    const pw1 = pw1El.value;
+    const pw2 = pw2El.value;
+
+    if (!pw1 || !pw2) {
+      setCpMessage("Enter and confirm a new password.", "error");
+      return;
+    }
+    if (pw1 !== pw2) {
+      setCpMessage("Passwords don't match.", "error");
+      return;
+    }
+    if (pw1.length < 6) {
+      setCpMessage("Password must be at least 6 characters.", "error");
+      return;
+    }
+
+    const sc = window.supabaseClient;
+    if (!sc || !sc.auth || typeof sc.auth.updateUser !== "function") {
+      setCpMessage("Not available right now — please try again later.", "error");
+      return;
+    }
+
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = "Updating…"; }
+    setCpMessage("");
+
+    const { error } = await sc.auth.updateUser({ password: pw1 });
+
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Update password"; }
+
+    if (error) {
+      setCpMessage(error.message || "Could not update password.", "error");
+      return;
+    }
+
+    setCpMessage("Password updated.", "success");
+    pw1El.value = "";
+    pw2El.value = "";
+  }
+
   // ── Panel open/close ─────────────────────────────────────────────────
   function openPanel() {
-    const panel = document.getElementById("settings-menu-panel");
-    const btn   = document.getElementById("settings-menu-btn");
+    const panel = document.getElementById("profile-menu-panel");
+    const btn   = document.getElementById("profile-menu-btn");
     if (!panel || !btn) return;
     panel.classList.add("open");
     btn.classList.add("open");
@@ -119,25 +221,26 @@
   }
 
   function closePanel() {
-    const panel = document.getElementById("settings-menu-panel");
-    const btn   = document.getElementById("settings-menu-btn");
+    const panel = document.getElementById("profile-menu-panel");
+    const btn   = document.getElementById("profile-menu-btn");
     if (!panel || !btn) return;
     panel.classList.remove("open");
     btn.classList.remove("open");
     btn.setAttribute("aria-expanded", "false");
     document.removeEventListener("click", onOutsideClick, true);
     document.removeEventListener("keydown", onEscape);
+    toggleChangePasswordPanel(false);
   }
 
   function togglePanel() {
-    const panel = document.getElementById("settings-menu-panel");
+    const panel = document.getElementById("profile-menu-panel");
     if (!panel) return;
     if (panel.classList.contains("open")) closePanel();
     else openPanel();
   }
 
   function onOutsideClick(e) {
-    const wrap = document.getElementById("settings-menu-wrap");
+    const wrap = document.getElementById("profile-menu-wrap");
     if (wrap && !wrap.contains(e.target)) closePanel();
   }
 
@@ -147,10 +250,11 @@
 
   // ── Wiring ─────────────────────────────────────────────────────────────
   function wire() {
-    const gearBtn = document.getElementById("settings-menu-btn");
-    if (gearBtn) gearBtn.addEventListener("click", (e) => { e.stopPropagation(); togglePanel(); });
+    // Profile menu open/close
+    const avatarBtn = document.getElementById("profile-menu-btn");
+    if (avatarBtn) avatarBtn.addEventListener("click", (e) => { e.stopPropagation(); togglePanel(); });
 
-    // Theme select
+    // Theme select (now in the sidebar)
     const themeSelect = document.getElementById("settings-theme-select");
     if (themeSelect) {
       themeSelect.addEventListener("change", () => applyTheme(themeSelect.value, true));
@@ -176,8 +280,20 @@
       fontSizeSel.addEventListener("change", () => applyFontSize(fontSizeSel.value, true));
     }
 
+    // Change password
+    const cpToggleBtn = document.getElementById("profile-change-password-btn");
+    if (cpToggleBtn) cpToggleBtn.addEventListener("click", () => toggleChangePasswordPanel());
+    const cpSubmitBtn = document.getElementById("profile-cp-submit");
+    if (cpSubmitBtn) cpSubmitBtn.addEventListener("click", handleChangePasswordSubmit);
+    const cpConfirmField = document.getElementById("profile-new-password-confirm");
+    if (cpConfirmField) {
+      cpConfirmField.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); handleChangePasswordSubmit(); }
+      });
+    }
+
     // Sign out
-    const signOutBtn = document.getElementById("settings-signout-btn");
+    const signOutBtn = document.getElementById("profile-signout-btn");
     if (signOutBtn) signOutBtn.addEventListener("click", handleSignOut);
 
     // Sync controls to whatever the pre-paint script already applied

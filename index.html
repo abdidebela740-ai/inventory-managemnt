@@ -835,7 +835,7 @@
         <input type="file" id="transitFileInput" accept=".xlsx,.xls,.csv" />
       </label>
       <div id="transitFileStatus"></div>
-      <div style="font-size:0.65rem;color:var(--muted);padding:2px 2px 0">Temporary — re-upload each session. Columns: Material Code, Plant Code, Quantity.</div>
+      <div style="font-size:var(--fs-2xs);color:var(--muted);padding:2px 2px 0">Temporary — re-upload each session. Columns: Material Code, Plant Code, Quantity.</div>
 
       <div class="sidebar-divider"></div>
       <div class="upload-label">📦Open Outbound</div>
@@ -847,27 +847,15 @@
     </div>
   </div>
 
-</aside>
-
-<!-- Global Material Search — results overlay (covers main content, left-anchored past the sidebar) -->
-<div id="global-search-results-panel">
-  <div class="gsr-panel-header">
-    <div class="gsr-panel-title">🔍 Search Results</div>
-    <button type="button" id="global-search-results-close" class="apply-btn secondary small">✕ Close</button>
-  </div>
-  <div id="global-search-results"></div>
-</div>
-
-<!-- Settings Menu -->
-<div id="settings-menu-wrap">
-  <button id="settings-menu-btn" type="button" title="Settings" aria-haspopup="true" aria-expanded="false">
-    <span id="settings-menu-icon">⚙️</span>
-  </button>
-
-  <div id="settings-menu-panel" role="menu" aria-label="Settings">
-
-    <div class="settings-panel-section">
-      <div class="settings-panel-label">Appearance</div>
+  <!-- Sidebar Settings — Appearance + Font (moved out of the old top-right
+       ⚙️ menu; that control is now a Profile menu — see #profile-menu-wrap
+       below). Same field IDs as before so settings-menu.js's localStorage
+       keys (epss-theme, epss-font-family, epss-font-size) and the pre-paint
+       <head> script keep working unchanged. Visible to every role. -->
+  <div class="sidebar-divider"></div>
+  <div class="nav-group expanded" data-group="sidebar-settings" id="sidebar-settings-group" style="margin-bottom:0;">
+    <div class="nav-group-title no-chevron"><span class="nav-group-icon">🎨</span> Settings</div>
+    <div class="sidebar-settings-body">
 
       <label class="settings-quick-toggle" for="settings-dark-light-switch">
         <span>🌙 Dark</span>
@@ -889,12 +877,6 @@
           <option value="quartz-dark">Quartz Dark</option>
         </select>
       </div>
-    </div>
-
-    <div class="settings-panel-divider"></div>
-
-    <div class="settings-panel-section">
-      <div class="settings-panel-label">Font style &amp; size</div>
 
       <div>
         <label class="settings-field-label" for="settings-font-family">Font style</label>
@@ -916,16 +898,61 @@
           <option value="xlarge">Extra Large</option>
         </select>
       </div>
+
+    </div>
+  </div>
+
+</aside>
+
+<!-- Global Material Search — results overlay (covers main content, left-anchored past the sidebar) -->
+<div id="global-search-results-panel">
+  <div class="gsr-panel-header">
+    <div class="gsr-panel-title">🔍 Search Results</div>
+    <button type="button" id="global-search-results-close" class="apply-btn secondary small">✕ Close</button>
+  </div>
+  <div id="global-search-results"></div>
+</div>
+
+<!-- Profile Menu — replaces the old ⚙️ "everything" menu. Theme/font now
+     live in the sidebar (#sidebar-settings-group); this is account-only:
+     who's signed in, their role, change password, sign out. -->
+<div id="profile-menu-wrap">
+  <button id="profile-menu-btn" type="button" title="Profile" aria-haspopup="true" aria-expanded="false">
+    <span id="profile-avatar">–</span>
+  </button>
+
+  <div id="profile-menu-panel" role="menu" aria-label="Profile">
+
+    <div class="profile-panel-header">
+      <div class="profile-avatar-lg" id="profile-avatar-lg" aria-hidden="true">–</div>
+      <div class="profile-header-text">
+        <div class="profile-name" id="profile-name">Not signed in</div>
+        <div class="profile-email" id="profile-email"></div>
+        <div class="profile-role-badge" id="profile-role-badge"></div>
+      </div>
     </div>
 
     <div class="settings-panel-divider"></div>
 
-    <div class="settings-panel-section">
-      <div class="settings-panel-label">Account</div>
-      <div id="settings-account-info" class="settings-account-info">Not signed in</div>
-      <button type="button" id="settings-signout-btn" class="settings-signout-btn">🚪 Sign out</button>
+    <button type="button" id="profile-change-password-btn" class="profile-menu-action" aria-expanded="false" aria-controls="profile-change-password-panel">
+      🔑 Change password
+    </button>
+
+    <div id="profile-change-password-panel" class="profile-cp-panel" hidden>
+      <label class="settings-field-label" for="profile-new-password">New password</label>
+      <input type="password" id="profile-new-password" class="settings-select" placeholder="••••••••" minlength="6" autocomplete="new-password" />
+
+      <label class="settings-field-label" for="profile-new-password-confirm">Confirm new password</label>
+      <input type="password" id="profile-new-password-confirm" class="settings-select" placeholder="••••••••" minlength="6" autocomplete="new-password" />
+
+      <div id="profile-cp-message" class="profile-cp-message"></div>
+
+      <button type="button" id="profile-cp-submit" class="profile-cp-submit">Update password</button>
     </div>
 
+    <div class="settings-panel-divider"></div>
+
+    <button type="button" id="profile-signout-btn" class="settings-signout-btn">🚪 Sign out</button>
   </div>
 </div>
 

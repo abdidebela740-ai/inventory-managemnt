@@ -729,7 +729,7 @@
       outer.style.cssText =
         "display:inline-flex;flex-direction:column;gap:5px;margin-left:0.5rem;vertical-align:bottom;min-width:170px;";
       outer.innerHTML =
-        `<div class="nav-label" style="font-size:0.65rem">Material Type</div>` +
+        `<div class="nav-label" style="font-size:var(--fs-2xs)">Material Type</div>` +
         `<div class="ms-wrap" id="reqan-mattype-wrap" style="min-width:0;width:100%">` +
           `<button class="ms-btn" type="button" style="width:100%">All Material Types <span class="ms-arrow">▾</span></button>` +
           `<div class="ms-dropdown" id="reqan-mattype-dd"></div>` +
@@ -758,7 +758,7 @@
       if (!note) {
         note = document.createElement("div");
         note.id = "reqan-mattype-note";
-        note.style.cssText = "font-size:0.65rem;color:var(--dim);max-width:220px;line-height:1.3;";
+        note.style.cssText = "font-size:var(--fs-2xs);color:var(--dim);max-width:220px;line-height:1.3;";
         note.textContent = "Load the main inventory file to enable filtering by Material Type.";
         outer.appendChild(note);
       }
@@ -801,7 +801,7 @@
       outer.style.cssText =
         "display:inline-flex;flex-direction:column;gap:5px;margin-left:0.5rem;vertical-align:bottom;min-width:170px;";
       outer.innerHTML =
-        `<div class="nav-label" style="font-size:0.65rem">Material Group</div>` +
+        `<div class="nav-label" style="font-size:var(--fs-2xs)">Material Group</div>` +
         `<div class="ms-wrap" id="reqan-matgroup-wrap" style="min-width:0;width:100%">` +
           `<button class="ms-btn" type="button" style="width:100%">All Material Groups <span class="ms-arrow">▾</span></button>` +
           `<div class="ms-dropdown" id="reqan-matgroup-dd"></div>` +
@@ -823,7 +823,7 @@
       if (!note) {
         note = document.createElement("div");
         note.id = "reqan-matgroup-note";
-        note.style.cssText = "font-size:0.65rem;color:var(--dim);max-width:220px;line-height:1.3;";
+        note.style.cssText = "font-size:var(--fs-2xs);color:var(--dim);max-width:220px;line-height:1.3;";
         note.textContent = "Load the main inventory file to enable filtering by Material Group.";
         outer.appendChild(note);
       }

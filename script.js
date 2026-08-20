@@ -663,7 +663,7 @@ function renderMappedMatDesc_early(val, row) {
   if (!tDesc) return '<span style="color:var(--dim)">—</span>';
   let html = `<span class="col-mat-desc">${escHtml(tDesc)}</span>`;
   if (oDesc && oDesc !== tDesc) {
-    html += `<div style="font-size:0.65rem;color:var(--dim);margin-top:1px;font-style:italic">${escHtml(oDesc)}</div>`;
+    html += `<div style="font-size:var(--fs-2xs);color:var(--dim);margin-top:1px;font-style:italic">${escHtml(oDesc)}</div>`;
   }
   return html;
 }
@@ -1147,7 +1147,7 @@ function filterChipHTML(id, label, innerHtml) {
       <button type="button" class="filter-chip-toggle" id="flt-toggle-${id}"
         style="display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;cursor:pointer;white-space:nowrap">
         <span>${escHtml(label)}</span>
-        <span class="filter-badge" id="flt-badge-${id}" style="display:none;background:var(--blue,#3a8fd4);color:#fff;border-radius:10px;font-size:10px;font-weight:700;padding:1px 6px;min-width:16px;text-align:center;line-height:1.4">0</span>
+        <span class="filter-badge" id="flt-badge-${id}" style="display:none;background:var(--blue,#3a8fd4);color:#fff;border-radius:10px;font-size:11px;font-weight:700;padding:1px 6px;min-width:16px;text-align:center;line-height:1.4">0</span>
         <span style="font-size:10px;opacity:0.7">▾</span>
       </button>
       <div class="filter-body" id="flt-body-${id}" style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:50;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:0.7rem;min-width:230px;box-shadow:0 4px 18px rgba(0,0,0,0.3)">
@@ -1954,7 +1954,7 @@ function loadMappingFile(file) {
           const actualCols = Object.keys(data[0]).map(k => k.trim()).join(", ");
           statusEl.innerHTML = `
             <div class="status-ok" style="color:var(--red)">✗ Missing required columns: ${missing.join(", ")}</div>
-            <div style="font-size:0.65rem;margin-top:4px;color:var(--muted)">
+            <div style="font-size:var(--fs-2xs);margin-top:4px;color:var(--muted)">
               <b>Accepted names:</b><br>
               • Source: "Material Code Source" (or "Material Code Sorce", "Source Code")<br>
               • Target: "Material Code Target" (or "Target Material Code", "Target Code")<br>
@@ -2080,7 +2080,7 @@ function loadTransitFile(file) {
           const actualCols = Object.keys(data[0]).map(k => k.trim()).join(", ");
           setStatus(`
             <div class="status-ok" style="color:var(--red)">✗ Missing required columns: ${missing.join(", ")}</div>
-            <div style="font-size:0.65rem;margin-top:4px;color:var(--muted)">
+            <div style="font-size:var(--fs-2xs);margin-top:4px;color:var(--muted)">
               <b>Expected:</b> "Material Code", "Plant Code", "Quantity"<br>
               <b style="color:var(--amber)">Columns found in your file:</b> ${escHtml(actualCols)}
             </div>`);
@@ -3394,23 +3394,23 @@ function renderBranch() {
         <div id="mat-filterbar-wrap" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-bottom:1rem;overflow:visible">
           <div style="display:flex;align-items:center;justify-content:flex-end;gap:1.1rem;padding:0.55rem 0.9rem;border-bottom:1px solid var(--border)">
             <button id="mat-apply" class="apply-btn" style="padding:5px 22px">Go</button>
-            <button id="mat-hide-filterbar-btn" type="button" style="background:none;border:none;color:var(--blue);font-size:12.5px;cursor:pointer;padding:0">Hide Filter Bar</button>
+            <button id="mat-hide-filterbar-btn" type="button" style="background:none;border:none;color:var(--blue);font-size:0.78rem;cursor:pointer;padding:0">Hide Filter Bar</button>
           </div>
           <div id="mat-filterbar-fields" style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:flex-end;padding:0.9rem 1rem 1rem">
             <div style="min-width:240px;flex:1 1 240px">
-              <div class="nav-label" style="font-size:0.65rem;margin-bottom:5px">Material</div>
+              <div class="nav-label" style="font-size:var(--fs-2xs);margin-bottom:5px">Material</div>
               <div class="ms-wrap" id="mat-ms-wrap" style="min-width:0;width:100%"><button class="ms-btn" type="button" style="width:100%">All Materials <span class="ms-arrow">▾</span></button><div class="ms-dropdown" id="mat-ms-dd"></div></div>
             </div>
             <div style="min-width:210px;flex:1 1 210px">
-              <div class="nav-label" style="font-size:0.65rem;margin-bottom:5px">Material Group</div>
+              <div class="nav-label" style="font-size:var(--fs-2xs);margin-bottom:5px">Material Group</div>
               <div class="ms-wrap" id="mat-mg-ms-wrap" style="min-width:0;width:100%"><button class="ms-btn" type="button" style="width:100%">All Material Groups <span class="ms-arrow">▾</span></button><div class="ms-dropdown" id="mat-mg-ms-dd"></div></div>
             </div>
             <div style="min-width:180px;flex:1 1 180px">
-              <div class="nav-label" style="font-size:0.65rem;margin-bottom:5px">Material Type</div>
+              <div class="nav-label" style="font-size:var(--fs-2xs);margin-bottom:5px">Material Type</div>
               <div class="ms-wrap" id="mat-type-ms-wrap" style="min-width:0;width:100%"><button class="ms-btn" type="button" style="width:100%">All Material Types <span class="ms-arrow">▾</span></button><div class="ms-dropdown" id="mat-type-ms-dd"></div></div>
             </div>
             <div style="min-width:190px;flex:1 1 190px">
-              <div class="nav-label" style="font-size:0.65rem;margin-bottom:5px">Metric</div>
+              <div class="nav-label" style="font-size:var(--fs-2xs);margin-bottom:5px">Metric</div>
               <select id="mat-metric" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;width:100%">
                 <option value="TotalQty" selected>Total Quantity</option>
                 <option value="UnrestrictedQty">Unrestricted Stock Quantity</option>
@@ -3423,7 +3423,7 @@ function renderBranch() {
               </select>
             </div>
             <div style="min-width:190px;flex:1 1 190px">
-              <div class="nav-label" style="font-size:0.65rem;margin-bottom:5px">Sort By</div>
+              <div class="nav-label" style="font-size:var(--fs-2xs);margin-bottom:5px">Sort By</div>
               <select id="mat-sort" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;width:100%">
                 <option value="total_desc">Highest Total ↓</option>
                 <option value="total_asc">Lowest Total ↑</option>
@@ -3437,7 +3437,7 @@ function renderBranch() {
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:1rem;padding:0 0.2rem">
-          <span class="nav-label" style="font-size:0.65rem">Show</span>
+          <span class="nav-label" style="font-size:var(--fs-2xs)">Show</span>
           <label style="display:flex;align-items:center;gap:4px;font-size:0.78rem;cursor:pointer" title="Stock on Hand — the value picked by the Metric dropdown">
             <input type="checkbox" id="mat-show-soh" checked /> SOH
           </label>
