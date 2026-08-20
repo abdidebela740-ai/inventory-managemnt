@@ -487,7 +487,14 @@ document.addEventListener("epss-auth-ready", async () => {
   // immediately, in parallel with that chain, instead of always loading
   // dead last behind four other awaits — that's why its data used to visibly
   // "appear after" every other page's.
-  const INDEPENDENT_SLOTS = ["pendingDispatch"];
+  //
+  // Transit is also independent: stampUnverifiedTransit() (script.js) runs
+  // both when the main inventory file finishes loading AND when the transit
+  // file finishes loading, so whichever of the two settles second simply
+  // re-stamps rawDf correctly — there's no ordering requirement between them.
+  // Without this, transit sat behind inventory/mapping/amc/incoming in the
+  // sequential chain and visibly lagged the other slots on load.
+  const INDEPENDENT_SLOTS = ["pendingDispatch", "transit"];
   const sequentialSlots = Object.keys(FILE_SLOTS).filter(s => !INDEPENDENT_SLOTS.includes(s));
 
   const independentLoads = Promise.all(INDEPENDENT_SLOTS.map(slot => pullFileFromSupabase(slot)));
@@ -496,4 +503,18 @@ document.addEventListener("epss-auth-ready", async () => {
     await pullFileFromSupabase(slot);
   }
   await independentLoads; // make sure startup doesn't resolve before this settles too
+
+  // FIX-TRANSIT-GATE-RACE: transit and pendingDispatch load in parallel with
+  // (not after) the sequential inventory/mapping/amc/incoming chain, so their
+  // data can arrive before OR after the user has already navigated to a page
+  // that depends on it. Each loader tries to self-refresh the current page
+  // when IT finishes, but that only works if the page's dependent data (e.g.
+  // rawDf for Transit) had already arrived too — if the user lands on the
+  // page in between, that self-refresh check can be skipped. This final,
+  // unconditional re-render — once every single slot above has completely
+  // settled — is what actually guarantees the current page always reflects
+  // fully-loaded data, no matter what order the slots finished in.
+  if (typeof renderPage === "function" && typeof currentPage !== "undefined") {
+    renderPage(currentPage);
+  }
 });
