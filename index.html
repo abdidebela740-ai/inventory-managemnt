@@ -122,6 +122,63 @@
     }
     .reqan-tab-btn.active .reqan-tab-count { color: var(--blue); }
 
+    /* ── Branch Demand: Analysis / Request Form tabs ── */
+    .brd-tab-bar {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 1.5rem;
+      margin-bottom: 0;
+      border-bottom: 2px solid var(--border2);
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .brd-tab-btn {
+      padding: 0.5rem 1.1rem;
+      border: none;
+      border-bottom: 2px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 500;
+      font-size: 0.82rem;
+      cursor: pointer;
+      margin-bottom: -2px;
+      font-family: inherit;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: color 0.15s, border-color 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .brd-tab-btn.active {
+      color: var(--blue);
+      font-weight: 700;
+      border-bottom-color: var(--blue);
+    }
+    .brd-tab-count {
+      font-size: 0.68rem;
+      font-weight: 700;
+      background: var(--surface2);
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 0.05rem 0.45rem;
+    }
+    .brd-tab-btn.active .brd-tab-count { color: var(--blue); }
+    .brd-tab-hint {
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-bottom: 0.6rem;
+    }
+    /* Compact Notes column (badges + tooltip instead of long sentences) */
+    .brd-notes-cell { white-space: nowrap; }
+    .brd-notes-badges {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      flex-wrap: nowrap;
+    }
+    .brd-notes-badges .brd-status-pill { cursor: default; }
+
     /* ── Global Person Assigned filter (in-page filter bars) ── */
     .person-filter-chip {
       display: inline-flex;
@@ -1750,7 +1807,19 @@
 
       <div class="kpi-row" id="brd-kpis" style="margin:1rem 0"></div>
 
-      <div id="brd-table"></div>
+      <div class="brd-tab-bar">
+        <button class="brd-tab-btn active" data-tab="analysis">🔍 Analysis</button>
+        <button class="brd-tab-btn" data-tab="request">📝 Request Form <span class="brd-tab-count" id="brd-tab-count-request">0</span></button>
+      </div>
+
+      <div id="brd-tab-analysis" class="brd-tab-panel" style="display:block;padding-top:1rem">
+        <div class="brd-tab-hint">Full breakdown per branch × material — stock, AMC, months of stock, HO01 availability, and how the recommended quantity was worked out.</div>
+        <div id="brd-table"></div>
+      </div>
+      <div id="brd-tab-request" class="brd-tab-panel" style="display:none;padding-top:1rem">
+        <div class="brd-tab-hint">A branch can request a line here only when its stock is below 3 months' supply <b>and</b> Head Office actually has stock to give — includes each item's nearest expiry so you're not over-requesting on top of stock that's about to lapse. Check the ones to include, then Export. Lines outside that window (or with nothing to request) are left off this tab; use Analysis to see why.</div>
+        <div id="brd-request-table"></div>
+      </div>
     </div>
   </section>
 
