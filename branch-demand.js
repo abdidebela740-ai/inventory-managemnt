@@ -58,11 +58,30 @@
 //   total_need    = Σ need_b over every REQUESTING branch for this material
 //   if total_need == 0        → alloc_b = 0
 //   if total_need <= avail_HO → alloc_b = need_b                 (HO enough)
-//   else                      → alloc_b = need_b * (avail_HO / total_need),
-//                                capped at need_b                 [rule 4]
+//   else                      → allocated tier-by-tier, most urgent first —
+//                                see PRIORITY ALLOCATION below   [rule 4]
 //   Rounded to whole units via the "largest remainder" method so
 //   Σ alloc_b ≤ available_HO exactly, preferring to give partial > 0 over 0
 //   to branches with a real (if small) need whenever HO still has stock.
+//
+//   PRIORITY TIERS (labels the existing MOS thresholds — no new band):
+//     Critical         current MOS <  1                    (CRITICAL_MOS)
+//     High             1  ≤ current MOS <  3                (REQUEST_ELIGIBILITY_MOS)
+//     Medium           3  ≤ current MOS <  5                (TARGET_MOS)
+//     Low/Overstocked  current MOS >= 5 — need hard-clamped to 0, never orders
+//   See brdPriorityTier(). The fill target for every requesting branch is
+//   still TARGET_MOS (5); tiers only change the ORDER stock is handed out
+//   in, not how much a branch is entitled to.
+//
+//   PRIORITY ALLOCATION (replaces the old flat equal-scale split): when
+//   available_HO can't cover total_need for a material, HO01 stock is
+//   handed out tier by tier — Critical branches fully covered first, then
+//   High, then Medium — each tier filled completely before the next tier
+//   gets anything. Only the ONE tier that actually runs out of stock is
+//   split proportionally within itself (need-weighted, same formula as
+//   rule 4 above but scoped to that tier's branches only); every tier after
+//   it gets 0 for this material, and every tier before it was already
+//   filled in full. See brdComputeMaterialAllocation().
 //
 //   REQUEST ELIGIBILITY (Request Form tab only — Analysis still shows every
 //   branch × material line regardless): a branch may actually submit a
@@ -98,6 +117,34 @@
 
 const TARGET_MOS = 5; // constant for v1 — do not expose as user-editable yet
 const REQUEST_ELIGIBILITY_MOS = 3; // a branch may REQUEST a line only below this MOS — see file header
+const CRITICAL_MOS = 1; // below this MOS a branch is "Critical" priority — see file header / brdPriorityTier()
+
+// ── PRIORITY TIERS (see file header "PRIORITY TIERS" / "PRIORITY ALLOCATION") ─
+// This is deliberately just a labeled view onto the SAME MOS thresholds the
+// rest of the module already used (REQUEST_ELIGIBILITY_MOS=3 floor,
+// TARGET_MOS=5 fill ceiling) plus one new boundary (CRITICAL_MOS=1) — not a
+// second, independent band. `max` is exclusive-upper (current MOS < max).
+const PRIORITY_TIERS = [
+  { key: "critical", label: "Critical",          cls: "red",   max: CRITICAL_MOS },
+  { key: "high",      label: "High",              cls: "amber", max: REQUEST_ELIGIBILITY_MOS },
+  { key: "medium",    label: "Medium",            cls: "blue",  max: TARGET_MOS },
+  { key: "low",       label: "Low / Overstocked", cls: "green", max: Infinity },
+];
+// Returns the PRIORITY_TIERS entry for a branch's current MOS. A branch with
+// no AMC (mosNow === null) or stock but zero AMC (mosNow === Infinity) both
+// fall through to Low/Overstocked — there's no real, computable need either
+// way, so there's nothing to prioritize.
+function brdPriorityTier(mosNow) {
+  if (mosNow === null || mosNow === undefined || mosNow === Infinity) return PRIORITY_TIERS[3];
+  for (const t of PRIORITY_TIERS) {
+    if (mosNow < t.max) return t;
+  }
+  return PRIORITY_TIERS[3];
+}
+function brdPriorityBadge(tierKey) {
+  const t = PRIORITY_TIERS.find(x => x.key === tierKey) || PRIORITY_TIERS[3];
+  return `<span class="brd-status-pill brd-status-${t.cls}" title="Priority tier, based on this branch's current MOS">${escHtml(t.label)}</span>`;
+}
 
 // ── HO01 STOCK BREAKDOWN (Unrestricted vs Quality Inspection) ──────────────
 // buildMosSohMap() (mos.js) deliberately lumps Unrestricted + verified
@@ -398,31 +445,71 @@ function brdComputeMaterialAllocation(row, sohMap, buffer, ho01Breakdown) {
     const amcVal = row.amcs[p];
     const hasAmc = amcVal !== null && amcVal !== undefined;
     const amc    = hasAmc ? amcVal : null;
-    const need   = hasAmc ? Math.max(0, TARGET_MOS * amc - soh) : 0; // rule 7: no AMC → no auto need
     const mosNow = hasAmc ? (amc > 0 ? soh / amc : (soh > 0 ? Infinity : null)) : null;
-    return { plant: p, soh, amc, hasAmc, need, mosNow };
+    let need     = hasAmc ? Math.max(0, TARGET_MOS * amc - soh) : 0; // rule 7: no AMC → no auto need
+    // Overstocked branches don't order (see file header): hard-clamped to 0
+    // rather than just relying on the formula above landing on 0 — this also
+    // guards edge cases like mosNow === Infinity (stock on hand, AMC reads
+    // as 0) where the formula alone wouldn't have produced a need anyway,
+    // but the clamp makes the "never orders" guarantee explicit and immune
+    // to future formula tweaks.
+    if (mosNow !== null && mosNow >= TARGET_MOS) need = 0;
+    const tier = brdPriorityTier(mosNow);
+    return { plant: p, soh, amc, hasAmc, need, mosNow, tier: tier.key, tierLabel: tier.label };
   });
 
   const totalNeed = perBranch.reduce((s, b) => s + b.need, 0);
 
-  let idealAlloc;
-  if (totalNeed === 0) {
-    idealAlloc = perBranch.map(() => 0);
-  } else if (totalNeed <= availableHo) {
-    idealAlloc = perBranch.map(b => b.need);
-  } else {
-    const scale = availableHo / totalNeed;
-    idealAlloc = perBranch.map(b => Math.min(b.need, b.need * scale));
+  // ── PRIORITY-BASED ALLOCATION (see file header) ─────────────────────────
+  // Walk the tiers most-urgent-first (Critical → High → Medium; Low/
+  // Overstocked never has need>0 thanks to the clamp above, so it's skipped
+  // entirely). Each tier is fully covered from whatever HO01 stock remains
+  // before the next tier is touched at all; only the tier that actually
+  // exhausts the remaining stock gets a proportional (need-weighted) split
+  // WITHIN that tier — every tier after it is left at 0 for this material.
+  // Each tier is rounded to whole units on its own (largest-remainder,
+  // scoped to that tier's branches and stock) so rounding leftovers never
+  // leak from a higher-priority tier into a lower one.
+  const allocRounded = perBranch.map(() => 0);
+  let remainingHo = availableHo;
+  for (const tierDef of PRIORITY_TIERS) {
+    if (tierDef.key === "low") break; // overstocked branches never have need>0 here
+    if (remainingHo <= 0) break;
+    const idxs = [];
+    const needs = [];
+    perBranch.forEach((b, i) => {
+      if (b.tier === tierDef.key && b.need > 0) { idxs.push(i); needs.push(b.need); }
+    });
+    if (!idxs.length) continue;
+    const tierNeedTotal = needs.reduce((a, b) => a + b, 0);
+    if (tierNeedTotal <= 0) continue;
+    const tierCapTotal = Math.min(tierNeedTotal, remainingHo);
+    const idealForTier = tierNeedTotal <= remainingHo
+      ? needs.slice()
+      : needs.map(n => n * (remainingHo / tierNeedTotal));
+    const roundedForTier = brdLargestRemainderRound(idealForTier, needs, tierCapTotal);
+    idxs.forEach((i, k) => { allocRounded[i] = roundedForTier[k]; });
+    remainingHo -= tierCapTotal;
   }
 
-  const caps = perBranch.map(b => b.need);
-  const allocRounded = brdLargestRemainderRound(idealAlloc, caps, availableHo);
   const isPartial = totalNeed > availableHo && totalNeed > 0;
-  const scalePct  = totalNeed > 0 ? Math.min(1, availableHo / totalNeed) : 1;
+  // Material-level "HO short by X%" figure — kept for the material-wide
+  // framing (e.g. "HO01 only covers 40% of everyone's need combined"), but
+  // no longer used as each branch's own fill ratio, since priority
+  // allocation can fill one branch 100% and another 0% for the same
+  // material. See fillPct below for the per-branch figure.
+  const scalePct = totalNeed > 0 ? Math.min(1, availableHo / totalNeed) : 1;
 
   return {
     sohHo, qcHo, availableHo, totalNeed, isPartial, scalePct,
-    perBranch: perBranch.map((b, i) => ({ ...b, allocComputed: allocRounded[i] })),
+    perBranch: perBranch.map((b, i) => ({
+      ...b,
+      allocComputed: allocRounded[i],
+      // Actual share of THIS branch's own need that got filled (0–1) —
+      // what "how urgent, and did the priority order actually help this
+      // branch" should be judged against, unlike the material-wide scalePct.
+      fillPct: b.need > 0 ? Math.min(1, allocRounded[i] / b.need) : 1,
+    })),
   };
 }
 
@@ -550,6 +637,7 @@ function brdBuildLines(sohMap) {
         sohHo: calc.sohHo, qcHo: calc.qcHo, qcOnly, availableHo: calc.availableHo,
         need: b.need, alloc, mosAfter, status,
         totalNeed: calc.totalNeed, isPartial: calc.isPartial, scalePct: calc.scalePct,
+        priorityTier: b.tier, priorityLabel: b.tierLabel, fillPct: b.fillPct,
         approved: !!draft.approved, manual: hasManual,
         surplusPlants,
         stockPrefix: matScope.prefix, stockTypeLabel, purchGroup, purchOrg,
@@ -558,9 +646,14 @@ function brdBuildLines(sohMap) {
       });
     });
   });
-  // Most urgent first: critical/partial/none before ok/no-amc, then by need desc.
-  const statusRank = { none: 0, partial: 1, manual: 1, full: 2, "no-amc": 3, ok: 4 };
-  const sorted = lines.sort((a, b) => (statusRank[a.status] - statusRank[b.status]) || (b.need - a.need));
+  // Most urgent first: status, then priority tier (Critical > High > Medium >
+  // Low/Overstocked), then by need desc.
+  const statusRank   = { none: 0, partial: 1, manual: 1, full: 2, "no-amc": 3, ok: 4 };
+  const tierRank      = { critical: 0, high: 1, medium: 2, low: 3 };
+  const sorted = lines.sort((a, b) =>
+    (statusRank[a.status] - statusRank[b.status]) ||
+    (tierRank[a.priorityTier] - tierRank[b.priorityTier]) ||
+    (b.need - a.need));
   sorted.hiddenNoStockCount = hiddenNoStockCount; // for brdKpiRow — see caller
   return sorted;
 }
@@ -587,10 +680,30 @@ function brdKpiRow(lines) {
   const approvedCount = lines.filter(l => l.approved).length;
   const qcOnlyCount = new Set(lines.filter(l => l.qcOnly).map(l => l.code)).size;
   const hiddenNoStock = lines.hiddenNoStockCount || 0;
+
+  // Total HO01 Available / Shortfall are MATERIAL-level figures (availableHo
+  // and totalNeed are the same value repeated on every branch row for a
+  // given material) — dedupe by code first so summing lines doesn't
+  // multiply a material's HO01 stock by however many branches are shown.
+  const byMaterial = new Map();
+  lines.forEach(l => {
+    if (!byMaterial.has(l.code)) byMaterial.set(l.code, { availableHo: l.availableHo, totalNeed: l.totalNeed });
+  });
+  let totalHoAvailable = 0, totalShortfall = 0;
+  byMaterial.forEach(m => {
+    totalHoAvailable += m.availableHo;
+    totalShortfall   += Math.max(0, m.totalNeed - m.availableHo);
+  });
+
   setKpis("brd-kpis", [
     ["Lines Shown", lines.length.toLocaleString(), "material × branch pairs", "blue"],
+    // Explicit Target MOS band, per file header: floor at REQUEST_ELIGIBILITY_MOS
+    // (a branch may request below this), ceiling at TARGET_MOS (fill target).
+    ["Target MOS Band", `${REQUEST_ELIGIBILITY_MOS}–${TARGET_MOS}`, `request below ${REQUEST_ELIGIBILITY_MOS}, fill to ${TARGET_MOS}`, "purple"],
+    ["Total Recommended Qty", fmtQty(totalAlloc), "sum of Allocated / Quantity to Request", "green"],
+    ["Total HO01 Available", fmtQty(totalHoAvailable), "usable (unrestricted) stock, shown materials", "blue"],
+    ["Shortfall", fmtQty(totalShortfall), "unmet need after HO01 allocation", "red"],
     ["Total Need", fmtQty(totalNeed), `to reach ${TARGET_MOS} MOS`, "amber"],
-    ["Total Allocated", fmtQty(totalAlloc), "across shown lines", "green"],
     ["Short / Zero Lines", partialCount.toLocaleString(), "HO01 couldn't fully cover", "red"],
     ["HO01 Stock in Quality Inspection", qcOnlyCount.toLocaleString(), "materials, not yet releasable", "amber"],
     ["No AMC", noAmcCount.toLocaleString(), "manual entry needed", "muted"],
@@ -714,6 +827,7 @@ function renderBranchDemand() {
     { key: "soh", label: "Branch SOH", fmt: v => fmtQty(v) },
     { key: "amc", label: "Branch AMC", fmt: (v, r) => r.hasAmc ? fmtQty(v) : mosNABadge(), raw: true },
     { key: "mosNow", label: "MOS Now", fmt: v => `<span style="${mosCellStyle(v)}">${fmtMosVal(v)}</span>`, raw: true },
+    { key: "priorityTier", label: "Priority", raw: true, fmt: (v, r) => brdPriorityBadge(v) },
     { key: "sohHo", label: "SOH HO01", raw: true, fmt: (v, r) => r.qcOnly
         ? `<span class="brd-note-qc" title="No unrestricted (usable) HO01 stock. Total quantity in Quality Inspection: ${fmtQty(r.qcHo)}">0 <span class="brd-status-pill brd-status-amber">🧪 ${fmtQty(r.qcHo)} in Quality Inspection</span></span>`
         : fmtQty(v) },
@@ -733,7 +847,7 @@ function renderBranchDemand() {
       fmt: (v, r) => {
         const bits = [];
         if (r.qcOnly) bits.push(`<span class="brd-status-pill brd-status-amber" title="HO01 stock (${fmtQty(r.qcHo)}) is still in Quality Inspection — not yet releasable">🧪 ${fmtQty(r.qcHo)} Quality Inspection</span>`);
-        if (r.isPartial) bits.push(`<span class="brd-status-pill brd-status-amber" title="HO01 short — scaled to ${Math.round(r.scalePct * 100)}% of need across ${escHtml(brdSelectedPlant ? "all requesting branches" : "shown branches")}">⚖️ ${Math.round(r.scalePct * 100)}%</span>`);
+        if (r.isPartial) bits.push(`<span class="brd-status-pill brd-status-amber" title="HO01 short overall for this material (covers ${Math.round(r.scalePct * 100)}% of combined need) — priority allocation filled THIS branch's own need ${Math.round(r.fillPct * 100)}% (${escHtml(r.priorityLabel)} priority)">⚖️ ${Math.round(r.fillPct * 100)}%</span>`);
         if (r.surplusPlants && r.surplusPlants.length) bits.push(`<span class="brd-status-pill brd-status-blue" title="Surplus (>8mo) at: ${r.surplusPlants.map(escHtml).join(", ")}">↔️ ${r.surplusPlants.length}</span>`);
         if (!r.hasAmc) bits.push(`<span class="brd-status-pill brd-status-muted" title="No AMC on file — enter quantity manually">✏️ Manual</span>`);
         return bits.length ? `<span class="brd-notes-badges">${bits.join("")}</span>` : "—";
@@ -773,6 +887,7 @@ function renderBranchDemand() {
     { key: "code", label: "Mapped Code", fmt: (v, r) => `<span class="col-mat-code">${escHtml(v)}</span>`, raw: true, cellClass: "col-mat-code-wrap" },
     { key: "desc", label: "Description", cellClass: "col-mat-desc-wrap" },
     { key: "plant", label: "Branch" },
+    { key: "priorityTier", label: "Priority", raw: true, fmt: (v, r) => brdPriorityBadge(v) },
     { key: "alloc", label: "Quantity to Request", raw: true,
       fmt: (v, r) => canEdit
         ? `<input type="number" min="0" step="1" class="brd-alloc-input" data-plant="${escHtml(r.plant)}" data-code="${escHtml(r.code)}" value="${Number(v || 0)}" />`
@@ -828,6 +943,7 @@ function brdExportTemplate() {
       code: l.code, desc: l.desc, plant: l.plant,
       soh: l.soh, amc: l.hasAmc ? l.amc : "Not Committed",
       mosNow: l.mosNow === null ? "N/A" : (l.mosNow === Infinity ? "Infinite" : Number(l.mosNow).toFixed(2)),
+      priority: l.priorityLabel || "",
       need: Number(l.need).toFixed(0), alloc: Number(l.alloc).toFixed(0),
       mosAfter: l.mosAfter === null ? "N/A" : (l.mosAfter === Infinity ? "Infinite" : Number(l.mosAfter).toFixed(2)),
       sohHo: l.sohHo, factor: src.factor, sourceCodes: src.allSourceCodes.join(", "),
@@ -840,6 +956,7 @@ function brdExportTemplate() {
   const workingCols = [
     { key: "code", label: "Mapped Code" }, { key: "desc", label: "Description" }, { key: "plant", label: "Branch" },
     { key: "soh", label: "SOH Branch" }, { key: "amc", label: "AMC" }, { key: "mosNow", label: "MOS Now" },
+    { key: "priority", label: "Priority" },
     { key: "need", label: `Need (to ${TARGET_MOS})` }, { key: "alloc", label: "Allocated" }, { key: "mosAfter", label: "MOS After" },
     { key: "sohHo", label: "SOH HO01" }, { key: "factor", label: "Factor (source→mapped)" }, { key: "sourceCodes", label: "Source Code(s)" },
     { key: "stockType", label: "Stock Type" }, { key: "purchGroup", label: "Purchasing Group" }, { key: "purchOrg", label: "Purch. Organization" },
