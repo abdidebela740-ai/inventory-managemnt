@@ -589,8 +589,21 @@ async function loadProfileAndUnlock(session) {
   window.APP_MODULES = modulesError ? [] : (modules || []);
   if (modulesError) console.error("Could not load app_modules:", modulesError);
 
-  hideAuthOverlay();
   applyRoleToUI();
+  hideAuthOverlay();
+  // FIX-HARD-REFRESH-FLASH: #sidebar/#main are hidden (visibility:hidden)
+  // by default straight in the HTML, BEFORE any JS runs. Only reveal them
+  // here, after applyRoleToUI() has already hidden nav buttons the signed-in
+  // user's role doesn't grant. Without this, on a normal page load the app
+  // shell was hidden only by JS (removed once DOMContentLoaded/initAuth
+  // fired and the auth overlay covered it) — on a hard refresh (Ctrl+Shift+R,
+  // no cache), that JS takes longer to load/run than usual, so there was a
+  // real window where the full sidebar (every module's nav button) sat
+  // visible and clickable in the raw HTML before role-gating ever applied.
+  const sidebarEl = document.getElementById("sidebar");
+  const mainEl    = document.getElementById("main");
+  if (sidebarEl) sidebarEl.style.visibility = "";
+  if (mainEl)    mainEl.style.visibility    = "";
 
   // Tell the rest of the app auth is ready (storage-sync.js listens for this)
   document.dispatchEvent(new CustomEvent("epss-auth-ready", { detail: window.APP_USER }));
