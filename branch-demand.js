@@ -87,6 +87,37 @@
 
 const TARGET_MOS = 5; // constant for v1 — do not expose as user-editable yet
 
+// ── HO01 STOCK BREAKDOWN (Unrestricted vs Quality Inspection) ──────────────
+// buildMosSohMap() (mos.js) deliberately lumps Unrestricted + verified
+// Transit + QC into one "Total Quantity" figure so every other page (Branch
+// Comparison, National Table, Expiry Risk, main MOS view...) agrees on the
+// same SOH number. Branch Demand can't reuse that number for HO01 though:
+// stock still sitting in Quality Inspection hasn't been released yet, so it
+// is NOT actually available to allocate or ship to a branch. This builds a
+// second, HO01-only map (canonical code -> { unrestricted, qc }) so the
+// allocation math and the table can tell "usable now" apart from "exists but
+// stuck in QC" — see brdComputeMaterialAllocation() and brdBuildLines().
+function brdBuildHo01Breakdown() {
+  const map = new Map();
+  const base = (typeof getReconciledBase === "function")
+    ? getReconciledBase()
+    : (typeof rawDf !== "undefined" ? rawDf : []);
+  if (!base.length) return map;
+  for (const row of base) {
+    const plt = String(row["Plant"] || "").trim().toUpperCase();
+    if (plt !== HUB_PLANT) continue;
+    const mat = String(row._mappedMaterial || row["Material"] || "").trim();
+    if (!mat) continue;
+    const unrestricted = (typeof getMappedQty === "function") ? getMappedQty(row, "Unrestricted Stock") : Number(row["Unrestricted Stock"] || 0);
+    const qc            = (typeof getMappedQty === "function") ? getMappedQty(row, "Stock in Quality Inspection") : Number(row["Stock in Quality Inspection"] || 0);
+    if (!map.has(mat)) map.set(mat, { unrestricted: 0, qc: 0 });
+    const entry = map.get(mat);
+    entry.unrestricted += Number(unrestricted) || 0;
+    entry.qc            += Number(qc) || 0;
+  }
+  return map;
+}
+
 // ── STOCK TYPE → SAP HEADER FIELD LOOKUP TABLES (see file header) ──────────
 // Keyed by the same "PREFIX_SUFFIX" scope code getRowScopeCode() produces
 // (e.g. "R_ZME", "Q_ZLC") so the two stay in lockstep with the rest of the
@@ -282,9 +313,17 @@ function brdLargestRemainderRound(idealValues, caps, capTotal) {
 }
 
 // ── CORE ALLOCATION (one material, every branch, HO01 fair-share split) ────
-function brdComputeMaterialAllocation(row, sohMap, buffer) {
+// ho01Breakdown: Map from brdBuildHo01Breakdown() — see that function's
+// header comment. sohHo below is deliberately the UNRESTRICTED-only figure
+// (not buildMosSohMap()'s Total Quantity) because QC stock can't actually be
+// allocated to a branch yet; qcHo is carried separately purely so the table
+// can flag it ("stock exists but is stuck in QC") without ever counting it
+// as available.
+function brdComputeMaterialAllocation(row, sohMap, buffer, ho01Breakdown) {
   const branchPlants = mosPlants.filter(p => p !== HUB_PLANT);
-  const sohHo = mosSohFor(sohMap, row, HUB_PLANT);
+  const bd     = (ho01Breakdown && ho01Breakdown.get(row.code)) || { unrestricted: 0, qc: 0 };
+  const sohHo  = bd.unrestricted;
+  const qcHo   = bd.qc;
   const availableHo = Math.max(0, sohHo - (Number(buffer) || 0));
 
   const perBranch = branchPlants.map(p => {
@@ -315,7 +354,7 @@ function brdComputeMaterialAllocation(row, sohMap, buffer) {
   const scalePct  = totalNeed > 0 ? Math.min(1, availableHo / totalNeed) : 1;
 
   return {
-    sohHo, availableHo, totalNeed, isPartial, scalePct,
+    sohHo, qcHo, availableHo, totalNeed, isPartial, scalePct,
     perBranch: perBranch.map((b, i) => ({ ...b, allocComputed: allocRounded[i] })),
   };
 }
@@ -372,8 +411,10 @@ function brdBuildLines(sohMap) {
   const materials    = brdMaterialsForScope();
   const branchPlants = mosPlants.filter(p => p !== HUB_PLANT);
   const viewPlants   = brdSelectedPlant ? [brdSelectedPlant] : branchPlants;
+  const ho01Breakdown = brdBuildHo01Breakdown();
 
   const lines = [];
+  let hiddenNoStockCount = 0; // materials with truly nothing at HO01 (see rule below)
   materials.forEach(row => {
     // Stock Type filter (rule set in file header): classify once per
     // material and skip it entirely if it doesn't match the selected
@@ -386,7 +427,21 @@ function brdBuildLines(sohMap) {
     const purchOrg   = matScope.prefix ? (PURCH_ORG_MAP[matScope.prefix] || "") : "";
     const stockTypeLabel = matScope.prefix ? (STOCK_TYPE_LABEL[matScope.prefix] || matScope.prefix) : "";
 
-    const calc = brdComputeMaterialAllocation(row, sohMap, brdBuffer);
+    const calc = brdComputeMaterialAllocation(row, sohMap, brdBuffer, ho01Breakdown);
+
+    // ── "Consider only stock available at HO01" ──────────────────────────
+    // Only materials with NOTHING at HO01 (no unrestricted, no QC) are
+    // dropped from the table entirely — this module is about what a branch
+    // can actually be sent, so a material HO01 has zero of either way isn't
+    // useful to show. A material with real unrestricted stock is shown
+    // normally. A material sitting ONLY in Quality Inspection (unrestricted
+    // = 0 but QC > 0) is the one exception: it's kept on screen, allocated
+    // as 0 (QC stock can't be shipped yet), and flagged with a QC warning
+    // below instead of being hidden — so branches aren't left unaware that
+    // stock exists but isn't releasable yet.
+    const qcOnly = calc.sohHo === 0 && calc.qcHo > 0;
+    if (calc.sohHo === 0 && calc.qcHo === 0) { hiddenNoStockCount++; return; }
+
     calc.perBranch.forEach(b => {
       if (!viewPlants.includes(b.plant)) return;
       // Hide totally-inert branch/material pairs (no AMC, no stock) unless
@@ -424,7 +479,7 @@ function brdBuildLines(sohMap) {
       lines.push({
         plant: b.plant, code: row.code, desc: row.desc, origCodes: row.origCodes,
         soh: b.soh, amc: b.amc, hasAmc: b.hasAmc, mosNow: b.mosNow,
-        sohHo: calc.sohHo, availableHo: calc.availableHo,
+        sohHo: calc.sohHo, qcHo: calc.qcHo, qcOnly, availableHo: calc.availableHo,
         need: b.need, alloc, mosAfter, status,
         totalNeed: calc.totalNeed, isPartial: calc.isPartial, scalePct: calc.scalePct,
         approved: !!draft.approved, manual: hasManual,
@@ -436,7 +491,9 @@ function brdBuildLines(sohMap) {
   });
   // Most urgent first: critical/partial/none before ok/no-amc, then by need desc.
   const statusRank = { none: 0, partial: 1, manual: 1, full: 2, "no-amc": 3, ok: 4 };
-  return lines.sort((a, b) => (statusRank[a.status] - statusRank[b.status]) || (b.need - a.need));
+  const sorted = lines.sort((a, b) => (statusRank[a.status] - statusRank[b.status]) || (b.need - a.need));
+  sorted.hiddenNoStockCount = hiddenNoStockCount; // for brdKpiRow — see caller
+  return sorted;
 }
 
 // ── UI HELPERS ───────────────────────────────────────────────────────────────
@@ -459,13 +516,17 @@ function brdKpiRow(lines) {
   const partialCount = lines.filter(l => l.status === "partial" || l.status === "none").length;
   const noAmcCount  = lines.filter(l => l.status === "no-amc").length;
   const approvedCount = lines.filter(l => l.approved).length;
+  const qcOnlyCount = new Set(lines.filter(l => l.qcOnly).map(l => l.code)).size;
+  const hiddenNoStock = lines.hiddenNoStockCount || 0;
   setKpis("brd-kpis", [
     ["Lines Shown", lines.length.toLocaleString(), "material × branch pairs", "blue"],
     ["Total Need", fmtQty(totalNeed), `to reach ${TARGET_MOS} MOS`, "amber"],
     ["Total Allocated", fmtQty(totalAlloc), "across shown lines", "green"],
     ["Short / Zero Lines", partialCount.toLocaleString(), "HO01 couldn't fully cover", "red"],
+    ["HO01 Stock in QC", qcOnlyCount.toLocaleString(), "materials, not yet releasable", "amber"],
     ["No AMC", noAmcCount.toLocaleString(), "manual entry needed", "muted"],
     ["Approved", approvedCount.toLocaleString(), `of ${lines.length.toLocaleString()} shown`, "purple"],
+    ["Hidden — No HO01 Stock", hiddenNoStock.toLocaleString(), "materials with nothing at HO01", "muted"],
   ]);
 }
 
@@ -581,10 +642,12 @@ function renderBranchDemand() {
     { key: "code", label: "Mapped Code", fmt: (v, r) => `<span class="col-mat-code">${escHtml(v)}</span>`, raw: true, cellClass: "col-mat-code-wrap" },
     { key: "desc", label: "Description", cellClass: "col-mat-desc-wrap" },
     { key: "plant", label: "Branch" },
-    { key: "soh", label: "SOH Branch", fmt: v => fmtQty(v) },
-    { key: "amc", label: "AMC", fmt: (v, r) => r.hasAmc ? fmtQty(v) : mosNABadge(), raw: true },
+    { key: "soh", label: "Branch SOH", fmt: v => fmtQty(v) },
+    { key: "amc", label: "Branch AMC", fmt: (v, r) => r.hasAmc ? fmtQty(v) : mosNABadge(), raw: true },
     { key: "mosNow", label: "MOS Now", fmt: v => `<span style="${mosCellStyle(v)}">${fmtMosVal(v)}</span>`, raw: true },
-    { key: "sohHo", label: "SOH HO01", fmt: v => fmtQty(v) },
+    { key: "sohHo", label: "SOH HO01", fmt: (v, r) => r.qcOnly
+        ? `<span class="brd-note-qc" title="No unrestricted (usable) HO01 stock — the quantity below is still sitting in Quality Inspection">0 <span class="brd-status-pill brd-status-amber">🧪 in QC</span></span>`
+        : fmtQty(v) },
     { key: "need", label: `Need (to ${TARGET_MOS})`, fmt: v => fmtQty(v) },
     { key: "alloc", label: "Allocated", raw: true,
       fmt: (v, r) => canEdit
@@ -604,6 +667,7 @@ function renderBranchDemand() {
     { key: "_notes", label: "Notes", raw: true, cellClass: "col-mat-desc-wrap",
       fmt: (v, r) => {
         const bits = [];
+        if (r.qcOnly) bits.push(`<span class="brd-note-qc">🧪 HO01 stock in QC (${fmtQty(r.qcHo)}) — not yet releasable</span>`);
         if (r.isPartial) bits.push(`<span class="brd-note-scale">HO01 short — scaled to ${Math.round(r.scalePct * 100)}% of need across ${escHtml(brdSelectedPlant ? "all requesting branches" : "shown branches")}</span>`);
         if (r.surplusPlants && r.surplusPlants.length) bits.push(`<span class="brd-note-redist">⚠️ Check redistribution — surplus (>8mo) at: ${r.surplusPlants.map(escHtml).join(", ")}</span>`);
         if (!r.hasAmc) bits.push(`<span class="brd-note-noamc">No AMC — enter quantity manually</span>`);
@@ -613,7 +677,7 @@ function renderBranchDemand() {
 
   document.getElementById("brd-table").innerHTML = buildTable(
     lines, cols,
-    (row) => row.status === "none" ? "row-critical" : ""
+    (row) => row.status === "none" ? "row-critical" : (row.qcOnly ? "row-qc" : "")
   );
 }
 
