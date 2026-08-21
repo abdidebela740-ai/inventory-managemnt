@@ -126,21 +126,23 @@ function canManageUsersFully() {
 }
 
 // ── SIDEBAR / MODULE PERMISSIONS ────────────────────────────────
-// Head-Office-only modules: these are national/cross-branch views (open
-// outbound across every branch, branch-vs-branch comparison, overstock &
-// expiry risk analytics, stockout-risk analytics, and the whole Quick
-// Lookup section) that only make sense — and are only meant to be granted
-// — to a Head Office user (HO01 plant, or unset) or Admin. A user locked to
-// a specific branch plant can NEVER be granted these, no matter what an
-// Admin/Director checks in Advanced User Management: the checkboxes for
-// these keys are disabled there whenever a non-HO01 plant is selected (see
-// user-management.js), and this is the matching enforcement point so a
-// stale/tampered sidebar_permissions value can't grant them either. Other
-// modules remain available to branch users as normal, just scoped to their
-// own branch by the plant-scoping functions above.
+// Head-Office-only modules: these are national/cross-branch views that only
+// make sense — and are only meant to be granted — to a Head Office user
+// (HO01 plant, or unset) or Admin. A user locked to a specific branch plant
+// can NEVER be granted these, no matter what an Admin/Director checks in
+// Advanced User Management: the checkboxes for these keys are disabled
+// there whenever a non-HO01 plant is selected (see user-management.js),
+// and this is the matching enforcement point so a stale/tampered
+// sidebar_permissions value can't grant them either. Other modules remain
+// available to branch users as normal, just scoped to their own branch by
+// the plant-scoping functions above — notably "branch-demand" (Branch
+// Demand) is deliberately NOT in this list, since branch users placing
+// their own demand requests is the whole point of that page.
 const HEAD_OFFICE_ONLY_MODULE_KEYS = [
   "pending-dispatch", "branch", "expiry-risk", "stockout-risk",
   "quick-lookup", "who-responsible", "shelf-life-lookup", "new-received-stock",
+  "natl-table", "concentration", "request-analysis", "allocation-tool",
+  "person-assigned",
 ];
 
 // Admin always has every module. Everyone else needs an explicit `true`
