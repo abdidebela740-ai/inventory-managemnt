@@ -2810,6 +2810,152 @@ function renderTransit() {
 // ═══════════════════════════════════════════════════════════════════════════
 // EXPIRY
 // ═══════════════════════════════════════════════════════════════════════════
+// ── EXPIRY TIMELINE — SECTION BUILDER ──────────────────────────────────────
+// Injects either one combined chart-box (single stock type / Admin-collapsed
+// view is intentionally still split — see splitByStockType above) or two
+// side-by-side chart-boxes (RDF + Health Program Q) into #expiry-timeline-
+// boxes, then delegates the actual Plotly render + drilldown wiring for each
+// box to renderExpiryTimelineChart(). Re-run on every renderExpiry() call so
+// filter changes (window/plant/material group/etc.) always rebuild fresh —
+// this also means any bar clicked before a re-render is safely discarded
+// along with its now-stale drilldown DOM.
+function renderExpiryTimelineSection(splitByStockType, expiring) {
+  const boxesEl = document.getElementById("expiry-timeline-boxes");
+  if (!boxesEl) return;
+
+  const chartBoxHtml = (suffix, title) => `
+    <div class="chart-box full"${suffix ? ' style="margin-bottom:1rem"' : ""}>
+      <div class="section-header" style="display:flex;align-items:center;gap:0.5rem">
+        <span>${title}</span>
+        <span style="font-size:0.7rem;font-weight:400;color:var(--muted);margin-left:0.25rem">— Click a bar to drill into that month's items</span>
+      </div>
+      <div id="chart-expiry-timeline${suffix}"></div>
+      <div id="expiry-drilldown${suffix}" style="display:none;margin-top:1rem;border-top:1px solid var(--border2);padding-top:1rem">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;flex-wrap:wrap;gap:0.5rem">
+          <div>
+            <span id="expiry-drill-title${suffix}" style="font-weight:700;color:var(--text);font-size:0.95rem"></span>
+            <span id="expiry-drill-meta${suffix}" style="font-size:0.78rem;color:var(--muted);margin-left:0.75rem"></span>
+          </div>
+          <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
+            <button id="expiry-drill-dl-csv${suffix}" class="dl-btn" style="font-size:0.72rem;padding:4px 10px">⬇ CSV</button>
+            <button id="expiry-drill-dl-xlsx${suffix}" class="dl-btn" style="font-size:0.72rem;padding:4px 10px">⬇ Excel</button>
+            <button id="expiry-drill-close${suffix}" class="apply-btn secondary" style="font-size:0.72rem;padding:4px 12px">✕ Close</button>
+          </div>
+        </div>
+        <div id="expiry-drill-table${suffix}"></div>
+      </div>
+    </div>`;
+
+  if (splitByStockType) {
+    boxesEl.innerHTML =
+      chartBoxHtml("-rdf", "RDF Expiry Timeline — Items &amp; Value at Risk by Month") +
+      chartBoxHtml("-q",   "Health Program (Q) Expiry Timeline — Items &amp; Value at Risk by Month");
+    const rdfRows = expiring.filter(r => (typeof getRowStockTypeLabel === "function" ? getRowStockTypeLabel(r) : "RDF") !== "Health Program (Q)");
+    const qRows   = expiring.filter(r => (typeof getRowStockTypeLabel === "function" ? getRowStockTypeLabel(r) : "RDF") === "Health Program (Q)");
+    renderExpiryTimelineChart("-rdf", rdfRows);
+    renderExpiryTimelineChart("-q",   qRows);
+  } else {
+    boxesEl.innerHTML = chartBoxHtml("", "Expiry Timeline — Items &amp; Value at Risk by Month");
+    renderExpiryTimelineChart("", expiring);
+  }
+}
+
+// ── EXPIRY TIMELINE — SINGLE CHART + DRILLDOWN ─────────────────────────────
+// suffix is "" for the combined chart, or "-rdf" / "-q" for the split view
+// (see renderExpiryTimelineSection above); it's appended to every element id
+// so the two split charts never collide. rowsForChart is the (already
+// stock-type-filtered, where applicable) set of expiring rows to plot.
+function renderExpiryTimelineChart(suffix, rowsForChart) {
+  const chartElId = `chart-expiry-timeline${suffix}`;
+  const drillId   = `expiry-drilldown${suffix}`;
+  const chartEl   = document.getElementById(chartElId);
+  if (!chartEl) return;
+
+  if (!rowsForChart.length) {
+    chartEl.innerHTML = "";
+    const dEl = document.getElementById(drillId);
+    if (dEl) dEl.style.display = "none";
+    return;
+  }
+
+  // valMap: value at risk summed per month (bar). uniqMatSets: distinct
+  // materials expiring per month, counted via the same source→target
+  // mapping used elsewhere (_mappedMaterial), so it lines up with the KPI
+  // cards above rather than counting duplicate source rows.
+  const valMap = {}, uniqMatSets = {};
+  rowsForChart.forEach(r => {
+    const key = `${r._expiry.getFullYear()}-${String(r._expiry.getMonth()+1).padStart(2,"0")}`;
+    valMap[key] = (valMap[key] || 0) + (r["Value of Unrestricted Stock"]||0) + (r["Value of Stock in Quality Inspection"]||0);
+    if (!uniqMatSets[key]) uniqMatSets[key] = new Set();
+    uniqMatSets[key].add(r._mappedMaterial || r["Material"]);
+  });
+  const ms = Object.keys(valMap).sort();
+  const uniqMap = {};
+  ms.forEach(m => { uniqMap[m] = uniqMatSets[m].size; });
+
+  Plotly.newPlot(chartElId, [
+    {type:"bar",    name:"Value at Risk (ETB)", x:ms, y:ms.map(m=>valMap[m]), yaxis:"y",  marker:{color:"#d29922"}, hovertemplate:"<b>%{x}</b><br>ETB %{y:,.0f}<extra></extra>"},
+    {type:"scatter",mode:"lines+markers",name:"Unique Materials", x:ms, y:ms.map(m=>uniqMap[m]), yaxis:"y2", marker:{color:"#f85149",size:8}, line:{color:"#f85149"}, hovertemplate:"<b>%{x}</b><br>Materials: %{y}<extra></extra>"},
+  ], pl({
+    height:280,
+    margin:{l:60,r:70,t:20,b:60},
+    xaxis:{title:{text:"Expiry Month",font:{size:10}}, tickfont:{size:10}, automargin:true},
+    yaxis:{title:{text:"Value at Risk (ETB)",font:{size:10,color:"#d29922"}}, tickfont:{color:"#d29922"}, automargin:true},
+    yaxis2:{overlaying:"y",side:"right",gridcolor:"transparent",tickfont:{color:"#f85149"},tickformat:",d",title:{text:"Unique Materials",font:{size:10,color:"#f85149"}}},
+  }), PLOTLY_CONFIG);
+
+  document.getElementById(chartElId).on("plotly_click", function(data) {
+    const pt = data.points[0];
+    const monthKey = pt.x;
+    const [yr, mo] = monthKey.split("-").map(Number);
+    const monthItems = rowsForChart.filter(r => r._expiry.getFullYear() === yr && r._expiry.getMonth() + 1 === mo);
+    // FIX-QC-EXPIRY: _qty/_val roll Unrestricted + QC together so QC-only
+    // rows (Unrestricted Stock = 0) still show their real quantity/value
+    // instead of a misleading zero; _availBadge marks which is which.
+    const drillCols = [
+      {key:"Material", label:"Material Code", fmt:(val,r)=>renderMatCodeRaw(val,r), raw:true, cellClass:"col-mat-code-wrap"},
+      {key:"Material Description", label:"Material Description", fmt:(val,r)=>renderMatDescRaw(val,r), raw:true, cellClass:"col-mat-desc-wrap"},
+      {key:"Material Group Name",         label:"Material Group"},
+      {key:"Plant Name",                  label:"Plant"},
+      {key:"Description of Storage Location", label:"Storage Location"},
+      {key:"_expiryStr",                  label:"Expiry Date"},
+      {key:"_availBadge",                 label:"Availability",fmt:v=>v, raw:true},
+      {key:"_qty",                        label:"Qty",        fmt:fmtQty, cellClass:"col-qty"},
+      {key:"_val",                        label:"Value (ETB)",fmt:fmtETB, cellClass:"col-val"},
+      {key:"_daysLeft",                   label:"Days Left"},
+    ];
+    const drillRows = sortBy(
+      monthItems.map(r => ({
+        ...r,
+        _expiryStr: r._expiry ? fmtLocalDate(r._expiry) : "",
+        _daysLeft:  r._expiry ? Math.floor((r._expiry - new Date()) / 86400000) : 9999,
+        _qty:       (r["Unrestricted Stock"]||0) + (r["Stock in Quality Inspection"]||0),
+        _val:       (r["Value of Unrestricted Stock"]||0) + (r["Value of Stock in Quality Inspection"]||0),
+        _availBadge: r._qcOnly
+          ? "<span class='badge badge-amber'>In QC</span>"
+          : "<span class='badge badge-green'>Available</span>",
+      })),
+      "_daysLeft", true
+    );
+    const totalVal   = monthItems.reduce((s,r) => s+(r["Value of Unrestricted Stock"]||0)+(r["Value of Stock in Quality Inspection"]||0), 0);
+    const totalQty   = monthItems.reduce((s,r) => s+(r["Unrestricted Stock"]||0)+(r["Stock in Quality Inspection"]||0), 0);
+    const monthLabel = new Date(yr, mo-1, 1).toLocaleString("default", {month:"long", year:"numeric"});
+    document.getElementById(`expiry-drill-title${suffix}`).textContent = "📅 " + monthLabel;
+    document.getElementById(`expiry-drill-meta${suffix}`).textContent  = `${drillRows.length} items · ${fmtQty(totalQty)} units · ${fmtETB(totalVal)}`;
+    document.getElementById(`expiry-drill-table${suffix}`).innerHTML   = drillRows.length
+      ? buildTable(drillRows, drillCols, r => r._daysLeft <= 30 ? "row-red" : r._daysLeft <= 90 ? "row-amber" : "")
+      : '<div class="alert-info">No items for this month.</div>';
+    const drillEl = document.getElementById(drillId);
+    drillEl.style.display = "block";
+    drillEl.scrollIntoView({ behavior:"smooth", block:"nearest" });
+    document.getElementById(`expiry-drill-dl-csv${suffix}`).onclick  = () => downloadCSV(drillRows,  drillCols, `expiry${suffix}_${monthKey}.csv`);
+    document.getElementById(`expiry-drill-dl-xlsx${suffix}`).onclick = () => downloadExcel(drillRows, drillCols, `expiry${suffix}_${monthKey}.xlsx`);
+  });
+  document.getElementById(`expiry-drill-close${suffix}`).onclick = () => {
+    document.getElementById(drillId).style.display = "none";
+  };
+}
+
 function renderExpiry() {
   // ── Branch-Comparison material drilldown: auto-select the clicked material ──
   // _expiryDrilldownMatCode is set by goToMaterialExpiry() (see the Branch-
@@ -2870,86 +3016,18 @@ function renderExpiry() {
     ["At-Risk Quantity",  fmtQty(expiring.reduce((s,r) => s+getMappedQty(r,"Unrestricted Stock")+getMappedQty(r,"Stock in Quality Inspection"),0)),          "Units expiring soon (incl. QC)",     "amber"],
   ]);
 
-  if (expiring.length) {
-    // valMap: value at risk summed per month (bar). uniqMatSets: distinct
-    // materials expiring per month, counted via the same source→target
-    // mapping used elsewhere (_mappedMaterial), so it lines up with the KPI
-    // cards above rather than counting duplicate source rows.
-    const valMap = {}, uniqMatSets = {};
-    expiring.forEach(r => {
-      const key = `${r._expiry.getFullYear()}-${String(r._expiry.getMonth()+1).padStart(2,"0")}`;
-      valMap[key] = (valMap[key] || 0) + (r["Value of Unrestricted Stock"]||0) + (r["Value of Stock in Quality Inspection"]||0);
-      if (!uniqMatSets[key]) uniqMatSets[key] = new Set();
-      uniqMatSets[key].add(getMatKey(r));
-    });
-    const ms = Object.keys(valMap).sort();
-    const uniqMap = {};
-    ms.forEach(m => { uniqMap[m] = uniqMatSets[m].size; });
-    Plotly.newPlot("chart-expiry-timeline", [
-      {type:"bar",    name:"Value at Risk (ETB)", x:ms, y:ms.map(m=>valMap[m]), yaxis:"y",  marker:{color:"#d29922"}, hovertemplate:"<b>%{x}</b><br>ETB %{y:,.0f}<extra></extra>"},
-      {type:"scatter",mode:"lines+markers",name:"Unique Materials", x:ms, y:ms.map(m=>uniqMap[m]), yaxis:"y2", marker:{color:"#f85149",size:8}, line:{color:"#f85149"}, hovertemplate:"<b>%{x}</b><br>Materials: %{y}<extra></extra>"},
-    ], pl({
-      height:280,
-      margin:{l:60,r:70,t:20,b:60},
-      xaxis:{title:{text:"Expiry Month",font:{size:10}}, tickfont:{size:10}, automargin:true},
-      yaxis:{title:{text:"Value at Risk (ETB)",font:{size:10,color:"#d29922"}}, tickfont:{color:"#d29922"}, automargin:true},
-      yaxis2:{overlaying:"y",side:"right",gridcolor:"transparent",tickfont:{color:"#f85149"},tickformat:",d",title:{text:"Unique Materials",font:{size:10,color:"#f85149"}}},
-    }), PLOTLY_CONFIG);
-
-    document.getElementById("chart-expiry-timeline").on("plotly_click", function(data) {
-      const pt = data.points[0];
-      const monthKey = pt.x;
-      const [yr, mo] = monthKey.split("-").map(Number);
-      const monthItems = expiring.filter(r => r._expiry.getFullYear() === yr && r._expiry.getMonth() + 1 === mo);
-      // FIX-QC-EXPIRY: _qty/_val roll Unrestricted + QC together so QC-only
-      // rows (Unrestricted Stock = 0) still show their real quantity/value
-      // instead of a misleading zero; _availBadge marks which is which.
-      const drillCols = [
-        {key:"Material", label:"Material Code", fmt:(val,r)=>renderMatCodeRaw(val,r), raw:true, cellClass:"col-mat-code-wrap"},
-        {key:"Material Description", label:"Material Description", fmt:(val,r)=>renderMatDescRaw(val,r), raw:true, cellClass:"col-mat-desc-wrap"},
-        {key:"Material Group Name",         label:"Material Group"},
-        {key:"Plant Name",                  label:"Plant"},
-        {key:"Description of Storage Location", label:"Storage Location"},
-        {key:"_expiryStr",                  label:"Expiry Date"},
-        {key:"_availBadge",                 label:"Availability",fmt:v=>v, raw:true},
-        {key:"_qty",                        label:"Qty",        fmt:fmtQty, cellClass:"col-qty"},
-        {key:"_val",                        label:"Value (ETB)",fmt:fmtETB, cellClass:"col-val"},
-        {key:"_daysLeft",                   label:"Days Left"},
-      ];
-      const drillRows = sortBy(
-        monthItems.map(r => ({
-          ...r,
-          _expiryStr: r._expiry ? fmtLocalDate(r._expiry) : "",
-          _daysLeft:  r._expiry ? Math.floor((r._expiry - new Date()) / 86400000) : 9999,
-          _qty:       (r["Unrestricted Stock"]||0) + (r["Stock in Quality Inspection"]||0),
-          _val:       (r["Value of Unrestricted Stock"]||0) + (r["Value of Stock in Quality Inspection"]||0),
-          _availBadge: r._qcOnly
-            ? "<span class='badge badge-amber'>In QC</span>"
-            : "<span class='badge badge-green'>Available</span>",
-        })),
-        "_daysLeft", true
-      );
-      const totalVal   = monthItems.reduce((s,r) => s+(r["Value of Unrestricted Stock"]||0)+(r["Value of Stock in Quality Inspection"]||0), 0);
-      const totalQty   = monthItems.reduce((s,r) => s+(r["Unrestricted Stock"]||0)+(r["Stock in Quality Inspection"]||0), 0);
-      const monthLabel = new Date(yr, mo-1, 1).toLocaleString("default", {month:"long", year:"numeric"});
-      document.getElementById("expiry-drill-title").textContent = "📅 " + monthLabel;
-      document.getElementById("expiry-drill-meta").textContent  = `${drillRows.length} items · ${fmtQty(totalQty)} units · ${fmtETB(totalVal)}`;
-      document.getElementById("expiry-drill-table").innerHTML   = drillRows.length
-        ? buildTable(drillRows, drillCols, r => r._daysLeft <= 30 ? "row-red" : r._daysLeft <= 90 ? "row-amber" : "")
-        : '<div class="alert-info">No items for this month.</div>';
-      const drillEl = document.getElementById("expiry-drilldown");
-      drillEl.style.display = "block";
-      drillEl.scrollIntoView({ behavior:"smooth", block:"nearest" });
-      document.getElementById("expiry-drill-dl-csv").onclick  = () => downloadCSV(drillRows,  drillCols, `expiry_${monthKey}.csv`);
-      document.getElementById("expiry-drill-dl-xlsx").onclick = () => downloadExcel(drillRows, drillCols, `expiry_${monthKey}.xlsx`);
-    });
-    document.getElementById("expiry-drill-close").onclick = () => {
-      document.getElementById("expiry-drilldown").style.display = "none";
-    };
-  } else {
-    document.getElementById("chart-expiry-timeline").innerHTML = "";
-    document.getElementById("expiry-drilldown").style.display  = "none";
-  }
+  // ── STOCK-TYPE SPLIT (RDF vs Health Program Q) ────────────────────────────
+  // A role that has access to BOTH stock types (per stockTypeFilterOptions()
+  // in permissions.js — Admin, or a user whose data_scopes include both a
+  // "Q_..." and an "R_..." scope) gets two separate timeline charts, one per
+  // stock type, instead of one chart that blends both funding streams
+  // together. A role scoped to only one stock type keeps the original single
+  // combined chart, unchanged.
+  const expiryStockTypes  = (typeof stockTypeFilterOptions === "function")
+    ? stockTypeFilterOptions(valid)
+    : ["Q", "RDF"];
+  const splitByStockType  = expiryStockTypes.includes("Q") && expiryStockTypes.includes("RDF");
+  renderExpiryTimelineSection(splitByStockType, expiring);
 
   // Detailed batch/location table — driven by the Material filter in the
   // filter bar (replaces the old free-text Material Lookup search box).
