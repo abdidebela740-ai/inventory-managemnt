@@ -191,14 +191,46 @@ function finishMosAmcLoad(file, detectedPlants, statusEl, btnEl) {
   if (currentPage === "mos-plant") renderMosPlant();
 }
 
+// ── DESCRIPTION FALLBACK (from the main inventory file) ───────────────────────
+// AMC files aren't guaranteed to carry a "Description" column at all (e.g. a
+// Q/RDF-style export that only has Material Code, PROGRAM TYPE, PERSON, and
+// plant columns). When the AMC row itself has no description, fall back to
+// the main inventory upload's "Material Description" — keyed by the same
+// canonical code (_mappedMaterial when a mapping file is loaded) buildMosSohMap()
+// already uses, so this agrees with every other page's description lookup.
+// Built once per buildMosMerged() call, not per row, to avoid rescanning the
+// whole inventory file per material.
+function buildInventoryDescMap() {
+  const map = new Map();
+  const base = (typeof getReconciledBase === "function")
+    ? getReconciledBase()
+    : (typeof rawDf !== "undefined" ? rawDf : []);
+  base.forEach(row => {
+    const code = String(row._mappedMaterial || row["Material"] || "").trim();
+    const desc = String(row._mappedDesc || row["Material Description"] || "").trim();
+    if (code && desc && !map.has(code)) map.set(code, desc);
+  });
+  return map;
+}
+
 // ── DEDUPLICATION (mapping-aware) ─────────────────────────────────────────────
 // Collapses multiple AMC source codes onto the same canonical target code when
 // a mapping file is loaded, summing AMC per plant across duplicates — same
 // approach used elsewhere in the app for inventory rows.
+//
+// KEYED BY CODE + TYPE, NOT CODE ALONE: the same material code can legitimately
+// appear twice in the AMC file — once under program type Q, once under RDF —
+// representing two separate consumption streams for that code. Keying by code
+// alone would collapse those two rows into one, silently summing their AMC and
+// keeping only whichever type was seen first. Keying by code+type keeps them
+// as two distinct mosMerged rows (same .code, different .type), while still
+// merging/summing multiple rows that share BOTH the same canonical code AND
+// the same type (e.g. two source codes that map to one target code, both Q).
 function buildMosMerged() {
   if (!mosAmcRaw.length) return [];
 
-  const merged = new Map(); // canonicalCode → mergedRow
+  const merged = new Map(); // "canonicalCode|type" → mergedRow
+  const invDescMap = buildInventoryDescMap();
 
   for (const row of mosAmcRaw) {
     let canonical = row.code;
@@ -217,8 +249,13 @@ function buildMosMerged() {
       }
     }
 
-    if (!merged.has(canonical)) {
-      merged.set(canonical, {
+    // AMC file had nothing for this material — try the inventory file.
+    if (!canonDesc) canonDesc = invDescMap.get(canonical) || "";
+
+    const dedupKey = `${canonical}|${row.type}`;
+
+    if (!merged.has(dedupKey)) {
+      merged.set(dedupKey, {
         code: canonical,
         origCodes: new Set([row.code]),
         desc: canonDesc,
@@ -228,9 +265,10 @@ function buildMosMerged() {
         isMerged: false,
       });
     }
-    const m = merged.get(canonical);
+    const m = merged.get(dedupKey);
     m.origCodes.add(row.code);
     if (m.origCodes.size > 1) m.isMerged = true;
+    if (!m.desc && canonDesc) m.desc = canonDesc; // fill in if an earlier dup left it blank
 
     for (const p of mosPlants) {
       const v = row.amcs[p];
@@ -244,6 +282,24 @@ function buildMosMerged() {
     ...m,
     origCodes: [...m.origCodes].join(", "),
   }));
+}
+
+// ── FIND A mosMerged ROW BY CODE, TYPE-AWARE ──────────────────────────────────
+// Since the same code can now have separate Q and RDF rows, any caller that
+// needs "the one row for this material" must say which type it means when it
+// knows (e.g. branch-demand.js resolving a request line's own Q/R
+// classification). If `type` is omitted or matches nothing, falls back to the
+// first row for that code (old single-row behavior) so callers that don't yet
+// have a type to check against still get a usable result instead of null.
+function mosFindRow(code, type) {
+  const c = String(code || "").trim().toUpperCase();
+  if (!c) return null;
+  if (type) {
+    const t = String(type).trim().toUpperCase();
+    const exact = mosMerged.find(r => r.code === c && r.type === t);
+    if (exact) return exact;
+  }
+  return mosMerged.find(r => r.code === c) || null;
 }
 
 // ── SOH LOOKUP (from main inventory file) ─────────────────────────────────────
