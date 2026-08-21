@@ -684,12 +684,18 @@
     const matTypeDataAvailable = matTypeMap.size > 0;
 
     // Same idea as availableMatTypes/matTypeDataAvailable above, for Material
-    // Group — sourced straight from the literal column, so "data available"
-    // just means at least one row had that column populated.
-    const availableMatGroups = [...new Set([
-      ...rows.map(r => r.materialGroup),
-      ...ho01NotRequestedAll.map(r => r.materialGroup),
-    ].filter(Boolean))].sort();
+    // Group. Routed through the central materialGroupFilterOptions() helper
+    // (permissions.js) — same choke point every other Material Group dropdown
+    // in the app now goes through — sourced from getReconciledBase() (the
+    // authoritative, already access-filtered main inventory data) rather than
+    // rebuilt from the downstream request-line objects. "Data available" still
+    // just means at least one material could be resolved to a group at all.
+    const availableMatGroups = (typeof materialGroupFilterOptions === "function")
+      ? materialGroupFilterOptions(typeof getReconciledBase === "function" ? getReconciledBase() : [])
+      : [...new Set([
+          ...rows.map(r => r.materialGroup),
+          ...ho01NotRequestedAll.map(r => r.materialGroup),
+        ].filter(Boolean))].sort();
     const matGroupDataAvailable = matGroupMap.size > 0;
 
     return {
