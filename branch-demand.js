@@ -231,16 +231,21 @@ let brdDraft = new Map();
 function brdDraftKey(plant, code) { return `${plant}::${code}`; }
 
 // ── ROLE / CAPABILITY HELPERS ───────────────────────────────────────────────
-// Per spec: branch_demand_officer gets a read-only recommendation view
-// (locked to their own plant when known); team_leader/director/deputy
-// director/admin get the full plant selector + multi-branch view + editing +
-// approval + export. Admin/Director-like already bypass most gating
-// elsewhere in the app, so we mirror that here rather than inventing a new
-// rule.
+// UPDATED POLICY: branch_demand_officer now also gets editing + approval +
+// export (previously read-only). All of branch_demand_officer/team_leader/
+// director/deputy_director/admin get the full plant selector + multi-branch
+// view + editing + approval + export. Admin/Director-like already bypass
+// most gating elsewhere in the app, so we mirror that here rather than
+// inventing a new rule. branch_demand_officer stays locked to their own
+// plant when known (see brdLockedPlant()) — this only changes their edit
+// capability within that plant, not their plant scope.
 function brdCanEdit() {
   return (typeof computeIsAdmin === "function" && computeIsAdmin())
       || (typeof isDirectorLike === "function" && isDirectorLike())
-      || (typeof currentRole === "function" && currentRole() === "team_leader");
+      || (typeof currentRole === "function" && currentRole() === "team_leader")
+      // POLICY UPDATE: branch_demand_officer now also gets edit/approve/export
+      // access (previously read-only-only per the original spec comment above).
+      || (typeof currentRole === "function" && currentRole() === "branch_demand_officer");
 }
 function brdCanSeeAllBranches() { return brdCanEdit(); }
 // window.APP_USER.plant (see permissions.js "PLANT SCOPING" for the
