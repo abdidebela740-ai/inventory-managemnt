@@ -26,6 +26,78 @@ const ROLE_LABELS = {
 
 const VALID_VALUATION_SUFFIXES = ["ZME", "ZMS", "ZLC", "ZMD"];
 
+// ── PLANT SCOPING ────────────────────────────────────────────────
+// Single source of truth for the "restrict a user to one branch/plant"
+// feature configured in Advanced User Management (see user-management.js
+// PLANT_OPTIONS / field-hint, and window.APP_USER.plant set in auth.js).
+//
+// Rules (per the user-management field hint + auth.js comments this was
+// always meant to back):
+//   - Admin always sees every plant (hasFullPlantAccess()).
+//   - A user whose plant is unset or "HO01" (Head Office) sees every plant.
+//   - Any other plant code restricts that user to that plant ONLY, plus the
+//     HO01 hub itself (Branch Demand and similar hub-vs-branch views need to
+//     show what stock Head Office has available even to a branch-locked
+//     user).
+//
+// NOTE: these were previously referenced by comments/defensive
+// `typeof fn === "function"` checks throughout mos.js / pending-dispatch.js /
+// auth.js / user-management.js but never actually implemented here — which
+// meant plant restriction silently did nothing anywhere in the app
+// (dashboard, expiry watch list, quality inspection / New Received Stock,
+// branch comparison, etc. all showed every plant to every user regardless
+// of their assigned branch). This block is that missing implementation.
+const HUB_PLANT = "HO01";
+
+function hasFullPlantAccess() {
+  return computeIsAdmin();
+}
+
+function getUserPlant() {
+  return (window.APP_USER && window.APP_USER.plant)
+    ? String(window.APP_USER.plant).trim().toUpperCase()
+    : null;
+}
+
+// True when this user has no plant restriction at all — i.e. Admin, or a
+// user whose plant is unset / explicitly HO01.
+function isHeadOfficeUser() {
+  if (hasFullPlantAccess()) return true;
+  const p = getUserPlant();
+  return !p || p === HUB_PLANT;
+}
+
+/**
+ * Row/dropdown-level plant access check. `plantCode` should already be the
+ * bare code (e.g. "AA01"), matching how callers read row["Plant"] or a
+ * plant-select's value.
+ *
+ * Deliberately permissive on missing/blank plantCode (e.g. rows from a file
+ * that doesn't carry a "Plant" column at all, or a not-yet-selected filter
+ * value) — plant scoping only restricts rows that identify a plant this
+ * user isn't allowed to see; it never blanket-denies data that simply has
+ * no plant to check, which would be a different (and much more aggressive)
+ * failure mode than intended.
+ */
+function canAccessPlant(plantCode) {
+  if (isHeadOfficeUser()) return true;
+  const p = String(plantCode || "").trim().toUpperCase();
+  if (!p) return true;
+  if (p === HUB_PLANT) return true; // branch users can always see the HO01 hub
+  return p === getUserPlant();
+}
+
+/**
+ * Filters a list of plant codes (e.g. a page's plant dropdown options, or
+ * mosPlants derived from an AMC file's own columns) down to the ones this
+ * user may see. Admin / HO01 users get the list back unchanged.
+ */
+function getVisiblePlants(plants) {
+  if (!Array.isArray(plants)) return [];
+  if (isHeadOfficeUser()) return plants;
+  return plants.filter(p => canAccessPlant(p));
+}
+
 // ── BASIC ROLE CHECKS ───────────────────────────────────────────
 function computeIsAdmin() {
   return !!window.isAdmin;
@@ -54,13 +126,33 @@ function canManageUsersFully() {
 }
 
 // ── SIDEBAR / MODULE PERMISSIONS ────────────────────────────────
+// Head-Office-only modules: these are national/cross-branch views (open
+// outbound across every branch, branch-vs-branch comparison, overstock &
+// expiry risk analytics, stockout-risk analytics, and the whole Quick
+// Lookup section) that only make sense — and are only meant to be granted
+// — to a Head Office user (HO01 plant, or unset) or Admin. A user locked to
+// a specific branch plant can NEVER be granted these, no matter what an
+// Admin/Director checks in Advanced User Management: the checkboxes for
+// these keys are disabled there whenever a non-HO01 plant is selected (see
+// user-management.js), and this is the matching enforcement point so a
+// stale/tampered sidebar_permissions value can't grant them either. Other
+// modules remain available to branch users as normal, just scoped to their
+// own branch by the plant-scoping functions above.
+const HEAD_OFFICE_ONLY_MODULE_KEYS = [
+  "pending-dispatch", "branch", "expiry-risk", "stockout-risk",
+  "quick-lookup", "who-responsible", "shelf-life-lookup", "new-received-stock",
+];
+
 // Admin always has every module. Everyone else needs an explicit `true`
 // in their sidebar_permissions map — the default for a newly created user
 // is an empty map (nothing on), per the "minimal default, customize per
-// user" decision.
+// user" decision. Head-Office-only modules are additionally hard-denied to
+// any user locked to a specific branch plant, regardless of what their
+// sidebar_permissions map says.
 function canAccessModule(moduleKey) {
   if (computeIsAdmin()) return true;
   if (!window.APP_USER) return false;
+  if (HEAD_OFFICE_ONLY_MODULE_KEYS.includes(moduleKey) && !isHeadOfficeUser()) return false;
   const perms = window.APP_USER.sidebar_permissions || {};
   return perms[moduleKey] === true;
 }
@@ -106,6 +198,7 @@ function getRowScopeCode(row) {
  */
 function canAccessRow(row) {
   if (computeIsAdmin()) return true;
+  if (!canAccessPlant(row && row["Plant"])) return false;
   const scope = getRowScopeCode(row);
   if (!scope) return false;
   return getUserScopes().includes(scope);
@@ -271,10 +364,17 @@ function firstAccessibleModule() {
 // ── EXPORTS ──────────────────────────────────────────────────────
 window.isAdminUser          = computeIsAdmin;
 window.currentRole          = currentRole;
+window.hasFullPlantAccess   = hasFullPlantAccess;
+window.getUserPlant         = getUserPlant;
+window.isHeadOfficeUser     = isHeadOfficeUser;
+window.canAccessPlant       = canAccessPlant;
+window.getVisiblePlants     = getVisiblePlants;
+window.HUB_PLANT            = HUB_PLANT;
 window.isDirectorLike       = isDirectorLike;
 window.canManageRoles       = canManageRoles;
 window.canManageUsersFully  = canManageUsersFully;
 window.canAccessModule      = canAccessModule;
+window.HEAD_OFFICE_ONLY_MODULE_KEYS = HEAD_OFFICE_ONLY_MODULE_KEYS;
 window.getUserScopes        = getUserScopes;
 window.getRowScopeCode      = getRowScopeCode;
 window.canAccessRow         = canAccessRow;
