@@ -209,6 +209,15 @@
           const posting = parseExpiryDate(r["Posting Date"]);
           if (!posting) continue;
           const plant = String(r["Plant"] || "").trim().toUpperCase();
+          // PLANT SCOPING: this GR file is uploaded separately from the main
+          // inventory file, so it never passes through filterRowsByAccess()/
+          // canAccessRow() above — gate it here directly so a branch-locked
+          // user can't see New Received Stock batches from other plants.
+          // Blank plant (rare) is left unfiltered, same "don't blanket-deny
+          // unknown data" convention as canAccessPlant() itself.
+          if (typeof window.canAccessPlant === "function" && !window.canAccessPlant(plant)) {
+            excludedRows++; continue;
+          }
           const storageLoc = String(r["Storage Location"] || "").trim().toUpperCase();
 
           const key = `${mat}|${batch}`;
