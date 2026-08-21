@@ -1231,10 +1231,13 @@ document.addEventListener("click", e => {
 // ── POPULATE FILTER DROPDOWNS ──────────────────────────────────────────────
 function populateAllFilters() {
   const plants = [...new Set(rawDf.map(r => r["Plant Name"]))].filter(Boolean).sort();
-  const mgs    = [...new Set(rawDf.map(r => r["Material Group Name"]))]
-    .filter(Boolean)
-    .filter(name => !isNonMedicalGroup(name))
-    .sort();
+  // Routed through the single central helper (permissions.js) instead of
+  // building the list here — rawDf is already access-filtered, so this
+  // just needs the shared non-medical-group exclusion applied consistently
+  // with every other Material Group control in the app.
+  const mgs    = (typeof materialGroupFilterOptions === "function")
+    ? materialGroupFilterOptions(rawDf)
+    : [...new Set(rawDf.map(r => r["Material Group Name"]))].filter(Boolean).filter(name => !isNonMedicalGroup(name)).sort();
 
   // Plant multi-selects
   const plantConfigs = [
@@ -3502,8 +3505,13 @@ function renderBranch() {
 
     if (!matTabInitialized) {
       matTabInitialized = true;
-      // FIX-BRANCH-MG: use baseDf (not aggregated df) so all material groups are available
-      const mgNamesForFilter = [...new Set(baseDf.map(r => r["Material Group Name"]))].filter(Boolean).filter(name => !isNonMedicalGroup(name)).sort();
+      // FIX-BRANCH-MG: use baseDf (not aggregated df) so all material groups are available.
+      // Routed through the central materialGroupFilterOptions() helper (permissions.js)
+      // rather than a local copy of the list-building logic — baseDf here comes from
+      // applyPageFilter("branch"), which already runs canAccessRow().
+      const mgNamesForFilter = (typeof materialGroupFilterOptions === "function")
+        ? materialGroupFilterOptions(baseDf)
+        : [...new Set(baseDf.map(r => r["Material Group Name"]))].filter(Boolean).filter(name => !isNonMedicalGroup(name)).sort();
       // Build list of all materials for the multi-select.
       // BUGFIX-MAT-FILTER-DEDUP: previously built from the RAW "Material" /
       // "Material Description" fields on every baseDf row, so a material
