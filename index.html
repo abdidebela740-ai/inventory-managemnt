@@ -1426,27 +1426,11 @@
     </div>
     <div class="kpi-row" id="expiry-kpis"></div>
     <div id="expiry-mapping-banner"></div>
-    <div class="chart-box full">
-      <div class="section-header" style="display:flex;align-items:center;gap:0.5rem">
-        <span>Expiry Timeline — Items &amp; Value at Risk by Month</span>
-        <span style="font-size:0.7rem;font-weight:400;color:var(--muted);margin-left:0.25rem">— Click a bar to drill into that month's items</span>
-      </div>
-      <div id="chart-expiry-timeline"></div>
-      <div id="expiry-drilldown" style="display:none;margin-top:1rem;border-top:1px solid var(--border2);padding-top:1rem">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;flex-wrap:wrap;gap:0.5rem">
-          <div>
-            <span id="expiry-drill-title" style="font-weight:700;color:var(--text);font-size:0.95rem"></span>
-            <span id="expiry-drill-meta" style="font-size:0.78rem;color:var(--muted);margin-left:0.75rem"></span>
-          </div>
-          <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
-            <button id="expiry-drill-dl-csv" class="dl-btn" style="font-size:0.72rem;padding:4px 10px">⬇ CSV</button>
-            <button id="expiry-drill-dl-xlsx" class="dl-btn" style="font-size:0.72rem;padding:4px 10px">⬇ Excel</button>
-            <button id="expiry-drill-close" class="apply-btn secondary" style="font-size:0.72rem;padding:4px 12px">✕ Close</button>
-          </div>
-        </div>
-        <div id="expiry-drill-table"></div>
-      </div>
-    </div>
+    <!-- Populated by renderExpiryTimelineSection() in script.js: a single
+         combined chart-box for roles scoped to only one stock type, or two
+         side-by-side chart-boxes (RDF + Health Program Q) for roles that
+         have access to both — see stockTypeFilterOptions() in permissions.js. -->
+    <div id="expiry-timeline-boxes"></div>
     <div id="expiry-table-wrap"></div>
     <div id="expired-section" style="margin-top:1.5rem">
       <div class="section-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem">
