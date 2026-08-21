@@ -228,6 +228,35 @@ function openModal(mode, user) {
       if (el.dataset.roleField !== "true") el.disabled = true;
     });
   }
+
+  // Live-gate the Head-Office-only permission checkboxes as the Plant
+  // select changes, so an Admin switching a user from HO01 to a branch (or
+  // vice versa) immediately sees the affected modules lock/unlock, rather
+  // than only finding out on save.
+  const plantEl = document.getElementById("um-f-plant");
+  if (plantEl && fullEdit) {
+    plantEl.addEventListener("change", () => applyPlantGatingToPermCheckboxes(plantEl.value));
+    applyPlantGatingToPermCheckboxes(plantEl.value);
+  }
+}
+
+// Enables/disables the Head-Office-only "perm" checkboxes to match the
+// currently-selected Plant. Unchecking on lock is deliberate — a checkbox
+// that's disabled AND still checked would submit as checked via
+// collectPerms() (disabled inputs still expose .checked), so this is the
+// actual gating mechanism, not just a visual cue. Matches
+// permissions.js's canAccessModule() hard-deny for the same key set.
+function applyPlantGatingToPermCheckboxes(plantValue) {
+  const hoOnlyKeys = window.HEAD_OFFICE_ONLY_MODULE_KEYS || [];
+  const isBranch = !!plantValue && plantValue !== "HO01";
+  hoOnlyKeys.forEach(key => {
+    const input = document.querySelector(`input[name="perm"][value="${key}"]`);
+    const label = document.querySelector(`[data-ho-only="${key}"]`);
+    if (!input) return;
+    input.disabled = isBranch;
+    if (isBranch) input.checked = false;
+    if (label) label.classList.toggle("perm-check-locked", isBranch);
+  });
 }
 
 function closeModal() {
@@ -277,13 +306,24 @@ function modalBodyHtml(mode, user) {
       "new-received-stock:&nbsp;&nbsp;&nbsp;&nbsp;↳ New Received Stock",
     ],
   };
+  // Head-Office-only modules (permissions.js HEAD_OFFICE_ONLY_MODULE_KEYS):
+  // cross-branch/national views that only make sense for a Head Office user.
+  // A user locked to a specific (non-HO01) branch plant can never be
+  // granted these — the checkbox is disabled+unchecked below, and
+  // applyPlantGatingToPermCheckboxes() keeps that in sync live as the Plant
+  // select changes. permissions.js's canAccessModule() is the matching
+  // hard-enforcement point, so this isn't just cosmetic.
+  const hoOnlyKeys = window.HEAD_OFFICE_ONLY_MODULE_KEYS || [];
+  const plantIsBranch = !!plant && plant !== "HO01";
   const permGrid = Object.entries(MODULE_GROUPS).map(([group, items]) => `
     <div class="perm-group-label">${group}</div>
     ${items.map(item => {
       const [key, label] = item.split(":");
-      return `<label class="perm-check">
-        <input type="checkbox" name="perm" value="${key}" ${perms[key] ? "checked" : ""} />
-        <span>${label}</span>
+      const isHoOnly = hoOnlyKeys.includes(key);
+      const locked = isHoOnly && plantIsBranch;
+      return `<label class="perm-check${locked ? " perm-check-locked" : ""}" ${isHoOnly ? `data-ho-only="${key}"` : ""}>
+        <input type="checkbox" name="perm" value="${key}" ${(perms[key] && !locked) ? "checked" : ""} ${locked ? "disabled" : ""} />
+        <span>${label}${isHoOnly ? ' <em style="font-style:normal;color:var(--muted);font-size:0.68rem;">· HO01 only</em>' : ""}</span>
       </label>`;
     }).join("")}
   `).join("");
@@ -355,9 +395,17 @@ async function saveModal() {
 function collectScopes() {
   return Array.from(document.querySelectorAll('input[name="scope"]:checked')).map(el => el.value);
 }
-function collectPerms() {
+// `plantValue` strips any Head-Office-only key back to false when the
+// user being saved is locked to a branch plant — independent of whatever
+// the checkboxes' disabled/checked DOM state happens to be, so this can't
+// be bypassed even if the live-gating listener above didn't run.
+function collectPerms(plantValue) {
   const perms = {};
   document.querySelectorAll('input[name="perm"]').forEach(el => { perms[el.value] = el.checked; });
+  const isBranch = !!plantValue && plantValue !== "HO01";
+  if (isBranch) {
+    (window.HEAD_OFFICE_ONLY_MODULE_KEYS || []).forEach(key => { perms[key] = false; });
+  }
   return perms;
 }
 
@@ -368,7 +416,7 @@ async function createUser() {
   const role = document.getElementById("um-f-role").value;
   const plant = document.getElementById("um-f-plant").value;
   const data_scopes = collectScopes();
-  const sidebar_permissions = collectPerms();
+  const sidebar_permissions = collectPerms(plant);
 
   if (!full_name || !email || !password) {
     showAlert("error", "Full name, email, and password are all required.");
@@ -415,7 +463,7 @@ async function updateUser() {
   if (canManageUsersFully()) {
     const plant = document.getElementById("um-f-plant").value;
     const data_scopes = collectScopes();
-    const sidebar_permissions = collectPerms();
+    const sidebar_permissions = collectPerms(plant);
 
     if (role !== "admin" && data_scopes.length === 0) {
       showAlert("error", "Assign at least one data scope for non-Admin users.");
