@@ -1420,10 +1420,14 @@ function sortBy(arr, key, asc=false) { return [...arr].sort((a,b) => asc ? a[key
 // of stock quantities — those are two very different numbers, and mixing them
 // up under one "Qty" label is what was causing confusion.
 // Respects the same source-material mapping used elsewhere (_mappedMaterial).
-function countUniqueMaterialsByGroup(rows, groupKey) {
+// groupKey: column name to group by (e.g. "Plant Name"). Pass groupFn
+// instead (e.g. getRowStockTypeLabel) to derive the group label from the
+// row rather than reading a fixed column — used by charts that swap their
+// axis to Stock Type (Q/RDF) for branch-locked roles.
+function countUniqueMaterialsByGroup(rows, groupKey, groupFn) {
   const sets = {};
   rows.forEach(row => {
-    const g = row[groupKey] || "(Blank)";
+    const g = (typeof groupFn === "function") ? groupFn(row) : (row[groupKey] || "(Blank)");
     if (!sets[g]) sets[g] = new Set();
     sets[g].add(row._mappedMaterial || row["Material"]);
   });
@@ -1654,9 +1658,17 @@ function renderDashboard() {
   // the Branch Comparison chart style. Uses getMappedVal/getVerifiedTransitVal so
   // unit-conversion mapping and the phantom-transit exclusion are respected, same
   // as everywhere else on the Dashboard.
+  //
+  // FEAT-BRANCH-AXIS: branch-locked roles only ever have one Plant, so this
+  // chart used to render as one full-width bar for them. For those roles,
+  // group by Stock Type (Q / RDF) instead — still meaningful within a
+  // single branch. HO01/Admin keep the Plant axis regardless of how many
+  // plants survive the current filter. See shouldUseStockTypeAxis() in
+  // permissions.js.
+  const useStockTypeAxis = typeof shouldUseStockTypeAxis === "function" && shouldUseStockTypeAxis();
   const plantAggMap = {};
   df.forEach(r => {
-    const k = r["Plant Name"] || "(Blank)";
+    const k = useStockTypeAxis ? getRowStockTypeLabel(r) : (r["Plant Name"] || "(Blank)");
     if (!plantAggMap[k]) {
       plantAggMap[k] = {
         PlantName:k, Unrestricted:0, Transit:0, QC:0, TotalValue:0,
@@ -1699,10 +1711,27 @@ function renderDashboard() {
     height:300,
     barmode:"stack",
     margin:{l:60,r:70,t:20,b:100},
-    xaxis:{tickangle:-35, tickfont:{size:10}, automargin:true},
+    xaxis:{title:{text: useStockTypeAxis ? "Stock Type" : "Plant", font:{size:10}}, tickangle:-35, tickfont:{size:10}, automargin:true},
     yaxis:{title:{text:"Value (ETB)",font:{size:10}}, automargin:true},
     yaxis2:{overlaying:"y",side:"right",gridcolor:"transparent",tickfont:{color:"#7ee0ff"},tickformat:",d",title:{text:"Unique Materials",font:{size:10,color:"#7ee0ff"}}},
   }), PLOTLY_CONFIG);
+
+  const dashPlantValEl = document.getElementById("chart-plant-val");
+  if (dashPlantValEl) {
+    dashPlantValEl.on("plotly_click", function(data) {
+      const groupLabel = data.points[0].x;
+      const items = useStockTypeAxis
+        ? df.filter(r => getRowStockTypeLabel(r) === groupLabel)
+        : df.filter(r => (r["Plant Name"] || "(Blank)") === groupLabel);
+      const rows = buildDrillRows(items, "Unrestricted Stock", "Value of Unrestricted Stock");
+      showChartDrillModal({
+        title: `📦 Inventory — ${groupLabel}`,
+        meta: `${rows.length} items`,
+        rows, cols: CHART_DRILL_COLS,
+        filenameBase: `inventory_${groupLabel}`,
+      });
+    });
+  }
 
   // ── Material Groups with Expiry Risk ──────────────────────────────────
   // For each material group, count how many distinct materials have
@@ -1833,14 +1862,19 @@ function renderDashboard() {
   // a raw sum, this bar's height silently disagreed with the CSV/Excel exported from
   // clicking it whenever a mapping file was active. Aggregating with getMappedVal
   // here makes the bar and its export agree again.
+  // FEAT-BRANCH-AXIS: branch-locked roles only have one Plant, so this chart
+  // used to render as one full-width bar for them. Group by Stock Type
+  // (Q / RDF) instead for those roles; HO01/Admin keep the Plant axis. See
+  // shouldUseStockTypeAxis() in permissions.js.
+  const nearUseStockTypeAxis = typeof shouldUseStockTypeAxis === "function" && shouldUseStockTypeAxis();
   const nearByPlantMap = {};
   nearExpiry.forEach(r => {
-    const k = r["Plant Name"] || "(Blank)";
+    const k = nearUseStockTypeAxis ? getRowStockTypeLabel(r) : (r["Plant Name"] || "(Blank)");
     if (!nearByPlantMap[k]) nearByPlantMap[k] = { "Plant Name": k, val: 0 };
     nearByPlantMap[k].val += getMappedVal(r, "Value of Unrestricted Stock");
   });
   const nearByPlant = sortBy(Object.values(nearByPlantMap), "val");
-  const uniqByPlantNear = countUniqueMaterialsByGroup(nearExpiry, "Plant Name");
+  const uniqByPlantNear = countUniqueMaterialsByGroup(nearExpiry, nearUseStockTypeAxis ? null : "Plant Name", nearUseStockTypeAxis ? getRowStockTypeLabel : null);
   nearByPlant.forEach(r => { r.uniqMat = uniqByPlantNear[r["Plant Name"]] || 0; });
   if (nearByPlant.length) {
     Plotly.newPlot("chart-mg-bar", [
@@ -1848,20 +1882,22 @@ function renderDashboard() {
       { type:"scatter", mode:"lines+markers", name:"Unique Materials at Risk", x:nearByPlant.map(r=>r["Plant Name"]), y:nearByPlant.map(r=>r.uniqMat), yaxis:"y2", marker:{color:"#f85149",size:8}, line:{color:"#f85149"}, hovertemplate:"<b>%{x}</b><br>Materials: %{y}<extra></extra>" },
     ], pl({
       height:420, margin:{l:60,r:80,t:20,b:110}, barmode:"group",
-      xaxis:{title:{text:"Plant",font:{size:10}}, tickangle:-35, tickfont:{size:10}, automargin:true},
+      xaxis:{title:{text: nearUseStockTypeAxis ? "Stock Type" : "Plant", font:{size:10}}, tickangle:-35, tickfont:{size:10}, automargin:true},
       yaxis:{title:{text:"Value at Risk (ETB)",font:{size:10,color:"#d29922"}}, tickfont:{color:"#d29922"}, automargin:true},
       yaxis2:{overlaying:"y",side:"right",gridcolor:"transparent",tickfont:{color:"#f85149"},tickformat:",d",title:{text:"Unique Materials",font:{size:10,color:"#f85149"}}},
     }), PLOTLY_CONFIG);
 
     document.getElementById("chart-mg-bar").on("plotly_click", function(data) {
-      const plantName = data.points[0].x;
-      const items = nearExpiry.filter(r => (r["Plant Name"] || "(Blank)") === plantName);
+      const groupLabel = data.points[0].x;
+      const items = nearUseStockTypeAxis
+        ? nearExpiry.filter(r => getRowStockTypeLabel(r) === groupLabel)
+        : nearExpiry.filter(r => (r["Plant Name"] || "(Blank)") === groupLabel);
       const rows  = buildDrillRows(items, "Unrestricted Stock", "Value of Unrestricted Stock");
       showChartDrillModal({
-        title: `⏳ Near-Expiry Risk — ${plantName}`,
+        title: `⏳ Near-Expiry Risk — ${groupLabel}`,
         meta: `${rows.length} items · within 6 months`,
         rows, cols: CHART_DRILL_COLS,
-        filenameBase: `near_expiry_${plantName}`,
+        filenameBase: `near_expiry_${groupLabel}`,
       });
     });
   } else {
@@ -3045,14 +3081,19 @@ function renderQC() {
   // KPI cards above (which sum df, already mapped via aggregateByMappedMaterial) and
   // the drilldown export (buildDrillRows -> getMappedVal). Aggregating with
   // getMappedVal here brings all three into agreement.
+  // FEAT-BRANCH-AXIS: branch-locked roles only have one Plant, so this chart
+  // used to render as one full-width bar for them. Group by Stock Type
+  // (Q / RDF) instead for those roles; HO01/Admin keep the Plant axis. See
+  // shouldUseStockTypeAxis() in permissions.js.
+  const qcUseStockTypeAxis = typeof shouldUseStockTypeAxis === "function" && shouldUseStockTypeAxis();
   const plantQCMap = {};
   rawFiltered.forEach(r => {
-    const k = r["Plant Name"] || "(Blank)";
+    const k = qcUseStockTypeAxis ? getRowStockTypeLabel(r) : (r["Plant Name"] || "(Blank)");
     if (!plantQCMap[k]) plantQCMap[k] = { "Plant Name": k, val: 0 };
     plantQCMap[k].val += getMappedVal(r, "Value of Stock in Quality Inspection");
   });
   const plantQC = sortBy(Object.values(plantQCMap), "val");
-  const uniqByPlantQC = countUniqueMaterialsByGroup(rawFiltered, "Plant Name");
+  const uniqByPlantQC = countUniqueMaterialsByGroup(rawFiltered, qcUseStockTypeAxis ? null : "Plant Name", qcUseStockTypeAxis ? getRowStockTypeLabel : null);
   plantQC.forEach(r => { r.uniqMat = uniqByPlantQC[r["Plant Name"]] || 0; });
   Plotly.newPlot("chart-qc-plant", [
     {type:"bar",     name:"Value (ETB)", x:plantQC.map(r=>r["Plant Name"]), y:plantQC.map(r=>r.val), yaxis:"y",  marker:{color:"#f85149"}, hovertemplate:"<b>%{x}</b><br>ETB %{y:,.0f}<extra></extra>"},
@@ -3060,20 +3101,22 @@ function renderQC() {
   ], pl({
     height:300,
     margin:{l:60,r:70,t:20,b:100},
-    xaxis:{title:{text:"Plant",font:{size:10}}, tickangle:-35, tickfont:{size:10}, automargin:true},
+    xaxis:{title:{text: qcUseStockTypeAxis ? "Stock Type" : "Plant", font:{size:10}}, tickangle:-35, tickfont:{size:10}, automargin:true},
     yaxis:{title:{text:"Value (ETB)",font:{size:10,color:"#f85149"}}, tickfont:{color:"#f85149"}, automargin:true},
     yaxis2:{overlaying:"y",side:"right",gridcolor:"transparent",tickfont:{color:"#3fb950"},tickformat:",d",title:{text:"Unique Materials",font:{size:10,color:"#3fb950"}}},
   }), PLOTLY_CONFIG);
 
   document.getElementById("chart-qc-plant").on("plotly_click", function(data) {
-    const plantName = data.points[0].x;
-    const items = rawFiltered.filter(r => (r["Plant Name"] || "(Blank)") === plantName);
+    const groupLabel = data.points[0].x;
+    const items = qcUseStockTypeAxis
+      ? rawFiltered.filter(r => getRowStockTypeLabel(r) === groupLabel)
+      : rawFiltered.filter(r => (r["Plant Name"] || "(Blank)") === groupLabel);
     const rows  = buildDrillRows(items, "Stock in Quality Inspection", "Value of Stock in Quality Inspection");
     showChartDrillModal({
-      title: `🧪 In QC — ${plantName}`,
+      title: `🧪 In QC — ${groupLabel}`,
       meta: `${rows.length} items`,
       rows, cols: CHART_DRILL_COLS,
-      filenameBase: `qc_${plantName}`,
+      filenameBase: `qc_${groupLabel}`,
     });
   });
 
