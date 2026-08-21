@@ -28,6 +28,12 @@
 
 const HUB_PLANT = "HO01"; // the distribution hub — never has its own consumption
 
+// The only two program types this app understands. Anything an AMC file
+// carries outside this set (including blank) can't be trusted for MOS-by-type
+// filtering, so it's routed through the assignment prompt below instead of
+// being silently kept as whatever raw string the file had.
+const VALID_MOS_TYPES = ["Q", "RDF"];
+
 // ── MOS STATE ────────────────────────────────────────────────────────────────
 let mosAmcRaw    = [];          // parsed rows from AMC.xlsx: { code, desc, type, person, amcs:{plant:val} }
 let mosPlants    = [];          // ordered plant code list detected from AMC.xlsx
@@ -49,7 +55,12 @@ function loadMosAmcFile(file) {
 
       if (!rows.length) throw new Error("AMC file is empty.");
 
-      const META = ["Material Code", "Description", "Material Type Code", "PERSON"];
+      // "Description" and the type column are both optional in the source
+      // file. Some AMC exports use "Material Type Code"; others (e.g. the
+      // Q/RDF-style export) use "PROGRAM TYPE" instead and drop Description
+      // entirely. Both are recognized here so neither gets mistaken for a
+      // plant column.
+      const META = ["Material Code", "Description", "Material Type Code", "PROGRAM TYPE", "PERSON"];
       const firstRow = rows[0];
       const detectedPlants = Object.keys(firstRow).filter(k => !META.includes(k));
       if (!detectedPlants.length) throw new Error("No plant columns found in AMC file.");
@@ -64,7 +75,7 @@ function loadMosAmcFile(file) {
       mosAmcRaw  = rows.map(r => ({
         code:   String(r["Material Code"] || "").trim(),
         desc:   String(r["Description"]   || "").trim(),
-        type:   String(r["Material Type Code"] || "").trim().toUpperCase(),
+        type:   String(r["Material Type Code"] || r["PROGRAM TYPE"] || "").trim().toUpperCase(),
         person: String(r["PERSON"] || "").trim(),
         amcs: Object.fromEntries(
           detectedPlants.map(p => [String(p).trim().toUpperCase(), (r[p] == null || r[p] === "" || typeof r[p] === "string") ? null : Number(r[p])])
@@ -75,20 +86,17 @@ function loadMosAmcFile(file) {
       mosPersons = [...new Set(mosAmcRaw.map(r => r.person).filter(Boolean))].sort();
       if (typeof populatePersonFilter === "function") populatePersonFilter(mosPersons);
 
-      mosMerged = buildMosMerged();
-
-      const count = mosMerged.length;
-      const hasHub = mosPlants.includes(HUB_PLANT);
-      if (statusEl) statusEl.innerHTML =
-        `<div class="status-ok">✓ LOADED</div><div class="status-name">${escHtml(file.name)}</div>` +
-        `<div class="status-name" style="color:var(--green)">${count} items · ${detectedPlants.length} plants</div>` +
-        (hasHub ? "" : `<div class="status-name" style="color:var(--amber)">⚠️ "${HUB_PLANT}" column not found — hub MOS rule won't apply</div>`);
-      if (btnEl) btnEl.textContent = "📐 Change AMC File";
-
-      document.getElementById("mos-no-amc").style.display  = "none";
-      document.getElementById("mos-content").style.display = "block";
-
-      if (currentPage === "mos-plant") renderMosPlant();
+      // Any row whose type isn't Q or RDF (including blank) needs a human
+      // call — stop and ask right away instead of guessing or silently
+      // dropping it into an "other" bucket. mosAmcRaw entries are mutated
+      // in place by promptForMosTypeAssignment, so this just needs to run
+      // before mosMerged is built.
+      const ambiguous = mosAmcRaw.filter(r => !VALID_MOS_TYPES.includes(r.type));
+      if (ambiguous.length) {
+        promptForMosTypeAssignment(ambiguous, () => finishMosAmcLoad(file, detectedPlants, statusEl, btnEl));
+      } else {
+        finishMosAmcLoad(file, detectedPlants, statusEl, btnEl);
+      }
 
     } catch (err) {
       console.error("MOS AMC load error:", err);
@@ -96,6 +104,91 @@ function loadMosAmcFile(file) {
     }
   };
   reader.readAsArrayBuffer(file);
+}
+
+// ── Program-type clarification prompt ─────────────────────────────────────────
+// Walks the caller through every row whose type wasn't Q or RDF, one at a
+// time, and lets them pick which it should be (or leave it unassigned).
+// `items` are references into mosAmcRaw, so assigning here mutates the same
+// objects buildMosMerged() will read from next.
+function promptForMosTypeAssignment(items, onDone) {
+  let idx = 0;
+
+  function finish() {
+    document.removeEventListener("keydown", escHandler);
+    const el = document.getElementById("mos-type-assign-backdrop");
+    if (el) el.remove();
+    onDone();
+  }
+
+  function escHandler(e) {
+    if (e.key === "Escape") assign(""); // skip this one item, keep the queue going
+  }
+
+  function assign(value) {
+    if (value) items[idx].type = value;
+    idx++;
+    render();
+  }
+
+  function render() {
+    if (idx >= items.length) { finish(); return; }
+    const row = items[idx];
+
+    let backdrop = document.getElementById("mos-type-assign-backdrop");
+    if (!backdrop) {
+      backdrop = document.createElement("div");
+      backdrop.id = "mos-type-assign-backdrop";
+      backdrop.className = "um-modal-backdrop open";
+      document.body.appendChild(backdrop);
+      document.addEventListener("keydown", escHandler);
+    }
+
+    backdrop.innerHTML = `
+      <div class="um-modal" role="dialog" aria-modal="true" aria-label="Assign program type">
+        <div class="um-modal-header">
+          <h2>📐 Assign Program Type</h2>
+          <span style="color:var(--muted);font-size:0.8rem">${idx + 1} of ${items.length}</span>
+        </div>
+        <div class="um-modal-body">
+          <div class="alert-info" style="margin-bottom:0.9rem">
+            This material's type isn't <b>Q</b> or <b>RDF</b>${row.type ? ` (found "${escHtml(row.type)}")` : " (blank)"} — pick one to continue.
+          </div>
+          <div style="font-weight:800;margin-bottom:2px">${escHtml(row.code)}</div>
+          <div style="color:var(--muted);font-size:0.85rem">${escHtml(row.desc || "—")}${row.person ? " · " + escHtml(row.person) : ""}</div>
+        </div>
+        <div class="um-modal-footer" style="justify-content:space-between">
+          <button type="button" class="apply-btn secondary small" id="mos-type-skip">Skip (leave blank)</button>
+          <div style="display:flex;gap:10px">
+            <button type="button" class="apply-btn" id="mos-type-q">Q</button>
+            <button type="button" class="apply-btn" id="mos-type-rdf">RDF</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.getElementById("mos-type-q").addEventListener("click", () => assign("Q"));
+    document.getElementById("mos-type-rdf").addEventListener("click", () => assign("RDF"));
+    document.getElementById("mos-type-skip").addEventListener("click", () => assign(""));
+  }
+
+  render();
+}
+
+function finishMosAmcLoad(file, detectedPlants, statusEl, btnEl) {
+  mosMerged = buildMosMerged();
+
+  const count = mosMerged.length;
+  const hasHub = mosPlants.includes(HUB_PLANT);
+  if (statusEl) statusEl.innerHTML =
+    `<div class="status-ok">✓ LOADED</div><div class="status-name">${escHtml(file.name)}</div>` +
+    `<div class="status-name" style="color:var(--green)">${count} items · ${detectedPlants.length} plants</div>` +
+    (hasHub ? "" : `<div class="status-name" style="color:var(--amber)">⚠️ "${HUB_PLANT}" column not found — hub MOS rule won't apply</div>`);
+  if (btnEl) btnEl.textContent = "📐 Change AMC File";
+
+  document.getElementById("mos-no-amc").style.display  = "none";
+  document.getElementById("mos-content").style.display = "block";
+
+  if (currentPage === "mos-plant") renderMosPlant();
 }
 
 // ── DEDUPLICATION (mapping-aware) ─────────────────────────────────────────────
