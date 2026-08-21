@@ -94,7 +94,18 @@
     if (typeof window.getUserScopes !== "function") return true; // permissions.js not loaded — fail open rather than break the page
     const scopes = window.getUserScopes();
     const wantPrefix = stockTypeOf(row) === "Q" ? "Q_" : "R_";
-    return scopes.some((s) => s.startsWith(wantPrefix));
+    if (!scopes.some((s) => s.startsWith(wantPrefix))) return false;
+    // PLANT SCOPING: this file has no "Plant" column of its own — the
+    // closest equivalent is the 4-char plant code derived from Ship-to
+    // Party (see plantCode() above, already used everywhere else in this
+    // file for branch grouping). Route it through the same
+    // canAccessPlant() every other page uses (permissions.js) so a
+    // branch-scoped user's Pending Dispatch view is restricted the same
+    // way their inventory/MOS/etc. views are — never leaking another
+    // branch's deliveries just because this file has a different shape.
+    if (typeof window.canAccessPlant === "function" &&
+        !window.canAccessPlant(plantCode(row.shipToParty))) return false;
+    return true;
   }
 
   function stockBadge(type) {
