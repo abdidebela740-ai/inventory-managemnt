@@ -1,9 +1,9 @@
 // ════════════════════════════════════════════════════════════════
-// create-user — Supabase Edge Function
+// admin-create-user — Supabase Edge Function
 //
 // Called from user-management.js via:
-//   supabaseClient.functions.invoke("create-user", {
-//     body: { email, password, full_name, role, data_scopes, sidebar_permissions }
+//   supabaseClient.functions.invoke("admin-create-user", {
+//     body: { email, password, full_name, role, data_scopes, sidebar_permissions, plant }
 //   })
 //
 // This is the ONLY place account creation happens, because it needs the
@@ -14,7 +14,7 @@
 // this check is the real boundary.
 //
 // Deploy with:
-//   supabase functions deploy create-user
+//   supabase functions deploy admin-create-user
 //
 // Required secrets (Project Settings → Edge Functions → these are usually
 // already present by default in every Supabase project, but confirm they
@@ -97,6 +97,12 @@ Deno.serve(async (req) => {
   const data_scopes = Array.isArray(body.data_scopes) ? body.data_scopes.map(String) : [];
   const sidebar_permissions =
     body.sidebar_permissions && typeof body.sidebar_permissions === "object" ? body.sidebar_permissions : {};
+  // PLANT SCOPING (see permissions.js / auth.js on the frontend for how this
+  // is consumed): "HO01" = sees all plants app-wide; any other plant code =
+  // restricted to that plant everywhere. Normalize the same way the rest of
+  // this function normalizes text input (trim + uppercase for a code field).
+  const plantRaw = body.plant == null ? "" : String(body.plant).trim().toUpperCase();
+  const plant = plantRaw || null;
 
   if (!email || !password || !full_name) {
     return json({ error: "Full name, email, and password are all required." }, 400);
@@ -109,6 +115,14 @@ Deno.serve(async (req) => {
   }
   if (role !== "admin" && data_scopes.length === 0) {
     return json({ error: "Assign at least one data scope for non-Admin users." }, 400);
+  }
+  // Admin is the one role that's exempt from plant scoping in the UI (see
+  // permissions.js hasFullPlantAccess()), so it's the one role that's
+  // exempt from requiring one here too — every other role needs a plant so
+  // the "must set Plant" requirement is enforced server-side, not just in
+  // the User Management form.
+  if (role !== "admin" && !plant) {
+    return json({ error: "Assign a Plant for non-Admin users (HO01 = Head Office / all plants)." }, 400);
   }
 
   // ── 3) Create the auth user (service-role client — bypasses RLS) ──
@@ -142,6 +156,7 @@ Deno.serve(async (req) => {
       status: "active",
       data_scopes,
       sidebar_permissions,
+      plant,
     });
 
   if (profileErr) {
