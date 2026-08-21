@@ -426,14 +426,25 @@ function brdInferStorageLocation(plant, mappedCode, scopeCode) {
   return brdNonColdCodeForPlant(plant, scopeCode);
 }
 
-// Resolves the Storage Location a line should use: real branch stock record
-// first (picking the location holding the most stock, if the material sits
-// in more than one), cold/non-cold-matched fallback second. `inferred:true`
-// means the caller should surface this for human review before the line is
-// approved.
+// Resolves the Storage Location a line should use. The temperature zone
+// (cold vs non-cold) is ALWAYS anchored to where this material currently
+// sits at HO01 — HOM3/HOM8/HOM9 = cold, anything else = non-cold (see file
+// header) — and the destination branch's own location must be in that same
+// zone, no exceptions. Within the correct zone: prefer the branch's own
+// existing stock record (picking whichever zone-matching location holds the
+// most stock, if it sits in more than one); cold/non-cold-matched inference
+// second, when the branch has no zone-matching record of its own yet.
+// `inferred:true` means the caller should surface this for human review
+// before the line is approved. Q vs RDF (scopeCode) is read straight off
+// the material's own "Special Stock Type" in the inventory data elsewhere
+// (blank = RDF, "Q" = Health Program — see brdScopeCodeForRow()); it only
+// affects which SPECIFIC code is picked within a zone here, never whether
+// the item is cold or non-cold.
 function brdStorageLocationForBranch(mappedCode, plant, scopeCode) {
   const src  = brdPrimarySource(mappedCode);
   const base = (mappingTable && mappingTable.size > 0 ? mappedDf : rawDf) || [];
+  const ho01Cold = brdHo01IsCold(mappedCode); // true | false | null (unknown/mixed)
+
   const branchRows = base.filter(r =>
     String(r["Plant"] || "").trim().toUpperCase() === plant &&
     src.allSourceCodes.includes(String(r["Material"] || "").trim().toUpperCase()) &&
@@ -446,10 +457,36 @@ function brdStorageLocationForBranch(mappedCode, plant, scopeCode) {
       const qty = (Number(r["Unrestricted Stock"]) || 0) + (Number(r["Stock in Transit"]) || 0) + (Number(r["Stock in Quality Inspection"]) || 0);
       qtyBySloc[sloc] = (qtyBySloc[sloc] || 0) + qty;
     });
-    let bestLoc = "", bestQty = -1;
-    Object.entries(qtyBySloc).forEach(([sloc, q]) => { if (q > bestQty) { bestQty = q; bestLoc = sloc; } });
-    return { loc: bestLoc, inferred: false };
+    // Zone-filter the branch's own recorded locations against HO01's zone
+    // for this material — a branch's own stock history is still preferred
+    // over inferring, but it must never send a non-cold HO01 item to a
+    // cold branch location (or vice-versa). A location this app has no
+    // reference-table zone data for is NOT excluded on that basis alone
+    // (isStorageLocationCold returns null = unknown, not "wrong zone");
+    // only a location the reference table CONFIRMS is the opposite zone
+    // gets dropped as a candidate.
+    let candidateSlocs = Object.keys(qtyBySloc);
+    if (ho01Cold !== null) {
+      const zoneMatched = candidateSlocs.filter(sloc => {
+        const cold = isStorageLocationCold(plant, sloc);
+        return cold === null ? true : cold === ho01Cold;
+      });
+      candidateSlocs = zoneMatched; // may end up empty — that's handled below
+    }
+    if (candidateSlocs.length) {
+      let bestLoc = "", bestQty = -1;
+      candidateSlocs.forEach(sloc => { const q = qtyBySloc[sloc]; if (q > bestQty) { bestQty = q; bestLoc = sloc; } });
+      return { loc: bestLoc, inferred: false };
+    }
+    // Branch has stock of this material, but every location it's recorded
+    // under is the WRONG temperature zone for where HO01 actually holds it
+    // — don't route a fresh request to a mismatched location just because
+    // that's where old stock happens to sit. Fall through to inference so
+    // the recommendation still lands in the correct zone, and mark it
+    // "inferred" so a human reviews it (the branch's real record disagreeing
+    // with HO01's zone is itself worth a second look).
   }
+
   const inferredLoc = brdInferStorageLocation(plant, mappedCode, scopeCode);
   return { loc: inferredLoc, inferred: !!inferredLoc };
 }
