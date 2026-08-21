@@ -915,12 +915,12 @@ function loadFile(file) {
         // FIX-STFILTER: also reset transit-section filter state on new main file load
         // so stale PO/supplying-plant selections from the previous dataset don't persist
 
-        // FIX-PHANTOM-MAP-ORDER: stamp phantom/unverified transit flags on rawDf
+        // FIX-PHANTOM-MAP-ORDER: stamp phantom/unTrue transit flags on rawDf
         // BEFORE applying material mapping. applyMaterialMapping() builds mappedDf
         // via a shallow copy of each rawDf row ({...row, ...}); if it ran first,
         // rawDf wouldn't have _phantomTransitQty/_phantomTransitVal yet, so those
         // fields would never make it onto mappedDf. Since getReconciledBase() reads
-        // from mappedDf whenever a mapping is loaded, the Unverified Transit tab
+        // from mappedDf whenever a mapping is loaded, the UnTrue transit tab
         // would silently show nothing for any dataset loaded alongside a mapping file.
         stampUnverifiedTransit(); // stamp unverified amounts using the uploaded Stock-in-Transit verification file
 
@@ -1631,14 +1631,14 @@ function pl(extra={}) {
 function renderDashboard() {
   const df = applyPageFilter("dashboard");
 
-  // FIX-NO-DASH-PHANTOM-ALERT: the "Unverified Transit Stock Excluded" banner
+  // FIX-NO-DASH-PHANTOM-ALERT: the "UnTrue transit Stock Excluded" banner
   // is no longer shown on the Dashboard — it now only appears on the Transit
   // page itself. Dashboard totals still exclude unverified amounts (see
   // getVerifiedTransitVal/Qty below), just without the inline banner.
   const dashPhantomEl = document.getElementById("dash-phantom-alert");
   if (dashPhantomEl) dashPhantomEl.innerHTML = "";
 
-  // Exclude unverified transit amounts (from the uploaded verification file) from Dashboard totals.
+  // Exclude unTrue transit amounts (from the uploaded verification file) from Dashboard totals.
   const transitVal = df.reduce((s,r) => s + getVerifiedTransitVal(r), 0);
   const transitQty = df.reduce((s,r) => s + getVerifiedTransitQty(r), 0);
   const qcVal      = df.reduce((s,r) => s + getMappedVal(r,"Value of Stock in Quality Inspection"), 0);
@@ -2522,7 +2522,7 @@ function stampUnverifiedTransit() {
     // Clamp to actual transit so we never go negative
     row._phantomTransitQty = Math.min(uqty, row["Stock in Transit"] || 0);
     row._phantomTransitVal = Math.min(uval, row["Value of Stock in Transit"] || 0);
-    // Recompute derived totals excluding unverified transit
+    // Recompute derived totals excluding unTrue transit
     row["Total Value"] = row["Value of Unrestricted Stock"]
                        + (row["Value of Stock in Transit"] - row._phantomTransitVal)
                        + row["Value of Stock in Quality Inspection"];
@@ -2591,7 +2591,7 @@ function renderPhantomAlert(containerId, df) {
     <div class="phantom-transit-alert">
       <span class="phantom-alert-icon">⚠️</span>
       <div class="phantom-alert-body">
-        <strong>Unverified Transit Stock Excluded</strong>
+        <strong>UnTrue transit Stock Excluded</strong>
         <span>${count.toLocaleString()} item${count!==1?"s":""} (${fmtQty(qty)} units · ${fmtETB(val)}) have <em>Stock in Transit</em> but
         ${transitFileLoaded ? "don't have a matching quantity in the uploaded Stock-in-Transit file" : "no Stock-in-Transit file has been uploaded yet to verify them"}.
         These items are <strong>excluded from all totals</strong> — verify first.</span>
@@ -2644,7 +2644,7 @@ function renderPhantomTable(df) {
       background:rgba(210,153,34,0.06);margin-bottom:1.5rem">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.8rem">
         <div>
-          <div class="section-header" style="margin:0;color:#d29922">⚠️ Unverified Transit Items</div>
+          <div class="section-header" style="margin:0;color:#d29922">⚠️ UnTrue transit Items</div>
           <div style="font-size:0.76rem;color:var(--muted);margin-top:3px">
             ${transitFileLoaded
               ? `These items appear in the SAP <em>Stock in Transit</em> column but their quantity <strong>does not exactly match</strong> the uploaded Stock-in-Transit file (or the material+plant wasn't found in it). They are <strong>excluded from all inventory totals</strong> until verified.`
@@ -2721,7 +2721,7 @@ function renderTransit() {
   const phantomRows  = allTransitDf.filter(r => r._phantomTransitQty > 0);
   const phantomCount = new Set(phantomRows.map(r => r._mappedMaterial || r["Material"])).size;
   const phantomKpiExtra = phantomCount > 0
-    ? [[`Unverified Transit Items`, String(phantomCount), "Excluded from all totals — see bottom of page ↓", "amber"]]
+    ? [[`UnTrue transit Items`, String(phantomCount), "Excluded from all totals — see bottom of page ↓", "amber"]]
     : [];
 
   setKpis("transit-kpis", [
