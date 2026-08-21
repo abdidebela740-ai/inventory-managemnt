@@ -95,6 +95,32 @@ function canAccessPlant(plantCode) {
   return p === getUserPlant();
 }
 
+// ── CHART AXIS: STOCK TYPE (Q vs RDF) FOR BRANCH-LOCKED ROLES ───────
+// Branch-locked users only ever have one Plant, so any "by Plant" bar
+// chart (Dashboard, QC, Near-Expiry Risk) collapses to a single
+// full-width bar for them. For these roles the chart's x-axis dimension
+// should swap from Plant to Stock Type (Q / RDF) instead — a split that's
+// actually meaningful within one branch, and one this app's own
+// permission model already keys on (data_scopes are stored as "Q_ZME" /
+// "R_ZLC", i.e. stock type + valuation type per material).
+//
+// Deliberately keyed on role (isHeadOfficeUser()), not on how many plants
+// happen to survive the current filter — an HO01/Admin user who filters
+// the Plant dropdown down to one branch is still comparing across the
+// org and should keep the Plant axis; only branch-locked roles get the
+// swap.
+function shouldUseStockTypeAxis() {
+  return !isHeadOfficeUser();
+}
+
+// Returns "RDF" or "Health Program (Q)" for a row. Mirrors
+// STOCK_TYPE_LABEL in branch-demand.js, kept independent here so
+// permissions.js doesn't depend on branch-demand.js's load order.
+function getRowStockTypeLabel(row) {
+  const sst = String((row && row["Special Stock Type"]) || "").trim().toUpperCase();
+  return sst === "Q" ? "Health Program (Q)" : "RDF";
+}
+
 /**
  * Filters a list of plant codes (e.g. a page's plant dropdown options, or
  * mosPlants derived from an AMC file's own columns) down to the ones this
@@ -379,6 +405,8 @@ window.getUserPlant         = getUserPlant;
 window.isHeadOfficeUser     = isHeadOfficeUser;
 window.canAccessPlant       = canAccessPlant;
 window.getVisiblePlants     = getVisiblePlants;
+window.shouldUseStockTypeAxis = shouldUseStockTypeAxis;
+window.getRowStockTypeLabel   = getRowStockTypeLabel;
 window.HUB_PLANT            = PERM_HUB_PLANT;
 window.isDirectorLike       = isDirectorLike;
 window.canManageRoles       = canManageRoles;
