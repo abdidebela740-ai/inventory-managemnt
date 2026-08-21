@@ -76,8 +76,7 @@ function injectAuthOverlay() {
       <section id="auth-hero">
         <div class="auth-hero-grid">
           <div class="auth-hero-text">
-            <span class="auth-hero-eyebrow">Demand & Inventory Management Directorate</span>
-            <h1>Pharmaceutical Inventory Management</h1>
+            <h1>Pharmaceutical Inventory Management and Operation</h1>
             <p>Track stock across every plant, catch expiry risk before it becomes loss, and always know who's responsible for what — all from one dashboard.</p>
             <div class="auth-hero-actions">
               <button type="button" class="auth-btn-primary" id="auth-hero-signin-btn">→ Sign In</button>
