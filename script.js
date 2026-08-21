@@ -1230,14 +1230,31 @@ document.addEventListener("click", e => {
 
 // ── POPULATE FILTER DROPDOWNS ──────────────────────────────────────────────
 function populateAllFilters() {
-  const plants = [...new Set(rawDf.map(r => r["Plant Name"]))].filter(Boolean).sort();
+  // BUGFIX-PHANTOM-FILTER-OPTION: build every dropdown off the same base
+  // applyPageFilter() actually renders against, not raw rawDf. rawDf
+  // deliberately keeps HO01 (Head Office hub) rows for a branch-locked user
+  // (canAccessPlant()'s hub carve-out, needed by Branch Demand / MOS), but
+  // applyPageFilter() strips those same HO01 rows back out for that user at
+  // render time (dashboard/transit/expiry/qc/branch all go through it). A
+  // dropdown built straight from rawDf could therefore offer a Plant /
+  // Material Group / Material Type whose only accessible rows live at
+  // HO01 — a selectable option guaranteed to render zero results the
+  // moment the user picks it. Routing through stripHubForBranchUser()
+  // (permissions.js) first keeps the offered options in lockstep with what
+  // applyPageFilter() can actually show. No-op for Admin/Head-Office users.
+  const dropdownBase = (typeof stripHubForBranchUser === "function")
+    ? stripHubForBranchUser(rawDf)
+    : rawDf;
+
+  const plants = [...new Set(dropdownBase.map(r => r["Plant Name"]))].filter(Boolean).sort();
   // Routed through the single central helper (permissions.js) instead of
-  // building the list here — rawDf is already access-filtered, so this
-  // just needs the shared non-medical-group exclusion applied consistently
-  // with every other Material Group control in the app.
+  // building the list here — dropdownBase is already access-filtered (and
+  // now HO01-stripped for branch users), so this just needs the shared
+  // non-medical-group exclusion applied consistently with every other
+  // Material Group control in the app.
   const mgs    = (typeof materialGroupFilterOptions === "function")
-    ? materialGroupFilterOptions(rawDf)
-    : [...new Set(rawDf.map(r => r["Material Group Name"]))].filter(Boolean).filter(name => !isNonMedicalGroup(name)).sort();
+    ? materialGroupFilterOptions(dropdownBase)
+    : [...new Set(dropdownBase.map(r => r["Material Group Name"]))].filter(Boolean).filter(name => !isNonMedicalGroup(name)).sort();
 
   // Plant multi-selects
   const plantConfigs = [
