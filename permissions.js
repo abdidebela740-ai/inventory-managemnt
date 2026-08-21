@@ -47,7 +47,15 @@ const VALID_VALUATION_SUFFIXES = ["ZME", "ZMS", "ZLC", "ZMD"];
 // (dashboard, expiry watch list, quality inspection / New Received Stock,
 // branch comparison, etc. all showed every plant to every user regardless
 // of their assigned branch). This block is that missing implementation.
-const HUB_PLANT = "HO01";
+// NOTE: named PERM_HUB_PLANT, not HUB_PLANT — mos.js also declares a
+// top-level `const HUB_PLANT`. Both files load as plain (non-module)
+// <script> tags sharing one global lexical scope, so two top-level `const
+// HUB_PLANT` declarations collide: the second one to load (mos.js, since it
+// loads after permissions.js) throws `SyntaxError: Identifier 'HUB_PLANT'
+// has already been declared` at parse time, which aborts ALL of mos.js
+// before any of its code runs — silently killing the AMC upload handler,
+// mosMerged, etc. Keep this name distinct from mos.js's HUB_PLANT.
+const PERM_HUB_PLANT = "HO01";
 
 function hasFullPlantAccess() {
   return computeIsAdmin();
@@ -64,7 +72,7 @@ function getUserPlant() {
 function isHeadOfficeUser() {
   if (hasFullPlantAccess()) return true;
   const p = getUserPlant();
-  return !p || p === HUB_PLANT;
+  return !p || p === PERM_HUB_PLANT;
 }
 
 /**
@@ -83,7 +91,7 @@ function canAccessPlant(plantCode) {
   if (isHeadOfficeUser()) return true;
   const p = String(plantCode || "").trim().toUpperCase();
   if (!p) return true;
-  if (p === HUB_PLANT) return true; // branch users can always see the HO01 hub
+  if (p === PERM_HUB_PLANT) return true; // branch users can always see the HO01 hub
   return p === getUserPlant();
 }
 
@@ -371,7 +379,7 @@ window.getUserPlant         = getUserPlant;
 window.isHeadOfficeUser     = isHeadOfficeUser;
 window.canAccessPlant       = canAccessPlant;
 window.getVisiblePlants     = getVisiblePlants;
-window.HUB_PLANT            = HUB_PLANT;
+window.HUB_PLANT            = PERM_HUB_PLANT;
 window.isDirectorLike       = isDirectorLike;
 window.canManageRoles       = canManageRoles;
 window.canManageUsersFully  = canManageUsersFully;
