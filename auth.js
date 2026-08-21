@@ -627,7 +627,7 @@ function escapeHtml(s) {
 async function loadProfileAndUnlock(session) {
   const { data: profile, error } = await supabaseClient
     .from("profiles")
-    .select("role,email,full_name,status,data_scopes,sidebar_permissions")
+    .select("role,email,full_name,status,data_scopes,sidebar_permissions,plant")
     .eq("id", session.user.id)
     .single();
 
@@ -660,6 +660,14 @@ async function loadProfileAndUnlock(session) {
     full_name: profile.full_name || "",
     role: normalizedRole,
     status: profile.status,
+    // PLANT SCOPING: "HO01" (or unset) = sees every plant; any other code
+    // restricts the user to that plant (+ the HO01 hub) app-wide — see
+    // permissions.js (getUserPlant / isHeadOfficeUser / canAccessPlant /
+    // getVisiblePlants) for the single source of truth this feeds. Normalized
+    // the same way role is above (trim + uppercase) so a stray "ho01" or
+    // trailing space in the DB doesn't silently fall through the "not HO01"
+    // branch and lock a Head Office user down to nothing.
+    plant: profile.plant ? String(profile.plant).trim().toUpperCase() : null,
     data_scopes: profile.data_scopes || [],
     sidebar_permissions: profile.sidebar_permissions || {},
   };
