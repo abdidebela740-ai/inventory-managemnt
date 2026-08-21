@@ -249,7 +249,7 @@ let scopeExcludedMaterialCodes = new Set();
 // in the main inventory file, that row is VERIFIED only if the uploaded file
 // contains the SAME material+plant with the EXACT SAME quantity. Anything
 // that doesn't match (or isn't present at all in the uploaded file) is
-// UNVERIFIED and excluded from every total across the app, exactly like the
+// Ghost transitand excluded from every total across the app, exactly like the
 // old phantom-transit logic — just driven by the upload instead of a
 // hardcoded list.
 let TRANSIT_UPLOAD_LIST = [];   // [{materialCode, plantCode, qty, supplyingPlant, ...}] — parsed rows from the uploaded file
@@ -280,12 +280,12 @@ function getSupplyingPlant(row) {
   return hit && hit.supplyingPlant ? hit.supplyingPlant : "";
 }
 
-// Returns {qty, val} of the UNVERIFIED portion of a row's Stock in Transit.
+// Returns {qty, val} of the Ghost transitportion of a row's Stock in Transit.
 //   - No transit file uploaded yet → the entire amount is unverified.
 //   - Transit file uploaded, but this material+plant is absent, or its
 //     quantity doesn't exactly match → the entire amount is unverified.
 //   - Transit file uploaded AND quantity matches exactly → nothing is
-//     unverified (fully verified).
+//     Ghost transit(fully verified).
 function getUnverifiedTransit(row) {
   const total = row["Stock in Transit"] || 0;
   if (total <= 0) return { qty: 0, val: 0 };
@@ -922,7 +922,7 @@ function loadFile(file) {
         // fields would never make it onto mappedDf. Since getReconciledBase() reads
         // from mappedDf whenever a mapping is loaded, the UnTrue transit tab
         // would silently show nothing for any dataset loaded alongside a mapping file.
-        stampUnverifiedTransit(); // stamp unverified amounts using the uploaded Stock-in-Transit verification file
+        stampUnverifiedTransit(); // stamp Ghost transitamounts using the uploaded Stock-in-Transit verification file
 
         // Apply material standardization mapping if already loaded
         if (mappingTable.size > 0) applyMaterialMapping();
@@ -1633,7 +1633,7 @@ function renderDashboard() {
 
   // FIX-NO-DASH-PHANTOM-ALERT: the "UnTrue transit Stock Excluded" banner
   // is no longer shown on the Dashboard — it now only appears on the Transit
-  // page itself. Dashboard totals still exclude unverified amounts (see
+  // page itself. Dashboard totals still exclude Ghost transitamounts (see
   // getVerifiedTransitVal/Qty below), just without the inline banner.
   const dashPhantomEl = document.getElementById("dash-phantom-alert");
   if (dashPhantomEl) dashPhantomEl.innerHTML = "";
@@ -2094,7 +2094,7 @@ function loadMappingFile(file) {
  *   session-only data model for hardcoded/derived state.
  *
  *   After parsing, re-stamps rawDf (stampUnverifiedTransit) and re-renders
- *   the current page so verified/unverified totals update everywhere.
+ *   the current page so verified/Ghost transittotals update everywhere.
  */
 function loadTransitFile(file) {
   const statusEls = [document.getElementById("transitFileStatus"), document.getElementById("transitGateFileStatus")].filter(Boolean);
@@ -2170,7 +2170,7 @@ function loadTransitFile(file) {
         transitFileName     = file.name;
         _rebuildTransitUploadLookup();
 
-        // Re-stamp rawDf with fresh verified/unverified amounts and re-render
+        // Re-stamp rawDf with fresh verified/Ghost transitamounts and re-render
         if (rawDf.length) {
           stampUnverifiedTransit();
           const phantomAllTransit = rawDf.filter(r => r["Stock in Transit"] > 0);
@@ -2180,7 +2180,7 @@ function loadTransitFile(file) {
         }
 
         const statsLine = transitFileStats
-          ? `<div class="status-stats">${transitFileStats.verifiedCount.toLocaleString()} verified · ${transitFileStats.unverifiedCount.toLocaleString()} unverified (material+plant rows)</div>`
+          ? `<div class="status-stats">${transitFileStats.verifiedCount.toLocaleString()} verified · ${transitFileStats.unverifiedCount.toLocaleString()} Ghost transit(material+plant rows)</div>`
           : "";
         setStatus(`
           <div class="status-ok">✓ FILE LOADED</div>
@@ -2191,7 +2191,7 @@ function loadTransitFile(file) {
         if (btnTextEl) btnTextEl.textContent = "🚚 Change Stock-in-Transit File";
 
         if (rawDf.length && currentPage === "transit") renderTransit();
-        // Other pages (dashboard, branch, flow) fold verified/unverified totals
+        // Other pages (dashboard, branch, flow) fold verified/Ghost transittotals
         // in automatically the next time they're rendered/navigated to.
       } catch (err) {
         setStatus(`<div class="status-ok" style="color:var(--red)">✗ ${escHtml(err.message)}</div>`);
@@ -2388,7 +2388,7 @@ function getMappedVal(row, field) {
  * getVerifiedTransitVal(row, field)
  *   Return transit qty/value MINUS any phantom (unverified) portion.
  *   A transit row is "phantom" when it has Stock in Transit > 0 but no
- *   Unverified amounts (rows not matched by the uploaded verification file)
+ *   Ghost transitamounts (rows not matched by the uploaded verification file)
  *   are subtracted from every
  *   aggregate shown to the user across all pages.
  */
@@ -2403,12 +2403,12 @@ function getVerifiedTransitVal(row) {
   return Math.max(0, raw - phantom);
 }
 /**
- * Returns true if the row has transit stock beyond the unverified portion.
+ * Returns true if the row has transit stock beyond the Ghost transitportion.
  */
 function _hasVerifiedTransit(row) {
-  // Row is verified if its unverified qty is LESS than total transit qty
+  // Row is verified if its Ghost transitqty is LESS than total transit qty
   const total = getMappedQty(row, "Stock in Transit");
-  const unverified = row._phantomTransitQty || 0;
+  const Ghost transit= row._phantomTransitQty || 0;
   return total > unverified;
 }
 
@@ -2496,11 +2496,11 @@ function getTransitInfo(material, plantCode) {
 }
 
 // ─── Phantom Transit Detection ────────────────────────────────────────────
-// A transit row is "phantom" (unverified / not confirmed available) when:
+// A transit row is "phantom" (Ghost transit/ not confirmed available) when:
 //   • The main data has Stock in Transit > 0, AND
 //   • The uploaded Stock-in-Transit verification file has NO exact quantity
 //     match for this material+plant (including when no file has been
-//     uploaded at all yet — everything is unverified until proven otherwise).
+//     uploaded at all yet — everything is Ghost transituntil proven otherwise).
 //
 // Phantom rows are EXCLUDED from all aggregate values (Total Value, Total Qty,
 // Value of Stock in Transit, Stock in Transit) on Dashboard, Branch Comparison,
@@ -2547,7 +2547,7 @@ function getPhantomSummary(df) {
 // Renders a dismissible alert banner into the element with given id.
 // Does nothing (clears el) if there are no phantom rows.
 // FIX-PHANTOM-VISIBLE: the alert now includes an expand/collapse button so users
-// can view the unverified items directly inline without navigating away.
+// can view the Ghost transititems directly inline without navigating away.
 // A unique alertId is derived from containerId so multiple alerts (dash, branch,
 // flow) each have independent expand state.
 function renderPhantomAlert(containerId, df) {
@@ -2568,22 +2568,22 @@ function renderPhantomAlert(containerId, df) {
     {key:"Material Description", label:"Material Description", fmt:(val,r)=>renderMatDesc(val,r), raw:true, cellClass:"col-mat-desc-wrap"},
     {key:"Material Group Name", label:"Material Group"},
     {key:"Plant Name",          label:"Plant"},
-    {key:"_phantomTransitQty",  label:"Unverified Qty",        fmt:fmtQty, rawKey:"_phantomTransitQty", cellClass:"col-qty"},
-    {key:"_phantomTransitVal",  label:"Unverified Value (ETB)", fmt:fmtETB, rawKey:"_phantomTransitVal", cellClass:"col-val"},
+    {key:"_phantomTransitQty",  label:"Ghost transitQty",        fmt:fmtQty, rawKey:"_phantomTransitQty", cellClass:"col-qty"},
+    {key:"_phantomTransitVal",  label:"Ghost transitValue (ETB)", fmt:fmtETB, rawKey:"_phantomTransitVal", cellClass:"col-val"},
   ];
 
   const isTransitPage = (containerId === "transit-phantom-alert");
   // On transit page, the full phantom section is rendered separately via
   // renderPhantomTable — so the alert only needs a short "jump to section" link.
   const actionHtml = isTransitPage
-    ? `<a class="phantom-alert-link" style="white-space:nowrap" onclick="document.querySelector('.transit-tab-btn[data-tab=unverified]').click()">View unverified items →</a>`
+    ? `<a class="phantom-alert-link" style="white-space:nowrap" onclick="document.querySelector('.transit-tab-btn[data-tab=unverified]').click()">View Ghost transititems →</a>`
     : `<button class="phantom-alert-toggle" id="${tableId}-btn" onclick="(function(){
         var tbl=document.getElementById('${tableId}');
         var btn=document.getElementById('${tableId}-btn');
         var open=tbl.style.display!=='none';
         tbl.style.display=open?'none':'block';
-        btn.textContent=open?'Show unverified items ▾':'Hide unverified items ▴';
-      })()" style="background:none;border:1px solid var(--amber);color:var(--amber);border-radius:4px;padding:3px 10px;font-size:0.72rem;cursor:pointer;white-space:nowrap">Show unverified items ▾</button>
+        btn.textContent=open?'Show Ghost transititems ▾':'Hide Ghost transititems ▴';
+      })()" style="background:none;border:1px solid var(--amber);color:var(--amber);border-radius:4px;padding:3px 10px;font-size:0.72rem;cursor:pointer;white-space:nowrap">Show Ghost transititems ▾</button>
       <a class="phantom-alert-link" style="white-space:nowrap" onclick="navReset('transit')">Transit page →</a>
       <div id="${tableId}" style="display:none;margin-top:0.75rem;max-height:320px;overflow-y:auto">${buildTable(phantomRows, phantomCols, () => "row-amber")}</div>`;
 
@@ -2629,8 +2629,8 @@ function renderPhantomTable(df) {
     {key:"Plant",                label:"Plant Code"},
     {key:"Plant Name",           label:"Plant Name"},
     {key:"Storage Location",     label:"Storage Location"},
-    {key:"_phantomTransitQty",   label:"Unverified Qty",         fmt:fmtQty, rawKey:"_phantomTransitQty", cellClass:"col-qty"},
-    {key:"_phantomTransitVal",   label:"Unverified Value (ETB)",  fmt:fmtETB, rawKey:"_phantomTransitVal", cellClass:"col-val"},
+    {key:"_phantomTransitQty",   label:"Ghost transitQty",         fmt:fmtQty, rawKey:"_phantomTransitQty", cellClass:"col-qty"},
+    {key:"_phantomTransitVal",   label:"Ghost transitValue (ETB)",  fmt:fmtETB, rawKey:"_phantomTransitVal", cellClass:"col-val"},
   ];
 
   // Sort by value descending so highest-risk items are at the top
@@ -2648,18 +2648,18 @@ function renderPhantomTable(df) {
           <div style="font-size:0.76rem;color:var(--muted);margin-top:3px">
             ${transitFileLoaded
               ? `These items appear in the SAP <em>Stock in Transit</em> column but their quantity <strong>does not exactly match</strong> the uploaded Stock-in-Transit file (or the material+plant wasn't found in it). They are <strong>excluded from all inventory totals</strong> until verified.`
-              : `No Stock-in-Transit verification file has been uploaded yet, so <strong>every</strong> item with <em>Stock in Transit</em> is treated as unverified and excluded from all inventory totals. Upload the file above to verify matching items.`}
+              : `No Stock-in-Transit verification file has been uploaded yet, so <strong>every</strong> item with <em>Stock in Transit</em> is treated as Ghost transitand excluded from all inventory totals. Upload the file above to verify matching items.`}
           </div>
         </div>
         <button class="dl-btn" id="${dlId}">⬇ Download CSV</button>
       </div>
       <div class="kpi-row" style="margin-bottom:0.9rem">
         ${[
-          ["Unverified Items",    sorted.length.toLocaleString(),    "Rows without a verified match",  "amber"],
+          ["Ghost transitItems",    sorted.length.toLocaleString(),    "Rows without a verified match",  "amber"],
           ["Unique Materials",    uniqMats.toLocaleString(),          "Distinct SKUs",                  "amber"],
-          ["Affected Plants",     uniqPlants.toLocaleString(),        "Locations with unverified stock","amber"],
-          ["Unverified Qty",      fmtQty(totalPhantomQty),           "Units not confirmed",            "amber"],
-          ["Unverified Value",    fmtETB(totalPhantomVal),           "Excluded from totals",           "amber"],
+          ["Affected Plants",     uniqPlants.toLocaleString(),        "Locations with Ghost transitstock","amber"],
+          ["Ghost transitQty",      fmtQty(totalPhantomQty),           "Units not confirmed",            "amber"],
+          ["Ghost transitValue",    fmtETB(totalPhantomVal),           "Excluded from totals",           "amber"],
         ].map(([l,v,s]) => `
           <div class="kpi-card amber">
             <div class="kpi-label">${escHtml(l)}</div>
@@ -2698,7 +2698,7 @@ function renderTransit() {
 
   // rawDf is pre-filtered at parse time — no need to re-apply isNonMedical* guards here.
   // Simply restrict to rows with positive transit qty and value.
-  // FIX-PHANTOM-HIDE: phantom transit rows (unverified against the uploaded file)
+  // FIX-PHANTOM-HIDE: phantom transit rows (Ghost transitagainst the uploaded file)
   // are excluded from the main table entirely; they only appear in the
   // unverified-items section.
   const df = applyPageFilter("transit").filter(r =>
