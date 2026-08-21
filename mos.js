@@ -208,7 +208,14 @@ function mosSohFor(sohMap, row, plant) {
  * there IS stock but zero demand (can't run out, but also isn't moving).
  */
 function computeRowMOS(row, sohMap) {
-  const branchPlants = mosPlants.filter(p => p !== HUB_PLANT);
+  // PLANT SCOPING: restrict which branches feed the hub's "Σ branch AMC"
+  // figure to plants this user can see (getVisiblePlants() — full list for
+  // Admin/HO01, so no behaviour change for them). Without this, a branch-
+  // scoped user's HO01 column would still reflect demand aggregated across
+  // every OTHER branch too, which is exactly the kind of cross-branch
+  // number the plant-scoping feature is meant to keep private.
+  const scopedPlants = (typeof getVisiblePlants === "function") ? getVisiblePlants(mosPlants) : mosPlants;
+  const branchPlants = scopedPlants.filter(p => p !== HUB_PLANT);
   const totalBranchAmc = branchPlants.reduce((s, p) => s + (row.amcs[p] || 0), 0);
   const anyBranchCommitted = branchPlants.some(p => row.amcs[p] !== null);
 
@@ -248,7 +255,12 @@ function computeRowMOS(row, sohMap) {
  *   - a number otherwise
  */
 function computeNationalMOS(row, sohMap) {
-  const branchPlants = mosPlants.filter(p => p !== HUB_PLANT);
+  // PLANT SCOPING: see the matching comment in computeRowMOS() just above —
+  // same reasoning, applied to the "National MOS" aggregate so it becomes a
+  // "my visible plants" MOS for a branch-scoped user rather than a true
+  // national figure that leaks other branches' demand into one number.
+  const scopedPlants = (typeof getVisiblePlants === "function") ? getVisiblePlants(mosPlants) : mosPlants;
+  const branchPlants = scopedPlants.filter(p => p !== HUB_PLANT);
   const totalBranchAmc = branchPlants.reduce((s, p) => s + (row.amcs[p] || 0), 0);
   const anyBranchCommitted = branchPlants.some(p => row.amcs[p] !== null);
 
@@ -316,13 +328,28 @@ async function renderMosPlant() {
   const criticalEl  = document.getElementById("mos-critical-only");
 
   const searchQ     = searchEl   ? searchEl.value.trim()  : "";
-  const plantVal    = plantEl    ? plantEl.value.trim()   : "";
   const typeVal     = typeEl     ? typeEl.value.trim()    : "";
   const criticalOnly= criticalEl ? criticalEl.checked     : false;
+  // PLANT SCOPING: ignore a plant value the DOM happens to hold (e.g. a
+  // stale selection from before the user's session/plant was known) if
+  // it's not one this user can actually see — defense in depth on top of
+  // the dropdown itself only ever offering visiblePlants options above.
+  const rawPlantVal = plantEl ? plantEl.value.trim() : "";
+  const plantVal    = (typeof canAccessPlant === "function" && rawPlantVal && !canAccessPlant(rawPlantVal))
+    ? "" : rawPlantVal;
+
+  // PLANT SCOPING: mosPlants comes from the AMC file's own column headers,
+  // not from rawDf rows — so unlike the row-based pages (whose plant
+  // dropdowns are built from already-scoped rows and get this filtering
+  // for free via permissions.js's canAccessRow()), this one needs an
+  // explicit getVisiblePlants() pass. HO01 stays visible to a branch user
+  // (canAccessPlant() always allows the hub) since MOS's hub-vs-branch
+  // comparison is the whole point of this page.
+  const visiblePlants = (typeof getVisiblePlants === "function") ? getVisiblePlants(mosPlants) : mosPlants;
 
   // Populate plant dropdown once
   if (plantEl && plantEl.options.length <= 1) {
-    mosPlants.forEach(p => {
+    visiblePlants.forEach(p => {
       const opt = document.createElement("option");
       opt.value = p; opt.text = p === HUB_PLANT ? `${p} (Hub)` : p;
       plantEl.appendChild(opt);
@@ -379,7 +406,10 @@ async function renderMosPlant() {
   }
 
   // ── CHART: avg MOS per plant across screened items (capped for display) ──
-  const displayPlants = plantVal ? [plantVal] : mosPlants;
+  // PLANT SCOPING: falls back to visiblePlants (not the raw mosPlants list)
+  // so a branch-scoped user's "no plant selected" view only ever shows
+  // their own plant + the HO01 hub column, never every other branch.
+  const displayPlants = plantVal ? [plantVal] : visiblePlants;
   const plantAverages = displayPlants.map(p => {
     const vals = scored
       .map(r => r._plantMos.find(m => m.plant === p))
@@ -461,8 +491,15 @@ async function renderMosPlant() {
   );
 
   // ── EXPORT ────────────────────────────────────────────────────────────────────
+  // PLANT SCOPING: r._plantMos always carries an entry for EVERY mosPlants
+  // code (computeRowMOS() has to compute all of them for the hub-vs-branch
+  // math), so filtering only by plantVal — as this used to — would leak
+  // every other branch's plant/soh/amc/mos into a branch-scoped user's CSV
+  // whenever no single plant was selected. Restrict to displayPlants (which
+  // is already visiblePlants-derived) so the export never exceeds what the
+  // table/chart above it are showing.
   const exportRows = scored.flatMap(r =>
-    r._plantMos.filter(m => !plantVal || m.plant === plantVal).map(m => ({
+    r._plantMos.filter(m => displayPlants.includes(m.plant) && (!plantVal || m.plant === plantVal)).map(m => ({
       code: r.code, desc: r.desc, type: r.type,
       nationalMos: r._national.mos, nationalSoh: r._national.totalSoh, nationalAmc: r._national.totalAmc,
       plant: m.plant, isHub: m.isHub ? "Yes (vs. total branch demand)" : "No",
