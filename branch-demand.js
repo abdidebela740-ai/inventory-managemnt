@@ -41,10 +41,12 @@
 //     brand-new line, would be) held in AT THE REQUESTING BRANCH PLANT —
 //     never HO01's own storage location. Resolved by looking at the
 //     branch's own stock rows for that material; if the branch has never
-//     stocked it before, we fall back to the storage location most
-//     commonly used at that branch for other materials of the same Q/R +
-//     valuation-type classification, and flag the line as "inferred" so a
-//     human can double-check before approving. See brdStorageLocationForBranch().
+//     stocked it before, we fall back to the branch's cold or non-cold
+//     storage-location code (per storage-locations.js, sourced from
+//     demand_storage.xlsx) that matches where the material sits at HO01,
+//     preferring whichever candidate's Special Stock Type matches this
+//     material's own Q/R classification, and flag the line as "inferred" so
+//     a human can double-check before approving. See brdStorageLocationForBranch().
 //
 //   Because RDF and Health Program lines take different Purchasing Group /
 //   Purch. Organization codes, the Branch Demand toolbar has a Stock Type
@@ -108,6 +110,9 @@
 //   requisition is normally typed in. See brdPrimarySource().
 //
 // Requires (must be loaded AFTER all of these):
+//   storage-locations.js (PLANT_STORAGE_LOCATIONS, PLANT_COLD_STORAGE_LOCATIONS,
+//               PLANT_NONCOLD_STORAGE_LOCATIONS, HO01_COLD_LOCATIONS,
+//               storageLocationSpecialStockType)
 //   script.js  (rawDf, mappedDf, mappingTable, escHtml, fmtQty, buildTable,
 //               kpiCard, setKpis, canAccessRow via permissions.js, getReconciledBase)
 //   mos.js     (HUB_PLANT, mosPlants, mosMerged, mosSohFor, buildMosSohMap,
@@ -337,28 +342,21 @@ function brdMaterialScope(mappedCode) {
 // temperature zone (cold vs non-cold) of wherever this material actually
 // sits at HO01 right now, same signal request-analysis.js's
 // classifyStorageMismatch() uses, then return THIS plant's own code for that
-// zone. Q vs RDF makes no difference to this — a Q drug and an RDF drug at
-// the same plant use the exact same cold/non-cold codes.
-
-// HO01's own cold storage locations — kept in sync with request-analysis.js's
-// HO01_COLD_LOCATIONS by hand.
-const HO01_COLD_LOCATIONS = ["HOM3", "HOM8", "HOM9"];
-
-// Each plant's own cold-storage code(s) — kept in sync with
-// request-analysis.js's PLANT_COLD_STORAGE_LOCATIONS by hand.
-const PLANT_COLD_STORAGE_LOCATIONS = {
-  AA01: ["AA1C"], AA02: ["AA2C"], AD01: ["ADC1"], AR01: ["AMC1"], AS01: ["ASC1"],
-  BD01: ["BDC1"], DE01: ["DEC1"], DI01: ["DDC1"], GA01: ["GAC1"], GO01: ["GOC1"],
-  HA01: ["HAC1", "HAC2"], JI01: ["JMC1"], JJ01: ["JJC1"], KD01: ["KDC1"],
-  MK01: ["MKC1"], NB01: ["NBC1"], NK01: ["NKC1"], SE01: ["SEC1"], SH01: ["SHC1"],
-};
-
-// Explicit non-cold code, where confirmed outright rather than derived from
-// data — currently only AA01/AA02 (AA1P / AA2P). Every other plant's
-// non-cold code is derived on the fly from its own live Storage Location
-// data in brdNonColdCodeForPlant(), same "any OTHER code counts as non-cold"
-// convention request-analysis.js's comment describes.
-const PLANT_NONCOLD_STORAGE_LOCATIONS = { AA01: "AA1P", AA02: "AA2P" };
+// zone. When a plant has more than one candidate code for that zone (e.g.
+// HA01 has two cold codes), prefer whichever one's Special Stock Type
+// serves this material's own Q/R classification — see storageLocationServesScope()
+// in storage-locations.js and brdNonColdCodeForPlant() / brdInferStorageLocation()
+// below. A location flagged "Q AND RDF" in the reference table serves
+// either classification, so it never rules out a candidate by itself.
+//
+// HO01_COLD_LOCATIONS, PLANT_COLD_STORAGE_LOCATIONS, and
+// PLANT_NONCOLD_STORAGE_LOCATIONS all come from storage-locations.js (loaded
+// before this file), which is generated from the real plant/storage-location
+// reference list (demand_storage.xlsx) — NOT hand-maintained copies in this
+// file anymore. That file is also what request-analysis.js's
+// classifyStorageMismatch() reads, so both modules now agree by construction
+// instead of by two people remembering to update two files in lockstep. See
+// storage-locations.js for the full table.
 
 // Whether this material sits cold, non-cold, both, or neither at HO01 right
 // now, read live from Storage Location on the main inventory data (any row,
@@ -382,33 +380,50 @@ function brdHo01IsCold(mappedCode) {
   return null; // no data, or split across both zones
 }
 
-// This plant's own non-cold code: explicit where confirmed (AA01/AA02),
-// otherwise the most common Storage Location value seen at this plant in
-// the live data that ISN'T one of the plant's own cold codes.
-function brdNonColdCodeForPlant(plant) {
-  if (PLANT_NONCOLD_STORAGE_LOCATIONS[plant]) return PLANT_NONCOLD_STORAGE_LOCATIONS[plant];
-  const coldCodes = PLANT_COLD_STORAGE_LOCATIONS[plant] || [];
+// This plant's own non-cold code, from the PLANT_NONCOLD_STORAGE_LOCATIONS
+// reference list (storage-locations.js). When the plant has more than one
+// non-cold code, narrow to whichever one's Special Stock Type matches this
+// material's own Q/R classification (scopeCode, e.g. "Q_ZME" or "R_ZLC")
+// where the reference table can tell them apart; if that still leaves more
+// than one candidate (or scopeCode is unknown), fall back to whichever
+// candidate is used most often in this plant's own live data, and finally
+// to the first reference-list candidate if there's no live data yet.
+function brdNonColdCodeForPlant(plant, scopeCode) {
+  let candidates = PLANT_NONCOLD_STORAGE_LOCATIONS[plant] || [];
+  if (!candidates.length) return "";
+  if (scopeCode) {
+    const wantPrefix = scopeCode.startsWith("Q_") ? "Q" : "R";
+    const matched = candidates.filter(loc => storageLocationServesScope(plant, loc, wantPrefix) === true);
+    if (matched.length) candidates = matched;
+  }
+  if (candidates.length === 1) return candidates[0];
   const base = (mappingTable && mappingTable.size > 0 ? mappedDf : rawDf) || [];
   const counts = {};
   base.forEach(r => {
     if (String(r["Plant"] || "").trim().toUpperCase() !== plant) return;
     const sloc = String(r["Storage Location"] || "").trim().toUpperCase();
-    if (!sloc || coldCodes.includes(sloc)) return;
-    counts[sloc] = (counts[sloc] || 0) + 1;
+    if (candidates.includes(sloc)) counts[sloc] = (counts[sloc] || 0) + 1;
   });
-  let best = "", bestCount = -1;
-  Object.entries(counts).forEach(([sloc, c]) => { if (c > bestCount) { bestCount = c; best = sloc; } });
+  let best = candidates[0], bestCount = -1;
+  candidates.forEach(sloc => { const c = counts[sloc] || 0; if (c > bestCount) { bestCount = c; best = sloc; } });
   return best;
 }
 
-function brdInferStorageLocation(plant, mappedCode) {
+// scopeCode carries this material's own Q/R + valuation-type classification
+// (e.g. "Q_ZME", "R_ZLC" — see brdMaterialScope()), used to break ties when
+// a plant has more than one candidate code for a temperature zone.
+function brdInferStorageLocation(plant, mappedCode, scopeCode) {
   const isCold = brdHo01IsCold(mappedCode);
   if (isCold === null) return ""; // no clear HO01 signal — don't guess
   if (isCold) {
     const coldCodes = PLANT_COLD_STORAGE_LOCATIONS[plant];
-    return (coldCodes && coldCodes.length) ? coldCodes[0] : "";
+    if (!coldCodes || !coldCodes.length) return "";
+    if (coldCodes.length === 1 || !scopeCode) return coldCodes[0];
+    const wantPrefix = scopeCode.startsWith("Q_") ? "Q" : "R";
+    const matched = coldCodes.filter(loc => storageLocationServesScope(plant, loc, wantPrefix) === true);
+    return matched.length ? matched[0] : coldCodes[0];
   }
-  return brdNonColdCodeForPlant(plant);
+  return brdNonColdCodeForPlant(plant, scopeCode);
 }
 
 // Resolves the Storage Location a line should use: real branch stock record
@@ -435,7 +450,7 @@ function brdStorageLocationForBranch(mappedCode, plant, scopeCode) {
     Object.entries(qtyBySloc).forEach(([sloc, q]) => { if (q > bestQty) { bestQty = q; bestLoc = sloc; } });
     return { loc: bestLoc, inferred: false };
   }
-  const inferredLoc = brdInferStorageLocation(plant, mappedCode);
+  const inferredLoc = brdInferStorageLocation(plant, mappedCode, scopeCode);
   return { loc: inferredLoc, inferred: !!inferredLoc };
 }
 
