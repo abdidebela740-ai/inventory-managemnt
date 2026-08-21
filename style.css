@@ -1760,6 +1760,8 @@ table.um-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm)
   border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 0.82rem; cursor: pointer; }
 .scope-check:hover, .perm-check:hover { border-color: var(--blue); }
 .scope-check input, .perm-check input { accent-color: var(--blue); }
+.perm-check-locked { opacity: 0.5; cursor: not-allowed; }
+.perm-check-locked:hover { border-color: inherit; }
 .perm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .perm-group-label { grid-column: 1 / -1; font-size: 0.72rem; text-transform: uppercase;
   letter-spacing: 0.04em; color: var(--dim); margin: 10px 0 2px; }
