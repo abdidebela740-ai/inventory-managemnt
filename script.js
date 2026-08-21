@@ -1631,7 +1631,7 @@ function pl(extra={}) {
 function renderDashboard() {
   const df = applyPageFilter("dashboard");
 
-  // FIX-NO-DASH-PHANTOM-ALERT: the "UnTrue transit Stock Excluded" banner
+  // FIX-NO-DASH-PHANTOM-ALERT: the "Ghost transit Stock Excluded" banner
   // is no longer shown on the Dashboard — it now only appears on the Transit
   // page itself. Dashboard totals still exclude Ghost transitamounts (see
   // getVerifiedTransitVal/Qty below), just without the inline banner.
@@ -2591,7 +2591,7 @@ function renderPhantomAlert(containerId, df) {
     <div class="phantom-transit-alert">
       <span class="phantom-alert-icon">⚠️</span>
       <div class="phantom-alert-body">
-        <strong>UnTrue transit Stock Excluded</strong>
+        <strong>Ghost transit Stock Excluded</strong>
         <span>${count.toLocaleString()} item${count!==1?"s":""} (${fmtQty(qty)} units · ${fmtETB(val)}) have <em>Stock in Transit</em> but
         ${transitFileLoaded ? "don't have a matching quantity in the uploaded Stock-in-Transit file" : "no Stock-in-Transit file has been uploaded yet to verify them"}.
         These items are <strong>excluded from all totals</strong> — verify first.</span>
