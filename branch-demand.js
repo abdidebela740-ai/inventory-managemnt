@@ -332,19 +332,68 @@ function brdMaterialScope(mappedCode) {
 }
 
 // ── STORAGE LOCATION AT THE REQUESTING BRANCH (see file header) ────────────
-// Best-effort fallback: the storage location most commonly used at this
-// plant for OTHER materials sharing the same Q/RDF + valuation-type scope
-// — used only when the branch has no existing stock record at all for this
-// exact material (so there's nothing to read a real storage location from).
-function brdInferStorageLocation(plant, scopeCode) {
-  if (!scopeCode) return "";
+// Fallback rule (used only when the branch has no existing stock record for
+// this exact material — see brdStorageLocationForBranch below): match the
+// temperature zone (cold vs non-cold) of wherever this material actually
+// sits at HO01 right now, same signal request-analysis.js's
+// classifyStorageMismatch() uses, then return THIS plant's own code for that
+// zone. Q vs RDF makes no difference to this — a Q drug and an RDF drug at
+// the same plant use the exact same cold/non-cold codes.
+
+// HO01's own cold storage locations — kept in sync with request-analysis.js's
+// HO01_COLD_LOCATIONS by hand.
+const HO01_COLD_LOCATIONS = ["HOM3", "HOM8", "HOM9"];
+
+// Each plant's own cold-storage code(s) — kept in sync with
+// request-analysis.js's PLANT_COLD_STORAGE_LOCATIONS by hand.
+const PLANT_COLD_STORAGE_LOCATIONS = {
+  AA01: ["AA1C"], AA02: ["AA2C"], AD01: ["ADC1"], AR01: ["AMC1"], AS01: ["ASC1"],
+  BD01: ["BDC1"], DE01: ["DEC1"], DI01: ["DDC1"], GA01: ["GAC1"], GO01: ["GOC1"],
+  HA01: ["HAC1", "HAC2"], JI01: ["JMC1"], JJ01: ["JJC1"], KD01: ["KDC1"],
+  MK01: ["MKC1"], NB01: ["NBC1"], NK01: ["NKC1"], SE01: ["SEC1"], SH01: ["SHC1"],
+};
+
+// Explicit non-cold code, where confirmed outright rather than derived from
+// data — currently only AA01/AA02 (AA1P / AA2P). Every other plant's
+// non-cold code is derived on the fly from its own live Storage Location
+// data in brdNonColdCodeForPlant(), same "any OTHER code counts as non-cold"
+// convention request-analysis.js's comment describes.
+const PLANT_NONCOLD_STORAGE_LOCATIONS = { AA01: "AA1P", AA02: "AA2P" };
+
+// Whether this material sits cold, non-cold, both, or neither at HO01 right
+// now, read live from Storage Location on the main inventory data (any row,
+// regardless of current stock qty). Returns true (cold), false (non-cold),
+// or null when there's no HO01 location data for it, or it's split across
+// both zones — either way there isn't a clean signal to act on, so callers
+// should not guess.
+function brdHo01IsCold(mappedCode) {
+  const base = (typeof getReconciledBase === "function") ? getReconciledBase() : (typeof rawDf !== "undefined" ? rawDf : []);
+  let hasCold = false, hasNonCold = false;
+  base.forEach(row => {
+    if (String(row["Plant"] || "").trim().toUpperCase() !== HUB_PLANT) return;
+    const canonical = String(row._mappedMaterial || row["Material"] || "").trim();
+    if (canonical !== mappedCode) return;
+    const loc = String(row["Storage Location"] || "").trim().toUpperCase();
+    if (!loc) return;
+    if (HO01_COLD_LOCATIONS.includes(loc)) hasCold = true; else hasNonCold = true;
+  });
+  if (hasCold && !hasNonCold) return true;
+  if (hasNonCold && !hasCold) return false;
+  return null; // no data, or split across both zones
+}
+
+// This plant's own non-cold code: explicit where confirmed (AA01/AA02),
+// otherwise the most common Storage Location value seen at this plant in
+// the live data that ISN'T one of the plant's own cold codes.
+function brdNonColdCodeForPlant(plant) {
+  if (PLANT_NONCOLD_STORAGE_LOCATIONS[plant]) return PLANT_NONCOLD_STORAGE_LOCATIONS[plant];
+  const coldCodes = PLANT_COLD_STORAGE_LOCATIONS[plant] || [];
   const base = (mappingTable && mappingTable.size > 0 ? mappedDf : rawDf) || [];
   const counts = {};
   base.forEach(r => {
     if (String(r["Plant"] || "").trim().toUpperCase() !== plant) return;
     const sloc = String(r["Storage Location"] || "").trim().toUpperCase();
-    if (!sloc) return;
-    if (brdScopeCodeForRow(r) !== scopeCode) return;
+    if (!sloc || coldCodes.includes(sloc)) return;
     counts[sloc] = (counts[sloc] || 0) + 1;
   });
   let best = "", bestCount = -1;
@@ -352,10 +401,21 @@ function brdInferStorageLocation(plant, scopeCode) {
   return best;
 }
 
+function brdInferStorageLocation(plant, mappedCode) {
+  const isCold = brdHo01IsCold(mappedCode);
+  if (isCold === null) return ""; // no clear HO01 signal — don't guess
+  if (isCold) {
+    const coldCodes = PLANT_COLD_STORAGE_LOCATIONS[plant];
+    return (coldCodes && coldCodes.length) ? coldCodes[0] : "";
+  }
+  return brdNonColdCodeForPlant(plant);
+}
+
 // Resolves the Storage Location a line should use: real branch stock record
 // first (picking the location holding the most stock, if the material sits
-// in more than one), inferred fallback second. `inferred:true` means the
-// caller should surface this for human review before the line is approved.
+// in more than one), cold/non-cold-matched fallback second. `inferred:true`
+// means the caller should surface this for human review before the line is
+// approved.
 function brdStorageLocationForBranch(mappedCode, plant, scopeCode) {
   const src  = brdPrimarySource(mappedCode);
   const base = (mappingTable && mappingTable.size > 0 ? mappedDf : rawDf) || [];
@@ -375,7 +435,7 @@ function brdStorageLocationForBranch(mappedCode, plant, scopeCode) {
     Object.entries(qtyBySloc).forEach(([sloc, q]) => { if (q > bestQty) { bestQty = q; bestLoc = sloc; } });
     return { loc: bestLoc, inferred: false };
   }
-  const inferredLoc = brdInferStorageLocation(plant, scopeCode);
+  const inferredLoc = brdInferStorageLocation(plant, mappedCode);
   return { loc: inferredLoc, inferred: !!inferredLoc };
 }
 
@@ -548,17 +608,30 @@ function brdComputeMaterialAllocation(row, sohMap, buffer, ho01Breakdown) {
   };
 }
 
+// A code's own Q/RDF classification (per brdMaterialScope, i.e. its actual
+// Special Stock Type in the inventory data) translated to the "Q"/"RDF"
+// strings mosMerged rows use for .type — the single source of truth this
+// module uses to pick between two AMC rows that share a code.
+function brdMosTypeForCode(code) {
+  const scope = brdMaterialScope(code);
+  if (scope.prefix === "Q") return "Q";
+  if (scope.prefix === "R") return "RDF";
+  return null;
+}
+
 // ── RESOLVE A PASTED CODE (source or mapped) TO A mosMerged ROW ────────────
+// A code can now have two mosMerged rows (Q and RDF) — pick the one whose
+// type matches the code's own classification from brdMosTypeForCode(), not
+// just whichever happened to come first in mosMerged.
 function brdResolveCode(raw) {
   const q = String(raw || "").trim().toUpperCase();
   if (!q) return null;
-  let row = mosMerged.find(r => r.code === q);
-  if (row) return row;
-  if (mappingTable && mappingTable.size > 0) {
+  let target = q;
+  if (!mosMerged.some(r => r.code === q) && mappingTable && mappingTable.size > 0) {
     const entry = mappingTable.get(q);
-    if (entry) row = mosMerged.find(r => r.code === entry.targetCode);
+    if (entry) target = entry.targetCode;
   }
-  return row || null;
+  return mosFindRow(target, brdMosTypeForCode(target));
 }
 
 function brdAddCodesFromText(text) {
@@ -582,9 +655,30 @@ function brdAddCodesFromText(text) {
 }
 
 // ── SCOPE: which mosMerged rows are in play ─────────────────────────────────
+// A code can have two mosMerged rows (Q and RDF). Only one of them is the
+// "real" classification for that code per the inventory data's own Special
+// Stock Type (brdMosTypeForCode) — the other would double the material onto
+// the screen with mismatched AMC, so it's dropped here before anything else
+// scopes or filters the list.
+function brdDedupeByOwnType(rows) {
+  const byCode = new Map();
+  rows.forEach(r => {
+    if (!byCode.has(r.code)) byCode.set(r.code, []);
+    byCode.get(r.code).push(r);
+  });
+  const out = [];
+  byCode.forEach((candidates, code) => {
+    if (candidates.length === 1) { out.push(candidates[0]); return; }
+    const wantType = brdMosTypeForCode(code);
+    const match = wantType ? candidates.find(r => r.type === wantType) : null;
+    out.push(match || candidates[0]);
+  });
+  return out;
+}
+
 function brdMaterialsForScope() {
   if (brdCodes.length) {
-    return brdCodes.map(c => mosMerged.find(r => r.code === c)).filter(Boolean);
+    return brdCodes.map(c => brdResolveCode(c)).filter(Boolean);
   }
   let rows = mosMerged;
   if (typeof personFilter !== "undefined" && personFilter.size > 0) {
@@ -592,7 +686,8 @@ function brdMaterialsForScope() {
   }
   const branchPlants = mosPlants.filter(p => p !== HUB_PLANT);
   const scopePlants  = brdSelectedPlant ? [brdSelectedPlant] : branchPlants;
-  return rows.filter(r => scopePlants.some(p => r.amcs[p] !== null && r.amcs[p] !== undefined));
+  rows = rows.filter(r => scopePlants.some(p => r.amcs[p] !== null && r.amcs[p] !== undefined));
+  return brdDedupeByOwnType(rows);
 }
 
 // ── BUILD DISPLAY LINES ─────────────────────────────────────────────────────
