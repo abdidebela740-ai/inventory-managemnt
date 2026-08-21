@@ -132,6 +132,30 @@ function getVisiblePlants(plants) {
   return plants.filter(p => canAccessPlant(p));
 }
 
+/**
+ * Strips HO01 (Head Office hub) rows for a branch-locked user, mirroring
+ * the exclusion applyPageFilter() applies at render time. Head Office /
+ * Admin users get rows back unchanged.
+ *
+ * WHY THIS EXISTS: rawDf (and therefore anything built from it, like
+ * filter-dropdown option lists) deliberately KEEPS HO01 rows for a
+ * branch-locked user — canAccessPlant() above lets them through so
+ * Branch Demand / the MOS hub-vs-branch comparison can read rawDf
+ * directly and still see what stock HO01 has. But applyPageFilter()
+ * (Dashboard/Transit/Expiry/QC/Branch Comparison) strips those same HO01
+ * rows back out for non-Head-Office users. Any dropdown built straight
+ * from rawDf can therefore offer a Material Group / Plant / Material
+ * whose ONLY accessible rows are at HO01 — a selectable option that is
+ * guaranteed to render zero results for that user. Callers that build
+ * filter-chip option lists should route rawDf through this first so the
+ * options offered always match what applyPageFilter() can actually show.
+ */
+function stripHubForBranchUser(rows) {
+  if (!Array.isArray(rows)) return [];
+  if (isHeadOfficeUser()) return rows;
+  return rows.filter(r => String(r["Plant"] || "").trim().toUpperCase() !== PERM_HUB_PLANT);
+}
+
 // ── BASIC ROLE CHECKS ───────────────────────────────────────────
 function computeIsAdmin() {
   return !!window.isAdmin;
@@ -429,6 +453,7 @@ window.getUserPlant         = getUserPlant;
 window.isHeadOfficeUser     = isHeadOfficeUser;
 window.canAccessPlant       = canAccessPlant;
 window.getVisiblePlants     = getVisiblePlants;
+window.stripHubForBranchUser = stripHubForBranchUser;
 window.shouldUseStockTypeAxis = shouldUseStockTypeAxis;
 window.getRowStockTypeLabel   = getRowStockTypeLabel;
 window.HUB_PLANT            = PERM_HUB_PLANT;
