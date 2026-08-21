@@ -340,6 +340,30 @@ function stockTypeFilterOptions(rows, prefixOfRow) {
   return out;
 }
 
+/**
+ * Material Group options for a filter checklist. Unlike Material Type /
+ * Stock Type, there's no fixed enum of Material Groups to intersect
+ * against a scope code — group membership isn't itself part of the
+ * Q_ZME-style scope grammar (a scope grants a Stock Type + Material Type
+ * combination, not a group). So the only invariant this helper enforces
+ * is: only groups actually present in access-filtered `rows` can appear,
+ * with non-medical groups excluded — same universal exclusion every other
+ * caller already applies via passesUniversalExclusions().
+ *
+ * `rows` MUST already be access-filtered (e.g. rawDf/baseDf/mappedDf, or
+ * the output of filterRowsByAccess()/applyPageFilter()) — this helper does
+ * not re-run canAccessRow() itself, since "Material Group Name" carries no
+ * scope info of its own to check. This is the single choke point every
+ * Material Group dropdown in the app should go through, so a duplicate,
+ * looser copy of this list-building logic can't reappear in a 7th spot.
+ */
+function materialGroupFilterOptions(rows) {
+  return [...new Set((Array.isArray(rows) ? rows : []).map(r => r["Material Group Name"]))]
+    .filter(Boolean)
+    .filter(name => typeof isNonMedicalGroup !== "function" || !isNonMedicalGroup(name))
+    .sort();
+}
+
 // ── ROLE BADGE TEXT (spec #4) ──────────────────────────────────
 // "Team Leader · Q_ZME"  |  "Team Leader · Q_ZME + Q_ZMS"  |
 // "Team Leader · 3 scopes" (tooltip should show scopes.join(", ") for this case)
@@ -420,6 +444,7 @@ window.passesUniversalExclusions = passesUniversalExclusions;
 window.filterRowsByAccess   = filterRowsByAccess;
 window.materialTypeFilterOptions = materialTypeFilterOptions;
 window.stockTypeFilterOptions    = stockTypeFilterOptions;
+window.materialGroupFilterOptions = materialGroupFilterOptions;
 window.roleBadgeText        = roleBadgeText;
 window.roleBadgeTooltip     = roleBadgeTooltip;
 window.firstAccessibleModule = firstAccessibleModule;
