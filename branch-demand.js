@@ -156,6 +156,23 @@ function brdPriorityBadge(tierKey) {
 // second, HO01-only map (canonical code -> { unrestricted, qc }) so the
 // allocation math and the table can tell "usable now" apart from "exists but
 // stuck in QC" — see brdComputeMaterialAllocation() and brdBuildLines().
+// BUGFIX-QC-FALSE-POSITIVE: the map key here MUST be normalized the exact
+// same way every other cross-file code lookup in the app normalizes it
+// (.trim().toUpperCase() — see getPersonFilteredCodes() / getReconciledBase()
+// in script.js). Previously this only .trim()'d the code. Real SAP exports
+// routinely have the same material appear with different casing across rows
+// (or across the AMC file vs the inventory file), and mosMerged.code /
+// row._mappedMaterial are themselves NOT case-normalized upstream (see
+// buildMosMerged() in mos.js and applyMaterialMapping() in script.js — both
+// only trim). Without normalizing here too, HO01 unrestricted stock recorded
+// under e.g. "MED123" and QC stock recorded under "med123" landed in TWO
+// SEPARATE map entries instead of being summed into one. brdComputeMaterialAllocation()
+// then looked the material up under whichever single casing mosMerged.code
+// happened to use, found the QC-only bucket, and showed "0 unrestricted /
+// QC positive" for a material that actually had usable unrestricted stock
+// sitting under the other-cased bucket. Normalizing the key here (and the
+// lookup key in brdComputeMaterialAllocation()) collapses both casings back
+// into one entry so the two quantities are summed correctly again.
 function brdBuildHo01Breakdown() {
   const map = new Map();
   const base = (typeof getReconciledBase === "function")
@@ -165,7 +182,7 @@ function brdBuildHo01Breakdown() {
   for (const row of base) {
     const plt = String(row["Plant"] || "").trim().toUpperCase();
     if (plt !== HUB_PLANT) continue;
-    const mat = String(row._mappedMaterial || row["Material"] || "").trim();
+    const mat = String(row._mappedMaterial || row["Material"] || "").trim().toUpperCase();
     if (!mat) continue;
     const unrestricted = (typeof getMappedQty === "function") ? getMappedQty(row, "Unrestricted Stock") : Number(row["Unrestricted Stock"] || 0);
     const qc            = (typeof getMappedQty === "function") ? getMappedQty(row, "Stock in Quality Inspection") : Number(row["Stock in Quality Inspection"] || 0);
@@ -173,6 +190,14 @@ function brdBuildHo01Breakdown() {
     const entry = map.get(mat);
     entry.unrestricted += Number(unrestricted) || 0;
     entry.qc            += Number(qc) || 0;
+  }
+  // DEFENSIVE LOG (dev aid, not shown to users): if this ever fires a lot,
+  // the QC badge is unreliable again — most likely a new place upstream
+  // stopped normalizing casing/trim on a material code. Grep for "QC-FALSE-
+  // POSITIVE" if this shows up.
+  if (window.DEBUG_BRD) {
+    const qcOnlyCodes = [...map.entries()].filter(([, v]) => v.unrestricted === 0 && v.qc > 0).map(([k]) => k);
+    if (qcOnlyCodes.length) console.debug("[branch-demand] HO01 QC-only codes this build:", qcOnlyCodes);
   }
   return map;
 }
@@ -213,13 +238,20 @@ function brdCanEdit() {
       || (typeof currentRole === "function" && currentRole() === "team_leader");
 }
 function brdCanSeeAllBranches() { return brdCanEdit(); }
-// window.APP_USER doesn't carry a "plant" field in the current profile
-// schema — this checks defensively so a future column drops in without a
-// code change; today it will simply fall back to the plant dropdown, which
-// is the explicitly-allowed v1 fallback ("if plant is known on profile, use
-// it; else plant dropdown").
+// window.APP_USER.plant (see permissions.js "PLANT SCOPING" for the
+// app-wide source of truth) drives this. Returns the plant code this user
+// is locked to for Branch Demand, or null when they may see every branch —
+// which is BOTH the "no plant set yet" case AND the "plant === HO01" case:
+// HO01 is the hub (not a branch in this dropdown at all — see
+// branchPlants = mosPlants.filter(p => p !== HUB_PLANT) below), so a
+// director/team_leader/admin whose plant is HO01 must fall through to full
+// multi-branch behaviour, not get treated as "locked to HO01". Without this
+// HUB_PLANT check, such a user's "All Branches" option would incorrectly
+// disappear (see the `!locked` guard in renderBranchDemand()'s plant-select
+// build below) even though the spec says HO01 users keep full access.
 function brdLockedPlant() {
-  return (window.APP_USER && window.APP_USER.plant) ? String(window.APP_USER.plant).trim().toUpperCase() : null;
+  const p = (window.APP_USER && window.APP_USER.plant) ? String(window.APP_USER.plant).trim().toUpperCase() : null;
+  return (p && p !== HUB_PLANT) ? p : null;
 }
 
 // ── SOURCE-CODE / FACTOR RESOLUTION FOR SAP EXPORT ──────────────────────────
@@ -435,7 +467,10 @@ function brdLargestRemainderRound(idealValues, caps, capTotal) {
 // as available.
 function brdComputeMaterialAllocation(row, sohMap, buffer, ho01Breakdown) {
   const branchPlants = mosPlants.filter(p => p !== HUB_PLANT);
-  const bd     = (ho01Breakdown && ho01Breakdown.get(row.code)) || { unrestricted: 0, qc: 0 };
+  // BUGFIX-QC-FALSE-POSITIVE: must match the normalization brdBuildHo01Breakdown()
+  // now uses for its keys (.trim().toUpperCase()) — see that function's comment.
+  const ho01Key = String(row.code || "").trim().toUpperCase();
+  const bd     = (ho01Breakdown && ho01Breakdown.get(ho01Key)) || { unrestricted: 0, qc: 0 };
   const sohHo  = bd.unrestricted;
   const qcHo   = bd.qc;
   const availableHo = Math.max(0, sohHo - (Number(buffer) || 0));
@@ -740,7 +775,8 @@ function renderBranchDemand() {
 
   if (typeof renderMappingBanner === "function") renderMappingBanner("brd-mapping-banner");
 
-  // ── Plant selector (populate once, respecting role locks) ────────────────
+  // ── Plant selector (populate once, respecting role locks AND the user's
+  //    profile plant — see brdLockedPlant()/PLANT SCOPING) ────────────────
   const plantEl = document.getElementById("brd-plant");
   const locked  = brdLockedPlant();
   const branchPlants = mosPlants.filter(p => p !== HUB_PLANT).sort();
@@ -761,8 +797,9 @@ function renderBranchDemand() {
       plantEl.value = locked;
       plantEl.disabled = true;
     } else if (!brdCanSeeAllBranches() && !brdSelectedPlant && branchPlants.length) {
-      // branch_demand_officer with no known profile plant: default to the
-      // first branch rather than "All Branches" (which they shouldn't see).
+      // branch_demand_officer with no plant assigned yet on their profile:
+      // default to the first branch rather than "All Branches" (which they
+      // shouldn't see) until an Admin assigns them a real plant.
       brdSelectedPlant = branchPlants[0];
       plantEl.value = brdSelectedPlant;
     } else {
@@ -810,9 +847,75 @@ function renderBranchDemand() {
       : `<span class="brd-chips-hint">Showing every material with an AMC commitment at ${escHtml(brdSelectedPlant || "the selected branch(es)")}. Paste codes above to narrow the list.</span>`;
   }
 
-  // ── Compute + table ────────────────────────────────────────────────────
-  const sohMap = buildMosSohMap();
-  const lines  = brdBuildLines(sohMap);
+  // ── LAZY/DEFERRED HEAVY COMPUTE (Issue: Branch Demand loads too slowly) ──
+  // brdBuildLines() runs the full priority allocation across every branch ×
+  // material (heaviest for users who can see all plants — see
+  // brdComputeMaterialAllocation()) and is synchronous, so running it inline
+  // here would block the main thread and the UI would just freeze with no
+  // feedback until it finishes. Instead: paint a "Calculating…" state into
+  // the KPI/table areas immediately (cheap, instant), then hand the actual
+  // computation to a fresh macrotask (setTimeout 0) so the browser gets a
+  // chance to paint the spinner first. brdRenderSeq guards against a stale
+  // in-flight calculation (e.g. user tweaks the buffer twice quickly, or
+  // navigates away) finishing late and overwriting a newer render.
+  const mySeq = ++brdRenderSeq;
+  const loadingHtml = `<div class="brd-loading"><span class="brd-spinner"></span>Calculating branch demand…</div>`;
+  const kpisEl = document.getElementById("brd-kpis");
+  if (kpisEl) kpisEl.innerHTML = loadingHtml;
+  const tableEl = document.getElementById("brd-table");
+  if (tableEl) tableEl.innerHTML = loadingHtml;
+  const reqTableElLoading = document.getElementById("brd-request-table");
+  if (reqTableElLoading) reqTableElLoading.innerHTML = loadingHtml;
+
+  setTimeout(() => brdRenderHeavy(mySeq), 0);
+}
+
+// ── HEAVY COMPUTE + TABLE RENDER (deferred out of renderBranchDemand, see
+//    comment above) — only ever runs while the user is actually on Branch
+//    Demand; renderBranchDemand() is itself only invoked via
+//    PAGE_RENDERERS["branch-demand"] (navigation) or explicit user actions
+//    (filters, recalc, edits) already guarded to that page — see
+//    wireBrdModule() at the bottom of this file for the file-upload / AMC /
+//    mapping-apply guards.
+let brdRenderSeq = 0;
+function brdRenderHeavy(mySeq) {
+  // Stale calculation (superseded by a newer render, or user navigated away
+  // from Branch Demand while this was pending) — drop it silently.
+  if (mySeq !== brdRenderSeq) return;
+  if (typeof currentPage !== "undefined" && currentPage !== "branch-demand") return;
+  const contentEl = document.getElementById("brd-content");
+  if (!contentEl || contentEl.style.display === "none") return;
+
+  const canEdit = brdCanEdit();
+
+  // Everything below runs in a deferred macrotask (see renderBranchDemand()
+  // above), so it's outside renderPage()'s own try/catch in script.js —
+  // without this try/catch, an error here would only surface as an
+  // uncaught console error with the "Calculating…" spinner left on screen
+  // forever, instead of the app's usual friendly in-page error message.
+  try {
+    const sohMap = buildMosSohMap();
+    const lines  = brdBuildLines(sohMap);
+    brdRenderTables(lines, canEdit);
+  } catch (e) {
+    console.error("Error computing Branch Demand:", e);
+    const msg = `<div class="alert-danger" style="margin-top:1rem">
+      ⚠️ An error occurred while calculating branch demand: <b>${escHtml(e.message)}</b>
+      <br><small style="opacity:0.7">Check the browser console for details.</small>
+    </div>`;
+    const kEl = document.getElementById("brd-kpis");
+    const tEl = document.getElementById("brd-table");
+    const rEl = document.getElementById("brd-request-table");
+    if (kEl) kEl.innerHTML = "";
+    if (tEl) tEl.innerHTML = msg;
+    if (rEl) rEl.innerHTML = "";
+  }
+}
+
+// ── TABLE RENDER (Analysis + Request Form tabs) — split out of
+//    brdRenderHeavy() purely so that function's try/catch (above) covers
+//    both the allocation math AND the table-building/DOM-write in one go.
+function brdRenderTables(lines, canEdit) {
   brdKpiRow(lines);
 
   const cols = [];
