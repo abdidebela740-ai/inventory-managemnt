@@ -2302,6 +2302,11 @@ table.um-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm)
 }
 .brd-alloc-input:focus { outline: none; border-color: var(--blue); }
 
+.brd-approve-cb {
+  accent-color: var(--green); width: 16px; height: 16px;
+  cursor: pointer; vertical-align: middle;
+}
+
 .brd-note-scale  { color: var(--amber); font-size: 0.72rem; }
 .brd-note-redist { color: var(--purple); font-size: 0.72rem; }
 .brd-note-noamc  { color: var(--muted); font-size: 0.72rem; font-style: italic; }
