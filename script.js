@@ -1353,6 +1353,17 @@ function applyPageFilter(page) {
     // of the rules living here.
     passesUniversalExclusions(r) &&
     canAccessRow(r) &&
+    // PLANT SCOPING — HUB EXCLUSION: canAccessRow()/canAccessPlant() let a
+    // branch-locked user's HO01 rows through (that carve-out exists for
+    // Branch Demand and the MOS hub-vs-branch comparison, which read rawDf
+    // directly and need it). Dashboard/Transit/Expiry Watchlist/Quality
+    // Inspection/Branch Comparison all route through this shared
+    // applyPageFilter() though, and a branch user should see ONLY their own
+    // plant here — HO01 included — so strip HO01 rows back out at this
+    // single choke point rather than duplicating the exclusion in every
+    // page renderer.
+    (typeof isHeadOfficeUser !== "function" || isHeadOfficeUser() ||
+      String(r["Plant"] || "").trim().toUpperCase() !== (window.HUB_PLANT || "HO01")) &&
     String(r["Inventory Valuation Type"] || "").trim() !== "" &&
     // Page-level plant / material group / valuation type / material filters
     (!plants.length    || plants.includes(r["Plant Name"])) &&
