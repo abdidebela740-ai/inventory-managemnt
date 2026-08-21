@@ -21,6 +21,29 @@ const SCOPE_LABELS = {
   R_ZLC: "RDF · Laboratory", R_ZMD: "RDF · Medical Device",
 };
 
+// ── PLANT OPTIONS (see permissions.js "PLANT SCOPING" for how this is
+//    consumed app-wide) ──────────────────────────────────────────────────
+// HO01 = Head Office — a user with this plant sees every plant everywhere
+// in the app. Any other code below restricts a user to that plant only
+// (+ the HO01 hub itself, since e.g. Branch Demand needs to show what
+// stock Head Office has to give). Hand-maintained list of the 19 branch
+// plant codes the app already knows about elsewhere (see
+// PLANT_COLD_STORAGE_LOCATIONS in request-analysis.js) — update by hand if
+// a branch is added/retired, same as that table.
+const PLANT_OPTIONS = [
+  { code: "HO01", label: "HO01 — Head Office (sees all plants)" },
+  { code: "AA01", label: "AA01" }, { code: "AA02", label: "AA02" },
+  { code: "AD01", label: "AD01" }, { code: "AR01", label: "AR01" },
+  { code: "AS01", label: "AS01" }, { code: "BD01", label: "BD01" },
+  { code: "DE01", label: "DE01" }, { code: "DI01", label: "DI01" },
+  { code: "GA01", label: "GA01" }, { code: "GO01", label: "GO01" },
+  { code: "HA01", label: "HA01" }, { code: "JI01", label: "JI01" },
+  { code: "JJ01", label: "JJ01" }, { code: "KD01", label: "KD01" },
+  { code: "MK01", label: "MK01" }, { code: "NB01", label: "NB01" },
+  { code: "NK01", label: "NK01" }, { code: "SE01", label: "SE01" },
+  { code: "SH01", label: "SH01" },
+];
+
 let allUsers = [];
 let modalMode = null;       // "create" | "edit"
 let editingUser = null;     // profile row being edited, when mode === "edit"
@@ -122,6 +145,7 @@ function rowHtml(u) {
   const scopesHtml = u.role === "admin"
     ? '<span class="scope-chip" style="background:transparent;color:var(--purple);border:1px solid var(--purple);">Full Access</span>'
     : scopeChips(u.data_scopes || []);
+  const plantHtml = plantBadge(u.plant);
 
   const canEdit = canManageUsersFully() || (isDirectorLike() && u.role !== "admin");
   const canToggle = canManageUsersFully() && !isSelf;
@@ -133,6 +157,7 @@ function rowHtml(u) {
         <div class="um-email">${escapeHtml(u.email)}${isSelf ? " · you" : ""}</div>
       </td>
       <td><span class="role-pill role-${u.role}">${escapeHtml(roleLabel)}</span></td>
+      <td>${plantHtml}</td>
       <td>${scopesHtml}</td>
       <td>
         <span class="status-${u.status}"><span class="status-dot"></span>${u.status === "active" ? "Active" : "Inactive"}</span>
@@ -147,6 +172,17 @@ function rowHtml(u) {
         </div>
       </td>
     </tr>`;
+}
+
+// Shows the assigned plant (spec task B: "Show the assigned plant in the
+// users table"). HO01 gets a distinct color since it means "sees
+// everything" rather than "restricted to one branch" — same visual
+// language as the "Full Access" scopes chip above.
+function plantBadge(plant) {
+  const p = String(plant || "").trim().toUpperCase();
+  if (!p) return '<span style="color:var(--dim); font-size:0.78rem;">Not set</span>';
+  if (p === "HO01") return '<span class="scope-chip" style="background:transparent;color:var(--purple);border:1px solid var(--purple);">HO01 · All Plants</span>';
+  return `<span class="scope-chip">${escapeHtml(p)}</span>`;
 }
 
 function scopeChips(scopes) {
@@ -202,12 +238,17 @@ function closeModal() {
 
 function modalBodyHtml(mode, user) {
   const role = user ? user.role : "user";
+  const plant = user ? (user.plant || "") : "";
   const scopes = user ? (user.data_scopes || []) : [];
   const perms = user ? (user.sidebar_permissions || {}) : {};
   const fullEdit = canManageUsersFully();
 
   const roleOptions = ALL_ROLES.map(r =>
     `<option value="${r}" ${r === role ? "selected" : ""}>${window.ROLE_LABELS[r]}</option>`).join("");
+
+  const plantOptions = `<option value="" ${!plant ? "selected" : ""} disabled>Select a plant…</option>` +
+    PLANT_OPTIONS.map(p =>
+      `<option value="${p.code}" ${p.code === plant ? "selected" : ""}>${escapeHtml(p.label)}</option>`).join("");
 
   const scopeGrid = ALL_SCOPES.map(s => `
     <label class="scope-check">
@@ -276,6 +317,12 @@ function modalBodyHtml(mode, user) {
     </div>
 
     <div class="field ${!fullEdit ? "field-locked" : ""}">
+      <label for="um-f-plant">Plant</label>
+      <select id="um-f-plant" ${!fullEdit ? "disabled" : ""}>${plantOptions}</select>
+      <div class="field-hint">HO01 = Head Office (sees all plants). Any other plant = restricted to that plant only (everywhere in the app, including Branch Demand).</div>
+    </div>
+
+    <div class="field ${!fullEdit ? "field-locked" : ""}">
       <label>Data Scopes</label>
       <div class="scope-grid">${scopeGrid}</div>
       <div class="field-hint">Admin does not need scopes — it always has full access.</div>
@@ -319,6 +366,7 @@ async function createUser() {
   const email = document.getElementById("um-f-email").value.trim();
   const password = document.getElementById("um-f-password").value;
   const role = document.getElementById("um-f-role").value;
+  const plant = document.getElementById("um-f-plant").value;
   const data_scopes = collectScopes();
   const sidebar_permissions = collectPerms();
 
@@ -330,9 +378,17 @@ async function createUser() {
     showAlert("error", "Assign at least one data scope for non-Admin users.");
     return;
   }
+  // Plant is required for every non-Admin role (Admin bypasses plant
+  // scoping entirely — see permissions.js hasFullPlantAccess()) — matches
+  // the same requirement enforced server-side in the create-user Edge
+  // Function, so a mistake here is caught before the round-trip.
+  if (role !== "admin" && !plant) {
+    showAlert("error", "Assign a Plant for non-Admin users (HO01 = Head Office / all plants).");
+    return;
+  }
 
   const { data, error } = await window.supabaseClient.functions.invoke("create-user", {
-    body: { email, password, full_name, role, data_scopes, sidebar_permissions },
+    body: { email, password, full_name, role, plant: plant || null, data_scopes, sidebar_permissions },
   });
 
   if (error || (data && data.error)) {
@@ -355,8 +411,9 @@ async function updateUser() {
     if (error) { showAlert("error", error.message); return; }
   }
 
-  // Scopes / sidebar permissions — Admin only.
+  // Plant / Scopes / sidebar permissions — Admin only.
   if (canManageUsersFully()) {
+    const plant = document.getElementById("um-f-plant").value;
     const data_scopes = collectScopes();
     const sidebar_permissions = collectPerms();
 
@@ -364,11 +421,17 @@ async function updateUser() {
       showAlert("error", "Assign at least one data scope for non-Admin users.");
       return;
     }
+    if (role !== "admin" && !plant) {
+      showAlert("error", "Assign a Plant for non-Admin users (HO01 = Head Office / all plants).");
+      return;
+    }
 
-    const [{ error: scopeErr }, { error: permErr }] = await Promise.all([
+    const [{ error: plantErr }, { error: scopeErr }, { error: permErr }] = await Promise.all([
+      window.supabaseClient.rpc("admin_set_user_plant", { p_user_id: user.id, p_plant: plant || null }),
       window.supabaseClient.rpc("admin_set_data_scopes", { p_user_id: user.id, p_scopes: data_scopes }),
       window.supabaseClient.rpc("admin_set_sidebar_permissions", { p_user_id: user.id, p_perms: sidebar_permissions }),
     ]);
+    if (plantErr) { showAlert("error", plantErr.message); return; }
     if (scopeErr) { showAlert("error", scopeErr.message); return; }
     if (permErr) { showAlert("error", permErr.message); return; }
   }
