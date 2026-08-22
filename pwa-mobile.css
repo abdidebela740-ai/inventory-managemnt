@@ -1,0 +1,210 @@
+/* ════════════════════════════════════════════════════════════════
+   pwa-mobile.css — mobile-only responsive improvements.
+   Load this AFTER style.css:
+       <link rel="stylesheet" href="style.css" />
+       <link rel="stylesheet" href="css/pwa-mobile.css" />
+
+   EVERY rule in this file is wrapped in a max-width media query, so
+   nothing here can ever change desktop/laptop layout. Safe to add
+   without touching the existing style.css.
+   ════════════════════════════════════════════════════════════════ */
+
+/* ── Respect the iPhone notch / home-indicator / status bar in
+   standalone (installed) mode. Harmless on desktop and in-browser. ── */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+@media (max-width: 900px) {
+
+  /* ══════════════════════════════════════════════════════════
+     1) LAYOUT / SIDEBAR — collapse to an off-canvas drawer
+     ══════════════════════════════════════════════════════════ */
+  body {
+    padding-top: var(--safe-top);
+    padding-bottom: var(--safe-bottom);
+  }
+
+  #sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    height: 100dvh;
+    width: 82vw;
+    max-width: 320px;
+    z-index: 4000;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    overflow-y: auto;
+    padding-top: calc(var(--safe-top) + 12px);
+    box-shadow: 2px 0 24px rgba(0,0,0,0.35);
+  }
+
+  #sidebar.mobile-open {
+    transform: translateX(0);
+  }
+
+  /* Dim/backdrop behind the open drawer — toggled via JS (see
+     pwa-mobile-nav.js snippet in the implementation instructions) */
+  .mobile-sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 3900;
+  }
+  .mobile-sidebar-backdrop.active {
+    display: block;
+  }
+
+  /* Hamburger button to open the drawer — inject in the header */
+  .mobile-menu-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    border: 1px solid var(--border, #22304a);
+    background: var(--surface, #0e1420);
+    color: var(--text, #e7ecf3);
+    font-size: 1.2rem;
+    cursor: pointer;
+  }
+
+  #main {
+    margin-left: 0 !important;
+    width: 100% !important;
+    padding: 12px !important;
+    padding-bottom: calc(16px + var(--safe-bottom));
+  }
+
+  /* ══════════════════════════════════════════════════════════
+     2) TABLES — horizontal scroll with sticky first column +
+        sticky header, so long/wide tables stay usable on a phone
+        instead of squeezing every column unreadably small.
+     ══════════════════════════════════════════════════════════ */
+  .table-wrap,
+  .um-table-wrap,
+  table {
+    max-width: 100%;
+  }
+
+  /* Wrap any bare <table> not already inside a scroll container.
+     (Apply class="table-scroll" around tables that need it, or rely
+     on this generic fallback selector.) */
+  table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+  }
+
+  table thead {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+
+  /* Keep the first column (usually item/branch name) visible while
+     scrolling horizontally through wide tables — huge usability win
+     on mobile for tables with 10+ numeric columns. */
+  table tr > *:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--surface, #0e1420);
+    box-shadow: 2px 0 4px rgba(0,0,0,0.15);
+  }
+  table thead tr > *:first-child {
+    z-index: 3;
+  }
+
+  /* Slightly denser padding + smaller font so more columns fit
+     on-screen before scrolling kicks in. */
+  table th,
+  table td {
+    padding: 8px 10px !important;
+    font-size: 0.76rem !important;
+  }
+
+  /* Existing card-style table (user-management) already ships its
+     own mobile layout at 640px in style.css — leave it as-is; this
+     block only affects the generic dense data tables. */
+
+  /* ══════════════════════════════════════════════════════════
+     3) FILTER BARS — stack vertically, full-width controls,
+        larger tap targets.
+     ══════════════════════════════════════════════════════════ */
+  [class*="filter"],
+  .exprisk-tab-bar {
+    flex-wrap: wrap;
+  }
+
+  [class*="filter-row"],
+  [class*="filter-bar"] {
+    flex-direction: column;
+    align-items: stretch !important;
+  }
+
+  select,
+  input[type="text"],
+  input[type="search"],
+  input[type="date"],
+  input[type="number"] {
+    font-size: 16px !important; /* prevents iOS Safari auto-zoom on focus */
+    min-height: 40px;
+  }
+
+  /* ══════════════════════════════════════════════════════════
+     4) BUTTONS — larger tap targets (44px min per WCAG/iOS HIG)
+     ══════════════════════════════════════════════════════════ */
+  .apply-btn,
+  button,
+  .btn {
+    min-height: 40px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .apply-btn.small,
+  button.small {
+    min-height: 36px;
+  }
+
+  /* Give adjacent buttons breathing room so thumbs don't mis-tap */
+  .apply-btn + .apply-btn {
+    margin-left: 8px;
+  }
+
+  /* ══════════════════════════════════════════════════════════
+     5) MISC — modals/overlays should fill more of a small screen
+     ══════════════════════════════════════════════════════════ */
+  [class*="modal"] {
+    width: 94vw !important;
+    max-width: 94vw !important;
+    max-height: 88vh;
+    overflow-y: auto;
+  }
+}
+
+/* ── Extra-small phones ── */
+@media (max-width: 400px) {
+  table th,
+  table td {
+    padding: 6px 8px !important;
+    font-size: 0.72rem !important;
+  }
+}
+
+/* ── Standalone (installed PWA) tweaks: hide any "install"/browser-only
+   affordances once the app is already running as an installed app. ── */
+@media (display-mode: standalone) {
+  .pwa-install-only {
+    display: none !important;
+  }
+}

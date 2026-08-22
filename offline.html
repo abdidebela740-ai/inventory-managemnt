@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>You're offline — EPSS Stock-Multiple</title>
+<link rel="icon" type="image/png" href="/epss-logo.png" />
+<style>
+  :root {
+    --bg: #07090d;
+    --surface: #0e1420;
+    --border: #1c2635;
+    --text: #e7ecf3;
+    --muted: #8291a6;
+    --blue: #3d94e0;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  .wrap {
+    min-height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .card {
+    max-width: 420px;
+    width: 100%;
+    text-align: center;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 40px 28px;
+  }
+  .logo {
+    height: 48px;
+    width: auto;
+    margin-bottom: 18px;
+  }
+  .icon {
+    font-size: 2.4rem;
+    margin-bottom: 10px;
+  }
+  h1 {
+    font-size: 1.15rem;
+    margin: 0 0 8px;
+  }
+  p {
+    font-size: 0.9rem;
+    color: var(--muted);
+    line-height: 1.5;
+    margin: 0 0 22px;
+  }
+  button {
+    background: var(--blue);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 11px 24px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  button:active { opacity: 0.85; }
+  .status {
+    margin-top: 16px;
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+  .status .dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #e5484d;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .status.online .dot { background: #2ecc71; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <img src="/epss-logo.png" alt="EPSS" class="logo" onerror="this.style.display='none'" />
+      <div class="icon">📡</div>
+      <h1>You're offline</h1>
+      <p>
+        EPSS Stock-Multiple needs an internet connection to load live
+        inventory data. Pages you've already opened may still be
+        available from cache — try going back, or reconnect and reload.
+      </p>
+      <button id="retry-btn" type="button">Try again</button>
+      <div class="status" id="status">
+        <span class="dot"></span><span id="status-text">Offline</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Reflect live connection status and auto-reload the moment the
+    // network comes back, so the user doesn't have to tap anything.
+    function updateStatus() {
+      const el = document.getElementById("status");
+      const text = document.getElementById("status-text");
+      if (navigator.onLine) {
+        el.classList.add("online");
+        text.textContent = "Back online — reloading…";
+        setTimeout(() => location.reload(), 600);
+      } else {
+        el.classList.remove("online");
+        text.textContent = "Offline";
+      }
+    }
+    window.addEventListener("online", updateStatus);
+    window.addEventListener("offline", updateStatus);
+    updateStatus();
+
+    document.getElementById("retry-btn").addEventListener("click", () => {
+      location.reload();
+    });
+  </script>
+</body>
+</html>
