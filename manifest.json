@@ -1,0 +1,23 @@
+{
+  "name": "EPSS Stock-Multiple — Inventory Management",
+  "short_name": "EPSS Stock",
+  "description": "Pharmaceutical inventory management system for EPSS: stock levels, outbound tracking, expiry risk, allocation and branch comparison across all locations.",
+  "id": "./index.html",
+  "start_url": "./index.html?source=pwa",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
+  "orientation": "any",
+  "background_color": "#0e1420",
+  "theme_color": "#0e1420",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["business", "productivity", "medical"],
+
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ],
+
+  "prefer_related_applications": false
+}
