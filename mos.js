@@ -718,11 +718,30 @@ function mosKpiRow(cards) {
     }, true);
 
     // Recompute SOH-driven values whenever the main inventory file finishes
-    // loading (rawDf changes) and the user is already on this page.
+    // loading (rawDf changes).
+    //
+    // PARALLEL-LOAD FIX: this used to only call renderMosPlant(), which
+    // re-reads rawDf for SOH quantities but does NOT rebuild mosMerged
+    // itself. buildInventoryDescMap() (used for the AMC row's Description
+    // fallback) is baked into mosMerged once, inside buildMosMerged(), at
+    // whatever moment the AMC file finished loading — reading rawDf as it
+    // stood AT THAT INSTANT. If AMC finishes loading before the inventory
+    // file (now possible now that storage-sync.js loads slots in parallel
+    // instead of strictly inventory-then-amc), that snapshot is an empty
+    // rawDf, and every AMC row's Description permanently falls back to
+    // blank for the rest of the session — renderMosPlant() alone can never
+    // fix this, since it doesn't touch mosMerged.
+    //
+    // Rebuilding mosMerged here (whenever it's already populated, i.e. AMC
+    // has already loaded at least once) makes AMC's description fallback
+    // correct regardless of whether inventory or AMC finishes loading
+    // first — mirroring the same self-healing pattern already used by the
+    // applyMaterialMapping() wrapper below for the mapping file.
     const fileInput = document.getElementById("fileInput");
     if (fileInput) {
       fileInput.addEventListener("change", () => {
         setTimeout(() => {
+          if (mosAmcRaw.length) mosMerged = buildMosMerged();
           if (currentPage === "mos-plant" && mosMerged.length) renderMosPlant();
         }, 300);
       });
