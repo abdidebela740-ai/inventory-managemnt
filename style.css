@@ -2207,6 +2207,14 @@ table.um-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm)
   #global-search-results-panel { left: var(--sidebar-w); }
 }
 
+/* Bottom tab bar is injected into <body> by pwa-mobile-nav.js on every
+   screen size (the script itself has no width check). Without this
+   default it falls back to the browser's normal `display:block` for
+   <nav> and stays visible above the 640px breakpoint too, which is why
+   it was showing up on desktop. Hidden by default; the media query
+   below switches it back to flex on phones. */
+#mobile-bottom-nav { display: none; }
+
 /* ══════════════════════════════════════════════
    RESPONSIVE — MOBILE (hamburger sidebar)
    ══════════════════════════════════════════════ */
