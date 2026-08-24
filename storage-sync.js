@@ -466,12 +466,101 @@ function applyUploadVisibility() {
   });
 }
 
-// ── Wire up: intercept admin's own file picks to also push to Supabase ──
+// ── Wait for a locally-picked file to finish parsing, and report whether it
+// actually SUCCEEDED — not just whether it settled. Used by the admin-upload
+// path below to decide whether it's safe to push to Supabase at all.
+//
+// Different loaders report success/failure differently:
+//   • mapping (loadMappingFile), amc (loadMosAmcFile/finishMosAmcLoad),
+//     incoming (loadIncomingGrFile): all write into their own #<slot>Status
+//     element — "✓ ..." on success, "✗ ..." or "⚠️ ..." (status-error) on
+//     failure. Straightforward to read.
+//   • inventory (loadFile) is the odd one out: on failure it calls
+//     showError(), which writes the real message into #errorBanner and
+//     leaves #fileStatus permanently stuck on its last "⏳ LOADING…"
+//     progress stage (Downloading/Parsing/Building indexes) — it's never
+//     updated to show a ✗. So for "inventory" specifically we also watch
+//     #errorBanner becoming visible, and treat THAT as the failure signal.
+function waitForUploadOutcome(slot, statusId, timeoutMs = 20000) {
+  return new Promise((resolve) => {
+    const statusEl  = document.getElementById(statusId);
+    const errBanner = slot === "inventory" ? document.getElementById("errorBanner") : null;
+    let settled = false;
+
+    function finish(ok) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(hardTimeout);
+      if (statusObserver) statusObserver.disconnect();
+      if (errObserver) errObserver.disconnect();
+      resolve(ok);
+    }
+
+    function checkStatusOutcome() {
+      if (!statusEl) return;
+      const text = statusEl.textContent || "";
+      if (text.includes("⏳")) return; // still loading — keep waiting
+      if (/✗|⚠️/.test(text) || statusEl.querySelector(".status-error")) { finish(false); return; }
+      // Left the loading state with no recognizable failure marker — treat
+      // as success. (Don't require an exact "✓" match: block only on a
+      // POSITIVE failure signal, so an upload never gets silently dropped
+      // just because a loader's success copy doesn't match what we expect.)
+      finish(true);
+    }
+
+    let statusObserver = null;
+    if (statusEl) {
+      statusObserver = new MutationObserver(checkStatusOutcome);
+      statusObserver.observe(statusEl, { childList: true, subtree: true, characterData: true });
+    }
+
+    let errObserver = null;
+    if (errBanner) {
+      errObserver = new MutationObserver(() => {
+        if (errBanner.style.display !== "none" && errBanner.textContent.trim()) finish(false);
+      });
+      errObserver.observe(errBanner, { attributes: true, attributeFilter: ["style"], childList: true, characterData: true, subtree: true });
+    }
+
+    // Safety net only — if nothing about this slot's DOM ever changes again
+    // (unexpected loader bug), don't block the admin's upload forever; fail
+    // OPEN after the timeout rather than silently eating a legitimate file.
+    const hardTimeout = setTimeout(() => finish(true), timeoutMs);
+
+    checkStatusOutcome(); // in case it already settled before we started observing
+  });
+}
+
+// ── Tell the admin, unmistakably, that an upload was NOT synced ──
+// The parser's own error already shows inline (status element / error
+// banner) explaining WHAT was wrong — this banner exists so the admin also
+// understands the broader consequence: nothing was pushed to Supabase, so
+// every other viewer is still seeing the previous (older) file for this slot.
+function notifyUploadNotSynced(slot) {
+  const existing = document.getElementById("upload-not-synced-banner");
+  if (existing) existing.remove();
+  const el = document.createElement("div");
+  el.id = "upload-not-synced-banner";
+  el.style.cssText = `
+    position: fixed; top: 0; left: 0; right: 0; z-index: 10002;
+    background: var(--red, #d4483a); color: #fff; text-align: center;
+    padding: 10px 14px; font-size: 0.85rem;
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+  `;
+  el.innerHTML = `
+    <span>⚠️ ${slotLabel(slot)} upload didn't match the expected format, so it was <b>not</b> synced — everyone else is still seeing the previous file. Fix the error shown below the upload button and try again.</span>
+    <button id="dismiss-not-synced-btn" style="background:none;border:1px solid rgba(255,255,255,0.6);color:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:0.8rem">Dismiss</button>
+  `;
+  document.body.prepend(el);
+  document.getElementById("dismiss-not-synced-btn").addEventListener("click", () => el.remove());
+}
+
+
 // NOTE: script.js resets input.value = "" right after reading the file in
 // its own (bubble-phase) change listener. We use { capture: true } here so
 // OUR listener runs FIRST, before that reset wipes e.target.files.
 function attachAdminUploadSync() {
-  Object.entries(FILE_SLOTS).forEach(([slot, { inputId }]) => {
+  Object.entries(FILE_SLOTS).forEach(([slot, { inputId, statusId }]) => {
     const input = document.getElementById(inputId);
     if (!input) return;
     input.addEventListener(
@@ -482,7 +571,22 @@ function attachAdminUploadSync() {
         if (!file) { console.warn(`[storage-sync] No file found on change for ${slot}`); return; }
         // Don't re-upload the file we just pulled from Supabase ourselves
         if (input.dataset.fromSupabase === "1") { input.dataset.fromSupabase = ""; return; }
-        pushFileToSupabase(slot, file);
+
+        // VALIDATE-BEFORE-SYNC: previously this pushed the raw file to
+        // Supabase immediately, in parallel with (not after) the app's own
+        // local parse/validation — so a file that FAILED validation
+        // (missing columns, empty sheet, wrong format, etc.) still got
+        // synced and overwrote the good file every other viewer was seeing.
+        // Now: wait for the local parse to actually finish, check whether
+        // it succeeded, and only push to Supabase if it did.
+        waitForUploadOutcome(slot, statusId).then((ok) => {
+          if (ok) {
+            pushFileToSupabase(slot, file);
+          } else {
+            console.warn(`[storage-sync] ${slot} upload failed local validation — not syncing to Supabase.`);
+            notifyUploadNotSynced(slot);
+          }
+        });
       },
       { capture: true }
     );
@@ -535,29 +639,43 @@ document.addEventListener("epss-auth-ready", async () => {
   attachAdminUploadSync();
   attachRealtimeSync();
 
-  // Pending Dispatch is a fully independent dataset/page — it doesn't feed
-  // the material-standardization pipeline that inventory/mapping/amc/incoming
-  // share, so it has no ordering dependency on them (that's what the
-  // sequential loop below protects against for those four). Kick it off
-  // immediately, in parallel with that chain, instead of always loading
-  // dead last behind four other awaits — that's why its data used to visibly
-  // "appear after" every other page's.
+  // PERF FIX — ALL SIX SLOTS NOW LOAD IN PARALLEL.
   //
-  // Transit is also independent: stampUnverifiedTransit() (script.js) runs
-  // both when the main inventory file finishes loading AND when the transit
-  // file finishes loading, so whichever of the two settles second simply
-  // re-stamps rawDf correctly — there's no ordering requirement between them.
-  // Without this, transit sat behind inventory/mapping/amc/incoming in the
-  // sequential chain and visibly lagged the other slots on load.
-  const INDEPENDENT_SLOTS = ["pendingDispatch", "transit"];
-  const sequentialSlots = Object.keys(FILE_SLOTS).filter(s => !INDEPENDENT_SLOTS.includes(s));
-
-  const independentLoads = Promise.all(INDEPENDENT_SLOTS.map(slot => pullFileFromSupabase(slot)));
-
-  for (const slot of sequentialSlots) {
-    await pullFileFromSupabase(slot);
-  }
-  await independentLoads; // make sure startup doesn't resolve before this settles too
+  // inventory/mapping/amc/incoming used to be pulled one at a time in a
+  // strict sequential loop, on the assumption that amc/incoming depended on
+  // rawDf (from inventory) already being loaded. Audited every loader
+  // (loadFile/loadMappingFile in script.js, loadMosAmcFile/buildMosMerged in
+  // mos.js, loadIncomingGrFile in shelf-life.js) and confirmed:
+  //
+  //   • inventory <-> mapping: already fully order-independent. Whichever of
+  //     loadFile()/loadMappingFile() finishes LAST calls applyMaterialMapping()
+  //     itself (each checks "if the other one's data is already here").
+  //
+  //   • incoming (GR file): its own parse + exclusion rules (permissions.js
+  //     canAccessRow()/passesUniversalExclusions()) only ever read the row
+  //     itself and static role/scope config — never rawDf. Cross-referencing
+  //     against inventory happens later, at RENDER time (shelf-life.js reads
+  //     rawDf live when the page actually renders), not at parse time. No
+  //     ordering dependency.
+  //
+  //   • amc: buildMosMerged()/buildInventoryDescMap() DID read rawDf once, at
+  //     the exact moment AMC finished loading, purely to backfill each AMC
+  //     row's optional "Description" text from the inventory file. That was
+  //     the one real ordering dependency in the group — if AMC finished
+  //     before inventory, descriptions would bake in blank and (previously)
+  //     never get refreshed. Fixed in mos.js: the #fileInput "change"
+  //     listener now rebuilds mosMerged (not just re-renders) whenever
+  //     inventory finishes, exactly like the existing applyMaterialMapping()
+  //     wrapper already did for the mapping file. SOH quantities themselves
+  //     were already always safe either way, since renderMosPlant() reads
+  //     rawDf live.
+  //
+  // transit and pendingDispatch were already parallel/independent (see their
+  // own self-healing re-stamp logic in script.js), so this just folds
+  // inventory/mapping/amc/incoming into that same parallel group instead of
+  // gating them behind a sequential chain. Net effect: total load time is
+  // now roughly the slowest SINGLE slot instead of the sum of all of them.
+  await Promise.all(Object.keys(FILE_SLOTS).map(slot => pullFileFromSupabase(slot)));
 
   // FIX-TRANSIT-GATE-RACE: transit and pendingDispatch load in parallel with
   // (not after) the sequential inventory/mapping/amc/incoming chain, so their
