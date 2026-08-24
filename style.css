@@ -2215,6 +2215,13 @@ table.um-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm)
    below switches it back to flex on phones. */
 #mobile-bottom-nav { display: none; }
 
+/* Defense in depth: the table/card view toggle (pwa-mobile-nav.js) and
+   the card view it controls are mobile-only features. Force the toggle
+   hidden by default so it can never render above the 640px breakpoint
+   even if it's ever injected outside that check; the media query below
+   re-enables it on phones. */
+.tbl-view-toggle { display: none; }
+
 /* ══════════════════════════════════════════════
    RESPONSIVE — MOBILE (hamburger sidebar)
    ══════════════════════════════════════════════ */
