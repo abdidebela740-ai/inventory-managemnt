@@ -487,6 +487,19 @@ function waitForUploadOutcome(slot, statusId, timeoutMs = 20000) {
     const errBanner = slot === "inventory" ? document.getElementById("errorBanner") : null;
     let settled = false;
 
+    // RACE GUARD: our listener and the app's own parser listener are both
+    // attached to the SAME <input> element — same-node listeners fire in
+    // REGISTRATION order, not "capture always runs first" (capture only
+    // affects ordering between DIFFERENT ancestor/descendant nodes). So we
+    // have no guarantee we run after the real parser has started. If we
+    // trust statusEl's text before this upload's own parse has begun, we're
+    // reading LEFTOVER text from the PREVIOUS upload (almost always a "✓"
+    // success) — which is exactly the bug that made every upload appear to
+    // "pass" and sync regardless of the new file's actual validity. Don't
+    // trust ANY outcome text until we've first actually seen THIS upload's
+    // own "⏳" loading state appear.
+    let sawLoadingStart = false;
+
     function finish(ok) {
       if (settled) return;
       settled = true;
@@ -499,7 +512,8 @@ function waitForUploadOutcome(slot, statusId, timeoutMs = 20000) {
     function checkStatusOutcome() {
       if (!statusEl) return;
       const text = statusEl.textContent || "";
-      if (text.includes("⏳")) return; // still loading — keep waiting
+      if (text.includes("⏳")) { sawLoadingStart = true; return; } // this upload's own parse has genuinely started — keep waiting
+      if (!sawLoadingStart) return; // stale leftover text from before this upload started — ignore, keep waiting for the real "⏳"
       if (/✗|⚠️/.test(text) || statusEl.querySelector(".status-error")) { finish(false); return; }
       // Left the loading state with no recognizable failure marker — treat
       // as success. (Don't require an exact "✓" match: block only on a
@@ -517,6 +531,12 @@ function waitForUploadOutcome(slot, statusId, timeoutMs = 20000) {
     let errObserver = null;
     if (errBanner) {
       errObserver = new MutationObserver(() => {
+        // Same race guard applies here: only trust the error banner
+        // appearing/being non-empty as THIS upload's failure once we've
+        // seen this upload's own loading state start — a banner already
+        // sitting visible from an earlier, unrelated failed upload must
+        // not be misread as this (possibly valid) new file's outcome.
+        if (!sawLoadingStart) return;
         if (errBanner.style.display !== "none" && errBanner.textContent.trim()) finish(false);
       });
       errObserver.observe(errBanner, { attributes: true, attributeFilter: ["style"], childList: true, characterData: true, subtree: true });
@@ -527,7 +547,7 @@ function waitForUploadOutcome(slot, statusId, timeoutMs = 20000) {
     // OPEN after the timeout rather than silently eating a legitimate file.
     const hardTimeout = setTimeout(() => finish(true), timeoutMs);
 
-    checkStatusOutcome(); // in case it already settled before we started observing
+    checkStatusOutcome(); // covers the (normal) case where "⏳" is already showing by the time we start observing
   });
 }
 
