@@ -2674,6 +2674,10 @@ function aggregateByMappedMaterial(df) {
       // causing a mismatch when a mapping factor != 1 was active.
       QTY_FIELDS.forEach(c => { matMap[mat][c] = getMappedQty(row, c); });
       VAL_FIELDS.forEach(c => { matMap[mat][c] = getMappedVal(row, c); });
+      // FIX-GHOST-AGG: track ghost/phantom transit amounts across the merge so
+      // Total Qty/Value below can exclude them — matches getTrueTransitQty/Val.
+      matMap[mat]._phantomTransitQty = row._phantomTransitQty || 0;
+      matMap[mat]._phantomTransitVal = row._phantomTransitVal || 0;
       if (row["Plant Name"]) matMap[mat]._allPlants.push(row["Plant Name"]);
       if (row["Description of Storage Location"] || row["Storage Location"]) {
         matMap[mat]._allStorageLocs.push(row["Description of Storage Location"] || row["Storage Location"]);
@@ -2683,6 +2687,11 @@ function aggregateByMappedMaterial(df) {
       const target = matMap[mat];
       QTY_FIELDS.forEach(c => { target[c] += getMappedQty(row, c); });
       VAL_FIELDS.forEach(c => { target[c] += getMappedVal(row, c); });
+      // FIX-GHOST-AGG: accumulate ghost/phantom transit across merged rows too,
+      // otherwise only the first row's phantom amount survives the merge and
+      // ghost stock from every other row silently leaks back into Total Qty/Value.
+      target._phantomTransitQty = (target._phantomTransitQty || 0) + (row._phantomTransitQty || 0);
+      target._phantomTransitVal = (target._phantomTransitVal || 0) + (row._phantomTransitVal || 0);
       // Keep earliest expiry across all batches (pharma best practice)
       const te = target["_expiry"], se = row["_expiry"];
       if (se instanceof Date && !isNaN(se)) {
@@ -2701,8 +2710,15 @@ function aggregateByMappedMaterial(df) {
   });
 
   Object.values(matMap).forEach(row => {
-    row["Total Qty"]   = (row["Unrestricted Stock"] || 0) + (row["Stock in Transit"] || 0) + (row["Stock in Quality Inspection"] || 0);
-    row["Total Value"] = (row["Value of Unrestricted Stock"] || 0) + (row["Value of Stock in Transit"] || 0) + (row["Value of Stock in Quality Inspection"] || 0);
+    // FIX-GHOST-AGG: subtract accumulated ghost/phantom transit before folding
+    // Stock in Transit into Total Qty/Value — same treatment ghost transit gets
+    // everywhere else (Dashboard, Branch per-plant totals, Inventory Flow).
+    const ghostQty = row._phantomTransitQty || 0;
+    const ghostVal = row._phantomTransitVal || 0;
+    const trueTransitQty = Math.max(0, (row["Stock in Transit"] || 0) - ghostQty);
+    const trueTransitVal = Math.max(0, (row["Value of Stock in Transit"] || 0) - ghostVal);
+    row["Total Qty"]   = (row["Unrestricted Stock"] || 0) + trueTransitQty + (row["Stock in Quality Inspection"] || 0);
+    row["Total Value"] = (row["Value of Unrestricted Stock"] || 0) + trueTransitVal + (row["Value of Stock in Quality Inspection"] || 0);
     const plants = (row._allPlants || []).filter(Boolean).sort();
     row["_plantList"]  = plants.length ? plants.join(", ") : (row["Plant Name"] || "—");
     const storageLocs = (row._allStorageLocs || []).filter(Boolean).sort();
@@ -4518,6 +4534,11 @@ function aggregateByMaterial(df) {
       const target = matMap[mat];
       QTY_COLS.forEach(c => { target[c] = (target[c] || 0) + (row[c] || 0); });
       VAL_COLS.forEach(c => { target[c] = (target[c] || 0) + (row[c] || 0); });
+      // FIX-GHOST-AGG: accumulate ghost/phantom transit across merged rows too,
+      // otherwise only the first row's phantom amount survives the merge and
+      // ghost stock from every other row silently leaks back into Total Qty/Value.
+      target._phantomTransitQty = (target._phantomTransitQty || 0) + (row._phantomTransitQty || 0);
+      target._phantomTransitVal = (target._phantomTransitVal || 0) + (row._phantomTransitVal || 0);
       // Keep earliest expiry
       const te = target["_expiry"], se = row["_expiry"];
       if (se instanceof Date && !isNaN(se)) {
@@ -4533,8 +4554,15 @@ function aggregateByMaterial(df) {
   // Recompute derived totals AFTER aggregation to prevent double-counting.
   // Total Qty / Total Value are sums of components — never accumulate directly.
   Object.values(matMap).forEach(row => {
-    row["Total Qty"]   = (row["Unrestricted Stock"] || 0) + (row["Stock in Transit"] || 0) + (row["Stock in Quality Inspection"] || 0);
-    row["Total Value"] = (row["Value of Unrestricted Stock"] || 0) + (row["Value of Stock in Transit"] || 0) + (row["Value of Stock in Quality Inspection"] || 0);
+    // FIX-GHOST-AGG: subtract accumulated ghost/phantom transit before folding
+    // Stock in Transit into Total Qty/Value — same treatment ghost transit gets
+    // everywhere else (Dashboard, Branch per-plant totals, Inventory Flow).
+    const ghostQty = row._phantomTransitQty || 0;
+    const ghostVal = row._phantomTransitVal || 0;
+    const trueTransitQty = Math.max(0, (row["Stock in Transit"] || 0) - ghostQty);
+    const trueTransitVal = Math.max(0, (row["Value of Stock in Transit"] || 0) - ghostVal);
+    row["Total Qty"]   = (row["Unrestricted Stock"] || 0) + trueTransitQty + (row["Stock in Quality Inspection"] || 0);
+    row["Total Value"] = (row["Value of Unrestricted Stock"] || 0) + trueTransitVal + (row["Value of Stock in Quality Inspection"] || 0);
     const plants = (row._allPlants || []).filter(Boolean).sort();
     row["_plantList"] = plants.length ? plants.join(", ") : (row["Plant Name"] || "—");
   });
