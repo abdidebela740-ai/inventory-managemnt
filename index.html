@@ -810,6 +810,12 @@
       <button class="nav-btn" data-page="qc">
         <span class="nav-icon">🔬</span> Quality Inspection
       </button>
+      <button class="nav-btn" data-page="blocked">
+        <span class="nav-icon">🚫</span> Blocked Stock
+      </button>
+      <button class="nav-btn" data-page="restricted">
+        <span class="nav-icon">🔒</span> Restricted Stock
+      </button>
       <button class="nav-btn" data-page="expiry-risk">
         <span class="nav-icon">🧯</span> Overstock &amp; Expiry Risk
       </button>
@@ -1120,6 +1126,16 @@
         <div class="overview-card-icon">🔬</div>
         <div class="overview-card-title">Quality Inspection</div>
         <div class="overview-card-desc">Batches pending or currently in quality control review before they can be released to stock.</div>
+      </div>
+      <div class="overview-card" data-goto="blocked">
+        <div class="overview-card-icon">🚫</div>
+        <div class="overview-card-title">Blocked Stock</div>
+        <div class="overview-card-desc">Materials placed on hold and unavailable for use, sale, or dispatch until released.</div>
+      </div>
+      <div class="overview-card" data-goto="restricted">
+        <div class="overview-card-icon">🔒</div>
+        <div class="overview-card-title">Restricted Stock</div>
+        <div class="overview-card-desc">Materials with restricted usage or issue status, tracked separately from Blocked Stock.</div>
       </div>
       <div class="overview-card" data-goto="expiry-risk">
         <div class="overview-card-icon">🧯</div>
@@ -1482,6 +1498,62 @@
     <div id="qc-tab-items" style="padding-top:1.5rem">
       <div id="qc-dl-row" style="display:flex;gap:0.6rem;justify-content:flex-end;margin-bottom:0.5rem"></div>
       <div id="qc-table-wrap"></div>
+    </div>
+  </section>
+
+  <!-- ── BLOCKED STOCK ── -->
+  <section id="page-blocked" class="page" style="display:none">
+    <div class="page-header-row">
+      <div>
+        <div class="page-title">🚫 Blocked Stock</div>
+        <div class="page-subtitle">Inventory placed on hold and unavailable for use, sale, or dispatch until released</div>
+      </div>
+    </div>
+    <div class="filter-bar">
+      <div class="ms-wrap" id="ms-blocked-plant"><button class="ms-btn" type="button">All Plants <span class="ms-arrow">▾</span></button><div class="ms-dropdown" id="ms-blocked-plant-dd"></div></div>
+      <div class="ms-wrap" id="ms-blocked-mg"><button class="ms-btn" type="button">All Material Groups <span class="ms-arrow">▾</span></button><div class="ms-dropdown" id="ms-blocked-mg-dd"></div></div>
+      <div class="ms-wrap" id="ms-blocked-vt"><button class="ms-btn" type="button">All Material Types <span class="ms-arrow">▾</span></button><div class="ms-dropdown" id="ms-blocked-vt-dd"></div></div>
+      <div class="ms-wrap" id="ms-blocked-mat"><button class="ms-btn" type="button">All Materials <span class="ms-arrow">▾</span></button><div class="ms-dropdown" id="ms-blocked-mat-dd"></div></div>
+      <button type="button" class="apply-btn small" id="blocked-filter-apply">Apply</button>
+      <button type="button" class="apply-btn secondary small" id="blocked-filter-clear">Clear</button>
+    </div>
+    <div class="kpi-row" id="blocked-kpis"></div>
+    <div id="blocked-mapping-banner"></div>
+    <div class="chart-box full">
+      <div class="section-header">Blocked Stock Quantity &amp; Value by Plant</div>
+      <div id="chart-blocked-plant"></div>
+    </div>
+    <div id="blocked-tab-items" style="padding-top:1.5rem">
+      <div id="blocked-dl-row" style="display:flex;gap:0.6rem;justify-content:flex-end;margin-bottom:0.5rem"></div>
+      <div id="blocked-table-wrap"></div>
+    </div>
+  </section>
+
+  <!-- ── RESTRICTED STOCK ── -->
+  <section id="page-restricted" class="page" style="display:none">
+    <div class="page-header-row">
+      <div>
+        <div class="page-title">🔒 Restricted Stock</div>
+        <div class="page-subtitle">Inventory with restricted usage or issue status, tracked separately from Blocked Stock</div>
+      </div>
+    </div>
+    <div class="filter-bar">
+      <div class="ms-wrap" id="ms-restricted-plant"><button class="ms-btn" type="button">All Plants <span class="ms-arrow">▾</span></button><div class="ms-dropdown" id="ms-restricted-plant-dd"></div></div>
+      <div class="ms-wrap" id="ms-restricted-mg"><button class="ms-btn" type="button">All Material Groups <span class="ms-arrow">▾</span></button><div class="ms-dropdown" id="ms-restricted-mg-dd"></div></div>
+      <div class="ms-wrap" id="ms-restricted-vt"><button class="ms-btn" type="button">All Material Types <span class="ms-arrow">▾</span></button><div class="ms-dropdown" id="ms-restricted-vt-dd"></div></div>
+      <div class="ms-wrap" id="ms-restricted-mat"><button class="ms-btn" type="button">All Materials <span class="ms-arrow">▾</span></button><div class="ms-dropdown" id="ms-restricted-mat-dd"></div></div>
+      <button type="button" class="apply-btn small" id="restricted-filter-apply">Apply</button>
+      <button type="button" class="apply-btn secondary small" id="restricted-filter-clear">Clear</button>
+    </div>
+    <div class="kpi-row" id="restricted-kpis"></div>
+    <div id="restricted-mapping-banner"></div>
+    <div class="chart-box full">
+      <div class="section-header">Restricted Stock Quantity &amp; Value by Plant</div>
+      <div id="chart-restricted-plant"></div>
+    </div>
+    <div id="restricted-tab-items" style="padding-top:1.5rem">
+      <div id="restricted-dl-row" style="display:flex;gap:0.6rem;justify-content:flex-end;margin-bottom:0.5rem"></div>
+      <div id="restricted-table-wrap"></div>
     </div>
   </section>
 
