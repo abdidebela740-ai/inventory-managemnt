@@ -531,7 +531,16 @@ function _syncChipState() {
 }
 
 // ── MATERIAL STANDARDIZATION MAPPING STATE ─────────────────────────────────
-// mappingTable: Map<sourceCode → { targetCode, targetDesc, factor }>
+// mappingTable: Map<sourceCode → Map<stockType ("RDF"|"Q") → { targetCode, targetDesc, factor }>>
+//
+// STOCK-TYPE-AWARE MAPPING: the same source code can legitimately map to a
+// DIFFERENT target code/conversion factor depending on stock type (RDF vs
+// the Health Program "Q" stream) — e.g. one formulation is standardized to
+// code A under RDF but code B under Q. The mapping file's own "Stock Type"
+// column tells us which; a blank/other value in that column is treated as
+// RDF, mirroring how the rest of the app already treats a row's Special
+// Stock Type (see getRowStockTypeLabel/getMaterialScopePrefix in
+// permissions.js — blank/anything-but-"Q" = RDF).
 let mappingTable   = new Map();   // populated when mapping file is uploaded
 let mappedDf       = [];          // rawDf rows after applyMaterialMapping()
 let mappingStats   = null;        // { mapped, total, valuePct } — shown in sidebar
@@ -1108,15 +1117,17 @@ function buildMultiSelect(wrapId, ddId, items, placeholder) {
     if (q && typeof mappingTable !== "undefined" && mappingTable.size > 0) {
       const directCodes = new Set(filtered.map(v => v.split(" — ")[0].trim().toUpperCase()));
       const qUpper = q.toUpperCase();
-      mappingTable.forEach((entry, srcCode) => {
+      mappingTable.forEach((stypeMap, srcCode) => {
         if (!srcCode.includes(qUpper)) return;
-        const targetCode = String(entry.targetCode || "").trim().toUpperCase();
-        if (!targetCode || directCodes.has(targetCode)) return; // already shown directly
-        const targetItem = items.find(v => v.split(" — ")[0].trim().toUpperCase() === targetCode);
-        if (targetItem && !mappedExtras.some(e => e.item === targetItem)) {
-          mappedExtras.push({ item: targetItem, viaCode: srcCode });
-          directCodes.add(targetCode);
-        }
+        stypeMap.forEach(entry => {
+          const targetCode = String(entry.targetCode || "").trim().toUpperCase();
+          if (!targetCode || directCodes.has(targetCode)) return; // already shown directly
+          const targetItem = items.find(v => v.split(" — ")[0].trim().toUpperCase() === targetCode);
+          if (targetItem && !mappedExtras.some(e => e.item === targetItem)) {
+            mappedExtras.push({ item: targetItem, viaCode: srcCode });
+            directCodes.add(targetCode);
+          }
+        });
       });
     }
 
@@ -2123,6 +2134,10 @@ function loadMappingFile(file) {
           "material description target","target material description","desc target",
           "description (target)","description target"
         );
+        const colStockType = gc(
+          "stock type","stocktype","stock_type","special stock type",
+          "special stock type code","sst","material stock type"
+        );
 
         // POSITIONAL-TARGET-DESC-FIX: some mapping files reuse the exact same
         // header text for both the source and target description columns
@@ -2168,9 +2183,14 @@ function loadMappingFile(file) {
           return;
         }
 
-        // Build the mapping table — source → { targetCode, targetDesc, factor }
+        // Build the mapping table — source → stockType → { targetCode, targetDesc, factor }
+        // STOCK-TYPE-AWARE: a source code may appear more than once in the
+        // sheet with different Stock Types (RDF / Q), each carrying its own
+        // target code and factor — both are kept, keyed by stock type,
+        // instead of the later row silently clobbering the earlier one.
         const newMap = new Map();
-        let skipped  = 0;
+        let skipped   = 0;
+        let ruleCount = 0;
         data.forEach(row => {
           const src    = String(row[colSource]  ?? "").trim();
           const tgt    = String(row[colTarget]  ?? "").trim();
@@ -2179,8 +2199,20 @@ function loadMappingFile(file) {
           const factor = parseFloat(rawFac);
 
           if (!src || !tgt || isNaN(factor) || factor <= 0) { skipped++; return; }
+
+          // Normalize this row's Stock Type: "Q" stays "Q"; blank or any
+          // other value (RDF, W, etc.) is treated as "RDF" — same
+          // blank/other-means-RDF convention the app already uses for a
+          // row's own Special Stock Type.
+          const rawStype = colStockType ? String(row[colStockType] ?? "").trim().toUpperCase() : "";
+          const stype    = rawStype === "Q" ? "Q" : "RDF";
+
+          const srcKey = src.toUpperCase();
+          if (!newMap.has(srcKey)) newMap.set(srcKey, new Map());
+          const stypeMap = newMap.get(srcKey);
           // Store with 9dp rounding to suppress float drift (consistent with existing reconciliation logic)
-          newMap.set(src.toUpperCase(), { targetCode: tgt, targetDesc: tDesc, factor: parseFloat(factor.toFixed(9)) });
+          if (!stypeMap.has(stype)) ruleCount++;
+          stypeMap.set(stype, { targetCode: tgt, targetDesc: tDesc, factor: parseFloat(factor.toFixed(9)), stockType: stype });
         });
 
         if (!newMap.size) {
@@ -2191,19 +2223,24 @@ function loadMappingFile(file) {
         mappingTable = newMap;
 
         // FIX-MAPPING-PERSIST: save mapping to sessionStorage so it survives
-        // soft page navigations within the same browser session.
+        // soft page navigations within the same browser session. Maps don't
+        // survive JSON.stringify on their own, so the nested
+        // source→stockType→entry structure is flattened to plain
+        // arrays/objects first.
         try {
-          const serialized = JSON.stringify([...newMap.entries()]);
+          const serializable = [...newMap.entries()].map(([code, stypeMap]) => [code, [...stypeMap.entries()]]);
+          const serialized = JSON.stringify(serializable);
           sessionStorage.setItem("pharmatrack_mapping", serialized);
         } catch (_) { /* quota exceeded or private mode — silent */ }
 
         // Apply to current inventory (if loaded)
         if (rawDf.length) applyMaterialMapping();
 
+        const multiTypeCodes = [...newMap.values()].filter(m => m.size > 1).length;
         statusEl.innerHTML = `
           <div class="status-ok">✓ MAPPING LOADED</div>
           <div class="status-name">${escHtml(file.name)}</div>
-          <div class="status-stats">${newMap.size.toLocaleString()} mapping rules${skipped ? ` · ${skipped} rows skipped` : ""}</div>
+          <div class="status-stats">${newMap.size.toLocaleString()} codes · ${ruleCount.toLocaleString()} mapping rules${colStockType ? ` (RDF/Q aware${multiTypeCodes ? `, ${multiTypeCodes} codes with both` : ""})` : ""}${skipped ? ` · ${skipped} rows skipped` : ""}</div>
           ${mappingStats ? `<div class="status-stats">${mappingStats.mapped.toLocaleString()} materials mapped · ${mappingStats.valuePct}% of stock value</div>` : ""}`;
         document.getElementById("mappingUploadBtnText").textContent = "🗺️ Change Mapping File";
 
@@ -2376,6 +2413,15 @@ function loadTransitFile(file) {
  *   The row-level conversion only rescales quantities; aggregation at a higher
  *   level groups by _mappedMaterial (and expiry for watchlist purposes).
  */
+// Normalizes an inventory row's own Special Stock Type to "Q" or "RDF" for
+// mapping lookup purposes. Mirrors getRowStockTypeLabel() in permissions.js
+// (blank/anything-but-"Q" = RDF); kept local so applyMaterialMapping()
+// doesn't depend on permissions.js's load order.
+function rowStockTypeForMapping(row) {
+  const sst = String((row && row["Special Stock Type"]) || "").trim().toUpperCase();
+  return sst === "Q" ? "Q" : "RDF";
+}
+
 function applyMaterialMapping() {
   if (!rawDf.length) return;
 
@@ -2384,8 +2430,22 @@ function applyMaterialMapping() {
   let mappedValue = 0;
 
   mappedDf = rawDf.map(row => {
-    const srcCode = String(row["Material"] || "").trim().toUpperCase();
-    const entry   = mappingTable.get(srcCode);
+    const srcCode  = String(row["Material"] || "").trim().toUpperCase();
+    const stypeMap = mappingTable.get(srcCode);
+    // STOCK-TYPE-AWARE LOOKUP: prefer the entry matching this row's own
+    // Special Stock Type (RDF vs Q — the same source code can legitimately
+    // map to a different target/factor per stock type). If the code only
+    // has a mapping rule for ONE stock type, apply it regardless of the
+    // row's stock type (preserves the old single-mapping-per-code
+    // behavior for the vast majority of codes, which never had a Q/RDF
+    // split to begin with). If the code has rules for multiple stock
+    // types but none matches this row's, leave the row unmapped rather
+    // than guess.
+    let entry;
+    if (stypeMap) {
+      const rowStype = rowStockTypeForMapping(row);
+      entry = stypeMap.get(rowStype) || (stypeMap.size === 1 ? [...stypeMap.values()][0] : undefined);
+    }
     totalValue += row["Total Value"] || 0;
 
     if (!entry) {
@@ -2461,10 +2521,12 @@ function applyMaterialMapping() {
   // target; falls back to the first raw description seen for that target if
   // no entry defines one) and stamp it uniformly on every row.
   const canonicalDescByTarget = new Map();
-  mappingTable.forEach(entry => {
-    if (entry.targetDesc && !canonicalDescByTarget.has(entry.targetCode)) {
-      canonicalDescByTarget.set(entry.targetCode, entry.targetDesc);
-    }
+  mappingTable.forEach(stypeMap => {
+    stypeMap.forEach(entry => {
+      if (entry.targetDesc && !canonicalDescByTarget.has(entry.targetCode)) {
+        canonicalDescByTarget.set(entry.targetCode, entry.targetDesc);
+      }
+    });
   });
   mappedDf.forEach(row => {
     if (!row._isMapped) return;
