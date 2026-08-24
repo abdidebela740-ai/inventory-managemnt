@@ -130,7 +130,11 @@
 
   // ── 5: "▤ Table view" toggle — lets a user opt back into the classic
   // scrollable table instead of the card view, per table, on demand.
+  // Mobile-only: the card view itself (style.css, ≤640px) never applies
+  // on desktop/laptop, so there's nothing to toggle back from there —
+  // this must not inject the button outside that breakpoint.
   function ensureTableViewToggle(wrap) {
+    if (!MQ.matches) return;
     if (wrap.querySelector(".tbl-view-toggle")) return;
     const btn = document.createElement("button");
     btn.type = "button";
@@ -144,10 +148,26 @@
     wrap.insertBefore(btn, wrap.firstChild);
   }
 
+  // Removes any toggle buttons (and resets forced-table state) that were
+  // injected while on a phone, when the viewport grows past the mobile
+  // breakpoint — e.g. rotating a tablet, or resizing a browser window.
+  // Without this, buttons created on mobile would linger as plain,
+  // unstyled <button> elements once the layout no longer needs them.
+  function removeTableViewToggles() {
+    document.querySelectorAll(".tbl-view-toggle").forEach(btn => btn.remove());
+    document.querySelectorAll(".tbl-wrap.force-table-view").forEach(wrap => {
+      wrap.classList.remove("force-table-view");
+    });
+  }
+
   // Runs the two enhancements above over every table currently in the DOM.
   // Cheap (skips tables already processed via dataset flags / existing
   // toggle check) so it's safe to call often.
   function enhanceTables() {
+    if (!MQ.matches) {
+      removeTableViewToggles();
+      return;
+    }
     document.querySelectorAll(".tbl-wrap").forEach(wrap => {
       const table = wrap.querySelector("table");
       if (table) backfillDataLabels(table);
@@ -272,4 +292,7 @@
   // already-wrapped bar stays visually identical on desktop with no
   // further action needed).
   MQ.addEventListener("change", initFilterAccordions);
+  // Also re-check the table enhancer, so toggle buttons are added when
+  // crossing into phone width and cleaned up when crossing back out.
+  MQ.addEventListener("change", enhanceTables);
 })();
