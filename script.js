@@ -306,6 +306,8 @@ const pageFilters = {
   transit:   { plants: [], mgs: [], valTypes: [], materials: [] },
   expiry:    { plants: [], mgs: [], valTypes: [], materials: [] },
   qc:        { plants: [], mgs: [], valTypes: [], materials: [] },
+  blocked:   { plants: [], mgs: [], valTypes: [], materials: [] },
+  restricted:{ plants: [], mgs: [], valTypes: [], materials: [] },
   branch:    { mgs: [],             valTypes: [], materials: [] },
   concentration: { mgs: [], valTypes: [] },
 };
@@ -982,8 +984,9 @@ function loadFile(file) {
         })();
 
         const numCols = [
-          "Unrestricted Stock","Stock in Quality Inspection","Blocked Stock","Stock in Transit",
+          "Unrestricted Stock","Stock in Quality Inspection","Blocked Stock","Stock in Transit","Restricted Stock",
           "Value of Stock in Quality Inspection","Value of Stock in Transit","Value of Unrestricted Stock",
+          "Value of Blocked Stock","Value of Restricted Stock",
         ];
         df.forEach(row => {
           numCols.forEach(c => { row[c] = parseFloat(row[c]) || 0; });
@@ -1003,7 +1006,8 @@ function loadFile(file) {
           r["Unrestricted Stock"] > 0 ||
           r["Stock in Transit"] > 0 ||
           r["Stock in Quality Inspection"] > 0 ||
-          r["Blocked Stock"] > 0
+          r["Blocked Stock"] > 0 ||
+          r["Restricted Stock"] > 0
         );
 
         rawDf  = df;
@@ -1394,6 +1398,8 @@ function populateAllFilters() {
     { wrapId:"ms-transit-plant", ddId:"ms-transit-plant-dd", page:"transit",   key:"plants" },
     { wrapId:"ms-expiry-plant",  ddId:"ms-expiry-plant-dd",  page:"expiry",    key:"plants" },
     { wrapId:"ms-qc-plant",      ddId:"ms-qc-plant-dd",      page:"qc",        key:"plants" },
+    { wrapId:"ms-blocked-plant", ddId:"ms-blocked-plant-dd", page:"blocked",   key:"plants" },
+    { wrapId:"ms-restricted-plant", ddId:"ms-restricted-plant-dd", page:"restricted", key:"plants" },
   ];
   plantConfigs.forEach(cfg => {
     const wrap = document.getElementById(cfg.wrapId);
@@ -1407,6 +1413,8 @@ function populateAllFilters() {
     { wrapId:"ms-transit-mg", ddId:"ms-transit-mg-dd", page:"transit",   key:"mgs" },
     { wrapId:"ms-expiry-mg",  ddId:"ms-expiry-mg-dd",  page:"expiry",    key:"mgs" },
     { wrapId:"ms-qc-mg",      ddId:"ms-qc-mg-dd",      page:"qc",        key:"mgs" },
+    { wrapId:"ms-blocked-mg", ddId:"ms-blocked-mg-dd", page:"blocked",   key:"mgs" },
+    { wrapId:"ms-restricted-mg", ddId:"ms-restricted-mg-dd", page:"restricted", key:"mgs" },
 
   ];
   mgConfigs.forEach(cfg => {
@@ -1439,6 +1447,8 @@ function populateAllFilters() {
     { wrapId:"ms-transit-vt", ddId:"ms-transit-vt-dd", page:"transit"   },
     { wrapId:"ms-expiry-vt",  ddId:"ms-expiry-vt-dd",  page:"expiry"    },
     { wrapId:"ms-qc-vt",      ddId:"ms-qc-vt-dd",      page:"qc"        },
+    { wrapId:"ms-blocked-vt", ddId:"ms-blocked-vt-dd", page:"blocked"   },
+    { wrapId:"ms-restricted-vt", ddId:"ms-restricted-vt-dd", page:"restricted" },
 
   ];
   vtConfigs.forEach(cfg => {
@@ -1467,6 +1477,8 @@ function populateAllFilters() {
     { wrapId:"ms-transit-mat", ddId:"ms-transit-mat-dd", page:"transit",   key:"materials" },
     { wrapId:"ms-expiry-mat",  ddId:"ms-expiry-mat-dd",  page:"expiry",    key:"materials" },
     { wrapId:"ms-qc-mat",      ddId:"ms-qc-mat-dd",      page:"qc",        key:"materials" },
+    { wrapId:"ms-blocked-mat", ddId:"ms-blocked-mat-dd", page:"blocked",   key:"materials" },
+    { wrapId:"ms-restricted-mat", ddId:"ms-restricted-mat-dd", page:"restricted", key:"materials" },
 
   ];
   matConfigs.forEach(cfg => {
@@ -1800,6 +1812,13 @@ function renderDashboard() {
   const transitQty = df.reduce((s,r) => s + getTrueTransitQty(r), 0);
   const qcVal      = df.reduce((s,r) => s + getMappedVal(r,"Value of Stock in Quality Inspection"), 0);
   const availVal   = df.reduce((s,r) => s + getMappedVal(r,"Value of Unrestricted Stock"), 0);
+  // Blocked / Restricted are separate hold statuses (not part of usable
+  // stock), so they're broken out as their own KPI cards rather than folded
+  // into Total Inventory Value — same treatment as QC used to get before it
+  // was included, but these two stay excluded since they're not pending
+  // release, they're on hold indefinitely until manually cleared in SAP.
+  const blockedVal    = df.reduce((s,r) => s + getMappedVal(r,"Value of Blocked Stock"), 0);
+  const restrictedVal = df.reduce((s,r) => s + getMappedVal(r,"Value of Restricted Stock"), 0);
   const totalVal   = availVal + transitVal + qcVal;
   const totalQty   = df.reduce((s,r) => s + getMappedQty(r,"Unrestricted Stock"), 0) + transitQty + df.reduce((s,r) => s + getMappedQty(r,"Stock in Quality Inspection"), 0);
 
@@ -1808,6 +1827,8 @@ function renderDashboard() {
     ["Stock in Transit Value",   fmtETB(transitVal), "", "amber"],
     ["Value in QC",              fmtETB(qcVal),      "", "red"],
     ["Available (Unrestricted)", fmtETB(availVal),   "", "green"],
+    ["Blocked Stock Value",      fmtETB(blockedVal),    "", "red"],
+    ["Restricted Stock Value",   fmtETB(restrictedVal), "", "amber"],
     ["Unique Materials",         new Set(df.map(r=>r._mappedMaterial||r["Material"])).size.toLocaleString(), `${new Set(df.map(r=>r["Plant"])).size} plants`, "purple"],
   ]);
 
@@ -2248,7 +2269,8 @@ function loadMappingFile(file) {
         if (rawDf.length) {
           const reRender = {
             dashboard: renderDashboard, transit: renderTransit,
-            expiry: renderExpiry, qc: renderQC, branch: renderBranch,
+            expiry: renderExpiry, qc: renderQC, blocked: renderBlocked,
+            restricted: renderRestricted, branch: renderBranch,
           };
           if (reRender[currentPage]) reRender[currentPage]();
         }
@@ -3428,6 +3450,154 @@ function renderQC() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// BLOCKED STOCK — mirrors renderQC() above (same reconciliation, chart, and
+// table pattern) but sourced from the "Blocked Stock" / "Value of Blocked
+// Stock" columns instead of the QC ones.
+// ═══════════════════════════════════════════════════════════════════════════
+function renderBlocked() {
+  const rawFiltered = applyPageFilter("blocked").filter(r => r["Blocked Stock"] > 0);
+  const df          = aggregateByMappedMaterial(rawFiltered).filter(r => r["Blocked Stock"] > 0);
+
+  const totalBlockedVal = df.reduce((s,r) => s + (r["Value of Blocked Stock"] || 0), 0);
+  setKpis("blocked-kpis", [
+    ["Total Value Blocked", fmtETB(totalBlockedVal), "Across all plants", "red"],
+    ["Unique Materials",    String(new Set(df.map(r=>r["Material"])).size), "Distinct SKUs", "blue"],
+  ]);
+
+  if (!df.length) { document.getElementById("blocked-table-wrap").innerHTML = `<div class="alert-info">✓ No items in blocked stock.</div>`; return; }
+
+  const blockedUseStockTypeAxis = typeof shouldUseStockTypeAxis === "function" && shouldUseStockTypeAxis();
+  const plantBlockedMap = {};
+  rawFiltered.forEach(r => {
+    const k = blockedUseStockTypeAxis ? getRowStockTypeLabel(r) : (r["Plant Name"] || "(Blank)");
+    if (!plantBlockedMap[k]) plantBlockedMap[k] = { "Plant Name": k, val: 0 };
+    plantBlockedMap[k].val += getMappedVal(r, "Value of Blocked Stock");
+  });
+  const plantBlocked = sortBy(Object.values(plantBlockedMap), "val");
+  const uniqByPlantBlocked = countUniqueMaterialsByGroup(rawFiltered, blockedUseStockTypeAxis ? null : "Plant Name", blockedUseStockTypeAxis ? getRowStockTypeLabel : null);
+  plantBlocked.forEach(r => { r.uniqMat = uniqByPlantBlocked[r["Plant Name"]] || 0; });
+  Plotly.newPlot("chart-blocked-plant", [
+    {type:"bar",     name:"Value (ETB)", x:plantBlocked.map(r=>r["Plant Name"]), y:plantBlocked.map(r=>r.val), yaxis:"y",  marker:{color:"#f85149"}, hovertemplate:"<b>%{x}</b><br>ETB %{y:,.0f}<extra></extra>"},
+    {type:"scatter", mode:"lines+markers", name:"Unique Materials", x:plantBlocked.map(r=>r["Plant Name"]), y:plantBlocked.map(r=>r.uniqMat), yaxis:"y2", marker:{color:"#3fb950",size:8}, line:{color:"#3fb950"}, hovertemplate:"<b>%{x}</b><br>Materials: %{y}<extra></extra>"},
+  ], pl({
+    height:300,
+    margin:{l:60,r:70,t:20,b:100},
+    xaxis:{title:{text: blockedUseStockTypeAxis ? "Stock Type" : "Plant", font:{size:10}}, tickangle:-35, tickfont:{size:10}, automargin:true},
+    yaxis:{title:{text:"Value (ETB)",font:{size:10,color:"#f85149"}}, tickfont:{color:"#f85149"}, automargin:true},
+    yaxis2:{overlaying:"y",side:"right",gridcolor:"transparent",tickfont:{color:"#3fb950"},tickformat:",d",title:{text:"Unique Materials",font:{size:10,color:"#3fb950"}}},
+  }), PLOTLY_CONFIG);
+
+  document.getElementById("chart-blocked-plant").on("plotly_click", function(data) {
+    const groupLabel = data.points[0].x;
+    const items = blockedUseStockTypeAxis
+      ? rawFiltered.filter(r => getRowStockTypeLabel(r) === groupLabel)
+      : rawFiltered.filter(r => (r["Plant Name"] || "(Blank)") === groupLabel);
+    const rows  = buildDrillRows(items, "Blocked Stock", "Value of Blocked Stock");
+    showChartDrillModal({
+      title: `🚫 Blocked — ${groupLabel}`,
+      meta: `${rows.length} items`,
+      rows, cols: CHART_DRILL_COLS,
+      filenameBase: `blocked_${groupLabel}`,
+    });
+  });
+
+  const blockedCols = [
+    {key:"Material", label:"Material Code", fmt:(val,r)=>renderMappedMatCode(val,r), raw:true, cellClass:"col-mat-code-wrap"},
+    {key:"Material Description", label:"Material Description", fmt:(val,r)=>renderMappedMatDesc(val,r), raw:true, cellClass:"col-mat-desc-wrap"},
+    {key:"Material Group Name",                  label:"Material Group"},
+    {key:"_plantList",                           label:"Plant(s)"},
+    {key:"_storageLocList",                      label:"Storage Location"},
+    {key:"_expiryStr",                           label:"Shelf Life Expiry"},
+    {key:"Blocked Stock",          label:"Blocked Qty",        fmt:fmtQty, rawKey:"Blocked Stock", cellClass:"col-qty"},
+    {key:"Value of Blocked Stock", label:"Blocked Value (ETB)",fmt:fmtETB, rawKey:"Value of Blocked Stock", cellClass:"col-val"},
+  ];
+
+  const blockedRows = sortBy(
+    [...df].map(r => ({
+      ...r,
+      _expiryStr: r._expiry ? fmtLocalDate(r._expiry) : "",
+    })),
+    "Value of Blocked Stock"
+  );
+  document.getElementById("blocked-table-wrap").innerHTML = buildTable(blockedRows, blockedCols, r => r["Value of Blocked Stock"] > 10000 ? "row-red" : "", "", {id:"blocked-export", title:"Blocked Stock"});
+  wireTableExport("blocked-export", blockedRows, blockedCols, "blocked_stock");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RESTRICTED STOCK — same pattern again, sourced from the "Restricted Stock" /
+// "Value of Restricted Stock" columns (a separate SAP status from Blocked
+// Stock, per a dedicated column in the source Excel).
+// ═══════════════════════════════════════════════════════════════════════════
+function renderRestricted() {
+  const rawFiltered = applyPageFilter("restricted").filter(r => r["Restricted Stock"] > 0);
+  const df          = aggregateByMappedMaterial(rawFiltered).filter(r => r["Restricted Stock"] > 0);
+
+  const totalRestrictedVal = df.reduce((s,r) => s + (r["Value of Restricted Stock"] || 0), 0);
+  setKpis("restricted-kpis", [
+    ["Total Value Restricted", fmtETB(totalRestrictedVal), "Across all plants", "amber"],
+    ["Unique Materials",       String(new Set(df.map(r=>r["Material"])).size), "Distinct SKUs", "blue"],
+  ]);
+
+  if (!df.length) { document.getElementById("restricted-table-wrap").innerHTML = `<div class="alert-info">✓ No items in restricted stock.</div>`; return; }
+
+  const restrictedUseStockTypeAxis = typeof shouldUseStockTypeAxis === "function" && shouldUseStockTypeAxis();
+  const plantRestrictedMap = {};
+  rawFiltered.forEach(r => {
+    const k = restrictedUseStockTypeAxis ? getRowStockTypeLabel(r) : (r["Plant Name"] || "(Blank)");
+    if (!plantRestrictedMap[k]) plantRestrictedMap[k] = { "Plant Name": k, val: 0 };
+    plantRestrictedMap[k].val += getMappedVal(r, "Value of Restricted Stock");
+  });
+  const plantRestricted = sortBy(Object.values(plantRestrictedMap), "val");
+  const uniqByPlantRestricted = countUniqueMaterialsByGroup(rawFiltered, restrictedUseStockTypeAxis ? null : "Plant Name", restrictedUseStockTypeAxis ? getRowStockTypeLabel : null);
+  plantRestricted.forEach(r => { r.uniqMat = uniqByPlantRestricted[r["Plant Name"]] || 0; });
+  Plotly.newPlot("chart-restricted-plant", [
+    {type:"bar",     name:"Value (ETB)", x:plantRestricted.map(r=>r["Plant Name"]), y:plantRestricted.map(r=>r.val), yaxis:"y",  marker:{color:"#d29922"}, hovertemplate:"<b>%{x}</b><br>ETB %{y:,.0f}<extra></extra>"},
+    {type:"scatter", mode:"lines+markers", name:"Unique Materials", x:plantRestricted.map(r=>r["Plant Name"]), y:plantRestricted.map(r=>r.uniqMat), yaxis:"y2", marker:{color:"#3fb950",size:8}, line:{color:"#3fb950"}, hovertemplate:"<b>%{x}</b><br>Materials: %{y}<extra></extra>"},
+  ], pl({
+    height:300,
+    margin:{l:60,r:70,t:20,b:100},
+    xaxis:{title:{text: restrictedUseStockTypeAxis ? "Stock Type" : "Plant", font:{size:10}}, tickangle:-35, tickfont:{size:10}, automargin:true},
+    yaxis:{title:{text:"Value (ETB)",font:{size:10,color:"#d29922"}}, tickfont:{color:"#d29922"}, automargin:true},
+    yaxis2:{overlaying:"y",side:"right",gridcolor:"transparent",tickfont:{color:"#3fb950"},tickformat:",d",title:{text:"Unique Materials",font:{size:10,color:"#3fb950"}}},
+  }), PLOTLY_CONFIG);
+
+  document.getElementById("chart-restricted-plant").on("plotly_click", function(data) {
+    const groupLabel = data.points[0].x;
+    const items = restrictedUseStockTypeAxis
+      ? rawFiltered.filter(r => getRowStockTypeLabel(r) === groupLabel)
+      : rawFiltered.filter(r => (r["Plant Name"] || "(Blank)") === groupLabel);
+    const rows  = buildDrillRows(items, "Restricted Stock", "Value of Restricted Stock");
+    showChartDrillModal({
+      title: `🔒 Restricted — ${groupLabel}`,
+      meta: `${rows.length} items`,
+      rows, cols: CHART_DRILL_COLS,
+      filenameBase: `restricted_${groupLabel}`,
+    });
+  });
+
+  const restrictedCols = [
+    {key:"Material", label:"Material Code", fmt:(val,r)=>renderMappedMatCode(val,r), raw:true, cellClass:"col-mat-code-wrap"},
+    {key:"Material Description", label:"Material Description", fmt:(val,r)=>renderMappedMatDesc(val,r), raw:true, cellClass:"col-mat-desc-wrap"},
+    {key:"Material Group Name",                     label:"Material Group"},
+    {key:"_plantList",                              label:"Plant(s)"},
+    {key:"_storageLocList",                         label:"Storage Location"},
+    {key:"_expiryStr",                              label:"Shelf Life Expiry"},
+    {key:"Restricted Stock",          label:"Restricted Qty",        fmt:fmtQty, rawKey:"Restricted Stock", cellClass:"col-qty"},
+    {key:"Value of Restricted Stock", label:"Restricted Value (ETB)",fmt:fmtETB, rawKey:"Value of Restricted Stock", cellClass:"col-val"},
+  ];
+
+  const restrictedRows = sortBy(
+    [...df].map(r => ({
+      ...r,
+      _expiryStr: r._expiry ? fmtLocalDate(r._expiry) : "",
+    })),
+    "Value of Restricted Stock"
+  );
+  document.getElementById("restricted-table-wrap").innerHTML = buildTable(restrictedRows, restrictedCols, r => r["Value of Restricted Stock"] > 10000 ? "row-red" : "", "", {id:"restricted-export", title:"Restricted Stock"});
+  wireTableExport("restricted-export", restrictedRows, restrictedCols, "restricted_stock");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // BRANCH COMPARISON
 // ═══════════════════════════════════════════════════════════════════════════
 function renderBranch() {
@@ -4380,6 +4550,8 @@ const PAGE_RENDERERS = {
   transit:       renderTransit,
   expiry:        renderExpiry,
   qc:            renderQC,
+  blocked:       renderBlocked,
+  restricted:    renderRestricted,
   branch:        renderBranch,
   concentration: renderConcentration,
 };
@@ -4536,6 +4708,10 @@ document.addEventListener("DOMContentLoaded", () => {
     "expiry-filter-clear":  { page:"expiry",    plantWrap:"ms-expiry-plant",  mgWrap:"ms-expiry-mg",  vtWrap:"ms-expiry-vt",  matWrap:"ms-expiry-mat",  action:"clear" },
     "qc-filter-apply":      { page:"qc",        plantWrap:"ms-qc-plant",      mgWrap:"ms-qc-mg",      vtWrap:"ms-qc-vt",      matWrap:"ms-qc-mat",      action:"apply" },
     "qc-filter-clear":      { page:"qc",        plantWrap:"ms-qc-plant",      mgWrap:"ms-qc-mg",      vtWrap:"ms-qc-vt",      matWrap:"ms-qc-mat",      action:"clear" },
+    "blocked-filter-apply": { page:"blocked",   plantWrap:"ms-blocked-plant", mgWrap:"ms-blocked-mg", vtWrap:"ms-blocked-vt", matWrap:"ms-blocked-mat", action:"apply" },
+    "blocked-filter-clear": { page:"blocked",   plantWrap:"ms-blocked-plant", mgWrap:"ms-blocked-mg", vtWrap:"ms-blocked-vt", matWrap:"ms-blocked-mat", action:"clear" },
+    "restricted-filter-apply": { page:"restricted", plantWrap:"ms-restricted-plant", mgWrap:"ms-restricted-mg", vtWrap:"ms-restricted-vt", matWrap:"ms-restricted-mat", action:"apply" },
+    "restricted-filter-clear": { page:"restricted", plantWrap:"ms-restricted-plant", mgWrap:"ms-restricted-mg", vtWrap:"ms-restricted-vt", matWrap:"ms-restricted-mat", action:"clear" },
 
     "conc-filter-apply":    { page:"concentration", plantWrap:null,               mgWrap:"ms-conc-mg",    vtWrap:"ms-conc-vt",    matWrap:null,             action:"apply" },
     "conc-filter-clear":    { page:"concentration", plantWrap:null,               mgWrap:"ms-conc-mg",    vtWrap:"ms-conc-vt",    matWrap:null,             action:"clear" },
