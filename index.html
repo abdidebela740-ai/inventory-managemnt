@@ -833,9 +833,6 @@
 
     <div class="nav-group" data-group="analytics">
       <div class="nav-group-title"><span class="nav-group-icon">📈</span> Analytics</div>
-      <button class="nav-btn" data-page="mos-plant">
-        <span class="nav-icon">📐</span> MOS by Plant
-      </button>
       <button class="nav-btn" data-page="natl-table">
         <span class="nav-icon">🗂️</span> National Stock &amp; MOS
       </button>
@@ -1654,6 +1651,13 @@
           <option value="ZME">ZME (Medicines)</option>
           <option value="ZMS">ZMS (Medical Supplies)</option>
         </select>
+        <select id="exprisk-program-class" class="filter-select" title="RDF items are CDSS or Non-CDSS; Program (Q) items are Reportable or Non-Reportable.">
+          <option value="">All Classifications</option>
+          <option value="RDF-CDSS">RDF · CDSS</option>
+          <option value="RDF-Non-CDSS">RDF · Non-CDSS</option>
+          <option value="PROGRAM-Reportable">Program (Q) · Reportable</option>
+          <option value="PROGRAM-Non-Reportable">Program (Q) · Non-Reportable</option>
+        </select>
         <button class="apply-btn small" id="exprisk-apply">Apply</button>
         <button class="apply-btn secondary small" id="exprisk-clear">Clear</button>
       </div>
@@ -1728,6 +1732,13 @@
           <option value="ZME">ZME (Medicines)</option>
           <option value="ZMS">ZMS (Medical Supplies)</option>
           <option value="ZLC">ZLC</option>
+        </select>
+        <select id="stko-program-class" class="filter-select" title="RDF items are CDSS or Non-CDSS; Program (Q) items are Reportable or Non-Reportable.">
+          <option value="">All Classifications</option>
+          <option value="RDF-CDSS">RDF · CDSS</option>
+          <option value="RDF-Non-CDSS">RDF · Non-CDSS</option>
+          <option value="PROGRAM-Reportable">Program (Q) · Reportable</option>
+          <option value="PROGRAM-Non-Reportable">Program (Q) · Non-Reportable</option>
         </select>
         <button class="apply-btn small" id="stko-apply">Apply</button>
         <button class="apply-btn secondary small" id="stko-clear">Clear</button>
@@ -1872,6 +1883,13 @@
           <option value="stockout">🚫 HO01 Stockout</option>
           <option value="no-match">❓ No SAP Match</option>
         </select>
+        <select id="reqan-program-class" class="filter-select" title="RDF items are CDSS or Non-CDSS; Program (Q) items are Reportable or Non-Reportable.">
+          <option value="">All Classifications</option>
+          <option value="RDF-CDSS">RDF · CDSS</option>
+          <option value="RDF-Non-CDSS">RDF · Non-CDSS</option>
+          <option value="PROGRAM-Reportable">Program (Q) · Reportable</option>
+          <option value="PROGRAM-Non-Reportable">Program (Q) · Non-Reportable</option>
+        </select>
         <button class="apply-btn small" id="reqan-apply">Apply</button>
         <button class="apply-btn secondary small" id="reqan-clear">Clear</button>
       </div>
@@ -1922,6 +1940,13 @@
       <div class="filter-bar" style="gap:0.6rem;flex-wrap:wrap;align-items:center">
         <select id="brd-plant" class="filter-select"></select>
         <select id="brd-stocktype" class="filter-select" title="RDF and Health Program (Q) requisitions use different Purchasing Group / Purch. Organization codes — filter to one at a time before exporting so the SAP paste sheet doesn't mix them."></select>
+        <select id="brd-program-class" class="filter-select" title="RDF items are CDSS or Non-CDSS; Program (Q) items are Reportable or Non-Reportable.">
+          <option value="">All Classifications</option>
+          <option value="RDF-CDSS">RDF · CDSS</option>
+          <option value="RDF-Non-CDSS">RDF · Non-CDSS</option>
+          <option value="PROGRAM-Reportable">Program (Q) · Reportable</option>
+          <option value="PROGRAM-Non-Reportable">Program (Q) · Non-Reportable</option>
+        </select>
         <span class="brd-target-label">🎯 Target: 5 MOS</span>
         <label class="brd-buffer-label">HO01 Buffer
           <input type="number" id="brd-buffer" min="0" step="1" value="0" class="filter-input" style="width:90px;min-width:0" />
