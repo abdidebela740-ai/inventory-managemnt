@@ -352,8 +352,17 @@ function buildMosMerged() {
         code: canonical,
         origCodes: new Set([row.code]),
         desc: canonDesc,
-        rawProgramType: row.rawProgramType || "",
-        person: row.person || "",
+        rawProgramType: "",
+        person: "",
+        // FIX-PERSON-CLS-COUPLING: which raw AMC code the current
+        // person/rawProgramType PAIR was adopted from — see below.
+        _pairSourceCode: null,
+        // True when a later raw row consolidated into this same canonical
+        // code disagrees with the pairing we already adopted (different
+        // Person and/or different RDF-CDSS classification on file for the
+        // same target material). Surfaced in the UI so a real data
+        // inconsistency is flagged instead of silently blended.
+        personClsConflict: false,
         amcs: Object.fromEntries(mosPlants.map(p => [p, null])),
         isMerged: false,
       });
@@ -362,8 +371,47 @@ function buildMosMerged() {
     m.origCodes.add(row.code);
     if (m.origCodes.size > 1) m.isMerged = true;
     if (!m.desc && canonDesc) m.desc = canonDesc; // fill in if an earlier dup left it blank
-    if (!m.rawProgramType && row.rawProgramType) m.rawProgramType = row.rawProgramType; // fill in if an earlier dup left it blank
-    if (!m.person && row.person) m.person = row.person;
+
+    // FIX-PERSON-CLS-COUPLING: Person and RDF-CDSS classification (rawProgramType)
+    // must always be read off the SAME underlying AMC row, since they describe
+    // one material line. Previously each field was filled independently
+    // ("first non-blank wins" per field, checked separately) — so when a
+    // mapping file consolidated two DIFFERENT source materials onto one
+    // canonical code, the merged record could end up showing one source
+    // row's Person next to a completely different source row's RDF-CDSS
+    // classification (whichever happened to arrive first for each field).
+    // That produced exactly the reported symptom: selecting a Person and
+    // cross-checking RDF-CDSS showed a classification that didn't actually
+    // belong to that person's material.
+    //
+    // Now: the first row that has any person/classification data "claims"
+    // the pairing for this canonical code. A later row is only allowed to
+    // fill in a field that's still blank (no conflict). If a later row
+    // actively disagrees with a field we already have, that's a genuine
+    // data inconsistency in the AMC file — we flag it (personClsConflict)
+    // and log it, rather than silently overwriting/blending the two rows.
+    if (row.person || row.rawProgramType) {
+      if (!m._pairSourceCode) {
+        m.person = row.person || "";
+        m.rawProgramType = row.rawProgramType || "";
+        m._pairSourceCode = row.code;
+      } else {
+        const personConflict = row.person && m.person && row.person !== m.person;
+        const clsConflict = row.rawProgramType && m.rawProgramType && row.rawProgramType !== m.rawProgramType;
+        if (personConflict || clsConflict) {
+          m.personClsConflict = true;
+          console.warn(
+            `[mos] AMC Person/Classification conflict for canonical code "${canonical}": ` +
+            `row "${m._pairSourceCode}" has Person="${m.person}" / Type="${m.rawProgramType}", ` +
+            `row "${row.code}" has Person="${row.person}" / Type="${row.rawProgramType}". ` +
+            `Keeping "${m._pairSourceCode}"'s pairing; flagging for review.`
+          );
+        } else {
+          if (!m.person && row.person) m.person = row.person;
+          if (!m.rawProgramType && row.rawProgramType) m.rawProgramType = row.rawProgramType;
+        }
+      }
+    }
 
     for (const p of mosPlants) {
       const v = row.amcs[p];
@@ -375,8 +423,9 @@ function buildMosMerged() {
 
   return Array.from(merged.values()).map(m => {
     const { type, cls } = resolveProgramTypeAndClass(m.code, m.rawProgramType, sstMap);
+    const { _pairSourceCode, ...rest } = m; // internal bookkeeping only, not needed downstream
     return {
-      ...m,
+      ...rest,
       origCodes: [...m.origCodes].join(", "),
       type,
       programClass: cls,
