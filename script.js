@@ -3387,12 +3387,19 @@ function renderQC() {
   // consignment stock) — these must still appear for physical count audits.
   // RECONCILIATION: aggregate all source codes into their target canonical code
   // so each material appears exactly once (e.g. three ASA variants → one total).
-  const rawFiltered = applyPageFilter("qc").filter(r => r["Stock in Quality Inspection"] > 0);
-  const df          = aggregateByMappedMaterial(rawFiltered).filter(r => r["Stock in Quality Inspection"] > 0);
+  // FIX-QC-VALUE-ONLY-ROWS: was qty-only (`Stock in Quality Inspection > 0`), which
+  // silently dropped rows where SAP exports a QC Value with a zero/blank quantity
+  // (rounding, unit mismatches, adjustment postings). That caused this page's KPI
+  // total to under-count vs the Dashboard's "Value in QC" card, which sums value
+  // across every row with no quantity gate at all. Matching that behavior here so
+  // both views reconcile.
+  const rawFiltered = applyPageFilter("qc").filter(r => r["Stock in Quality Inspection"] > 0 || r["Value of Stock in Quality Inspection"] > 0);
+  const df          = aggregateByMappedMaterial(rawFiltered).filter(r => r["Stock in Quality Inspection"] > 0 || r["Value of Stock in Quality Inspection"] > 0);
 
   const totalQCVal = df.reduce((s,r) => s + r["Value of Stock in Quality Inspection"], 0);
+  const qcScopeLabel = (typeof isHeadOfficeUser === "function" && !isHeadOfficeUser()) ? "Within your branch" : "Across all plants";
   setKpis("qc-kpis", [
-    ["Total Value in QC", fmtETB(totalQCVal), "Across all plants",      "red"],
+    ["Total Value in QC", fmtETB(totalQCVal), qcScopeLabel,      "red"],
     ["Unique Materials",  String(new Set(df.map(r=>r["Material"])).size),"Distinct SKUs","blue"],
   ]);
 
@@ -3471,12 +3478,19 @@ function renderQC() {
 // Stock" columns instead of the QC ones.
 // ═══════════════════════════════════════════════════════════════════════════
 function renderBlocked() {
-  const rawFiltered = applyPageFilter("blocked").filter(r => r["Blocked Stock"] > 0);
-  const df          = aggregateByMappedMaterial(rawFiltered).filter(r => r["Blocked Stock"] > 0);
+  // FIX-BLOCKED-VALUE-ONLY-ROWS: was qty-only (`Blocked Stock > 0`), which silently
+  // dropped rows where SAP exports a Blocked Value with a zero/blank quantity
+  // (rounding, unit mismatches, adjustment postings). That caused this page's KPI
+  // total to under-count vs the Dashboard's "Blocked Stock Value" card, which sums
+  // value across every row with no quantity gate at all. Matching that behavior
+  // here so both views reconcile.
+  const rawFiltered = applyPageFilter("blocked").filter(r => r["Blocked Stock"] > 0 || r["Value of Blocked Stock"] > 0);
+  const df          = aggregateByMappedMaterial(rawFiltered).filter(r => r["Blocked Stock"] > 0 || r["Value of Blocked Stock"] > 0);
 
   const totalBlockedVal = df.reduce((s,r) => s + (r["Value of Blocked Stock"] || 0), 0);
+  const blockedScopeLabel = (typeof isHeadOfficeUser === "function" && !isHeadOfficeUser()) ? "Within your branch" : "Across all plants";
   setKpis("blocked-kpis", [
-    ["Total Value Blocked", fmtETB(totalBlockedVal), "Across all plants", "red"],
+    ["Total Value Blocked", fmtETB(totalBlockedVal), blockedScopeLabel, "red"],
     ["Unique Materials",    String(new Set(df.map(r=>r["Material"])).size), "Distinct SKUs", "blue"],
   ]);
 
@@ -3545,12 +3559,19 @@ function renderBlocked() {
 // Stock, per a dedicated column in the source Excel).
 // ═══════════════════════════════════════════════════════════════════════════
 function renderRestricted() {
-  const rawFiltered = applyPageFilter("restricted").filter(r => r["Restricted Stock"] > 0);
-  const df          = aggregateByMappedMaterial(rawFiltered).filter(r => r["Restricted Stock"] > 0);
+  // FIX-RESTRICTED-VALUE-ONLY-ROWS: was qty-only (`Restricted Stock > 0`), which
+  // silently dropped rows where SAP exports a Restricted Value with a zero/blank
+  // quantity (rounding, unit mismatches, adjustment postings). That caused this
+  // page's KPI total to under-count vs the Dashboard's "Restricted Stock Value"
+  // card, which sums value across every row with no quantity gate at all.
+  // Matching that behavior here so both views reconcile.
+  const rawFiltered = applyPageFilter("restricted").filter(r => r["Restricted Stock"] > 0 || r["Value of Restricted Stock"] > 0);
+  const df          = aggregateByMappedMaterial(rawFiltered).filter(r => r["Restricted Stock"] > 0 || r["Value of Restricted Stock"] > 0);
 
   const totalRestrictedVal = df.reduce((s,r) => s + (r["Value of Restricted Stock"] || 0), 0);
+  const restrictedScopeLabel = (typeof isHeadOfficeUser === "function" && !isHeadOfficeUser()) ? "Within your branch" : "Across all plants";
   setKpis("restricted-kpis", [
-    ["Total Value Restricted", fmtETB(totalRestrictedVal), "Across all plants", "amber"],
+    ["Total Value Restricted", fmtETB(totalRestrictedVal), restrictedScopeLabel, "amber"],
     ["Unique Materials",       String(new Set(df.map(r=>r["Material"])).size), "Distinct SKUs", "blue"],
   ]);
 
