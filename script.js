@@ -482,14 +482,46 @@ let personFilter = new Set();   // empty = show all persons
 // determined which one displayed) depending on whether a person filter
 // was active. Resolving against mosMerged's canonical `code` (which is
 // already mapping-aware, see buildMosMerged()) fixes this at the source.
+//
+// FIX-PERSON-STREAM-LEAK: a code can legitimately have TWO mosMerged rows —
+// one "Q", one "RDF" (see buildMosMerged's LAW comment) — each with its OWN
+// person. This used to return bare codes, so if Person X owned ONLY the RDF
+// row of a code, the Q row's stock (and classification) leaked in too: the
+// whole code was let through everywhere getReconciledBase()/this function's
+// result is used, regardless of which stream the physical row actually
+// belongs to. A code assigned to Person X under RDF-CDSS could then surface
+// its unrelated Program-Reportable (Q) stock under Person X as well.
+//
+// Now returns a Set of type-aware keys, "CODE\u241FTYPE" (same separator/
+// convention as mos.js's buildCodeProgramClassMap()), so callers can check
+// a specific physical row's own Special Stock Type against the exact
+// stream that person owns — see isRowInPersonFilter() below, which every
+// consumer should use instead of reading this Set directly.
 function getPersonFilteredCodes() {
   if (personFilter.size === 0) return null;
   if (typeof mosMerged === "undefined" || !mosMerged.length) return null;
-  const codes = new Set();
+  const keys = new Set();
   mosMerged.forEach(r => {
-    if (r.person && personFilter.has(r.person)) codes.add(String(r.code || "").trim().toUpperCase());
+    if (r.person && personFilter.has(r.person)) {
+      keys.add(String(r.code || "").trim().toUpperCase() + "\u241F" + String(r.type || "RDF").trim().toUpperCase());
+    }
   });
-  return codes;
+  return keys;
+}
+
+// Type-aware membership check for a single inventory ROW (not a bare code)
+// against the Set returned by getPersonFilteredCodes(). Resolves the row's
+// OWN stream from its own "Special Stock Type" field (Q = Health Program;
+// blank/anything else = RDF — same convention used throughout the app, see
+// resolveProgramTypeAndClass()/applyPageFilter()'s clsLabelOf()), so a row
+// only passes when THIS row's stream is one the selected person actually
+// owns — not merely because the code's OTHER stream happens to be theirs.
+function isRowInPersonFilter(row, allowedKeys) {
+  if (!allowedKeys) return true; // no person filter active — show everything
+  const mat  = String(row._mappedMaterial || row["Material"] || "").trim().toUpperCase();
+  if (!mat) return false;
+  const sst  = String(row["Special Stock Type"] || "").trim().toUpperCase() === "Q" ? "Q" : "RDF";
+  return allowedKeys.has(mat + "\u241F" + sst);
 }
 
 // ── PERSON FILTER DROPDOWN POPULATION ──────────────────────────────────────
