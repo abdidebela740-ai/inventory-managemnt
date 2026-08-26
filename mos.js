@@ -197,8 +197,10 @@ function finishMosAmcLoad(file, detectedPlants, statusEl, btnEl) {
     (hasHub ? "" : `<div class="status-name" style="color:var(--amber)">⚠️ "${HUB_PLANT}" column not found — hub MOS rule won't apply</div>`);
   if (btnEl) btnEl.textContent = "📐 Change AMC File";
 
-  document.getElementById("mos-no-amc").style.display  = "none";
-  document.getElementById("mos-content").style.display = "block";
+  const noAmcEl  = document.getElementById("mos-no-amc");
+  const contentEl = document.getElementById("mos-content");
+  if (noAmcEl)  noAmcEl.style.display  = "none";
+  if (contentEl) contentEl.style.display = "block";
 
   if (currentPage === "mos-plant") renderMosPlant();
 }
@@ -302,6 +304,27 @@ function buildMosMerged() {
       programClass: cls,
     };
   });
+}
+
+// ── CANONICAL CODE → MATERIAL VALUATION TYPE (ZME/ZMS/ZLC/ZMD) ──────────────
+// mosMerged's own `type` field is Q/RDF (Special Stock Type) — a completely
+// different axis from the material's SAP valuation type (ZME=Medicines,
+// ZMS=Medical Supplies, ZLC, ZMD). Pages like Overstock & Expiry Risk and
+// Stockout Risk offer a "Type" dropdown of ZME/ZMS(/ZLC) — this map is what
+// they should actually filter against, not r.type. Sourced the exact same
+// way request-analysis.js's buildMaterialTypeMap() does (getValuationType()
+// from filters.js, over the mapping-reconciled base), just exposed globally
+// so any page can use it.
+function buildCodeMaterialTypeMap() {
+  const out = new Map();
+  const base = (typeof getReconciledBase === "function") ? getReconciledBase() : (typeof rawDf !== "undefined" ? rawDf : []);
+  base.forEach(row => {
+    const code = String(row._mappedMaterial || row["Material"] || "").trim();
+    if (!code || out.has(code)) return;
+    const type = (typeof getValuationType === "function" ? String(getValuationType(row) || "") : "").trim().toUpperCase();
+    if (type && type !== "(NONE)") out.set(code, type);
+  });
+  return out;
 }
 
 // ── FIND A mosMerged ROW BY CODE, TYPE-AWARE ──────────────────────────────────
