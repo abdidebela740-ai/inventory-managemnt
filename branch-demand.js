@@ -191,11 +191,59 @@ function brdBuildHo01Breakdown() {
     if (!mat) continue;
     const unrestricted = (typeof getMappedQty === "function") ? getMappedQty(row, "Unrestricted Stock") : Number(row["Unrestricted Stock"] || 0);
     const qc            = (typeof getMappedQty === "function") ? getMappedQty(row, "Stock in Quality Inspection") : Number(row["Stock in Quality Inspection"] || 0);
-    if (!map.has(mat)) map.set(mat, { unrestricted: 0, qc: 0 });
+    if (!map.has(mat)) map.set(mat, { unrestricted: 0, qc: 0, openOutbound: 0 });
     const entry = map.get(mat);
     entry.unrestricted += Number(unrestricted) || 0;
     entry.qc            += Number(qc) || 0;
   }
+
+  // ── OPEN OUTBOUND (Pending Dispatch) — already-committed HO01 stock ─────
+  // Every row in the Open Outbound / Pending Dispatch upload (pending-
+  // dispatch.js) is, by definition, a delivery that has NOT yet had Goods
+  // Issue posted (once GI posts, SAP drops it from that extract) — so its
+  // quantity still physically sits inside HO01's own "Unrestricted Stock"
+  // figure above, even though it's already earmarked for a branch and is
+  // not really free to allocate again. Summed across EVERY destination
+  // branch combined (the whole file is implicitly sourced from HO01 — see
+  // pending-dispatch.js header), then subtracted once from HO01's
+  // available-to-send pool in brdComputeMaterialAllocation(), regardless of
+  // which specific branch each delivery is headed to.
+  //
+  // Deliberately does NOT read from mos.js's verified-Stock-in-Transit
+  // check (script.js stampGhostTransit / getVerifiedTransitQty) — that
+  // reconciles a DIFFERENT upload (the Stock-in-Transit verification file,
+  // matched against each BRANCH's own "Stock in Transit" column) and never
+  // touches HO01's Unrestricted Stock figure, so there is no overlap/
+  // double-subtraction between the two.
+  if (typeof window.getOpenOutboundRows === "function") {
+    const outboundRows = window.getOpenOutboundRows() || [];
+    for (const r of outboundRows) {
+      const srcCode = String(r.material || "").trim().toUpperCase();
+      if (!srcCode || !(Number(r.qty) > 0)) continue;
+
+      // Same source→target/factor conversion applyMaterialMapping() uses
+      // for the main inventory file, so an outbound quantity recorded
+      // under a pre-mapping source code lands on the same canonical code
+      // (and the same converted units) as HO01's unrestricted stock above.
+      let canonicalCode = srcCode;
+      let qty = Number(r.qty) || 0;
+      if (typeof mappingTable !== "undefined") {
+        const stypeMap = mappingTable.get(srcCode);
+        if (stypeMap) {
+          const stype = String(r.specialStock || "").trim().toUpperCase() === "Q" ? "Q" : "RDF";
+          const entry = stypeMap.get(stype) || (stypeMap.size === 1 ? [...stypeMap.values()][0] : undefined);
+          if (entry) {
+            canonicalCode = String(entry.targetCode || srcCode).trim().toUpperCase();
+            qty = qty * entry.factor;
+          }
+        }
+      }
+
+      if (!map.has(canonicalCode)) map.set(canonicalCode, { unrestricted: 0, qc: 0, openOutbound: 0 });
+      map.get(canonicalCode).openOutbound += qty;
+    }
+  }
+
   // DEFENSIVE LOG (dev aid, not shown to users): if this ever fires a lot,
   // the QC badge is unreliable again — most likely a new place upstream
   // stopped normalizing casing/trim on a material code. Grep for "QC-FALSE-
@@ -587,10 +635,15 @@ function brdComputeMaterialAllocation(row, sohMap, buffer, ho01Breakdown) {
   // BUGFIX-QC-FALSE-POSITIVE: must match the normalization brdBuildHo01Breakdown()
   // now uses for its keys (.trim().toUpperCase()) — see that function's comment.
   const ho01Key = String(row.code || "").trim().toUpperCase();
-  const bd     = (ho01Breakdown && ho01Breakdown.get(ho01Key)) || { unrestricted: 0, qc: 0 };
+  const bd     = (ho01Breakdown && ho01Breakdown.get(ho01Key)) || { unrestricted: 0, qc: 0, openOutbound: 0 };
   const sohHo  = bd.unrestricted;
   const qcHo   = bd.qc;
-  const availableHo = Math.max(0, sohHo - (Number(buffer) || 0));
+  // Already-committed stock: Open Outbound deliveries from HO01 (any
+  // destination branch, summed together — see brdBuildHo01Breakdown()) that
+  // haven't had Goods Issue posted yet, so they're still sitting inside
+  // sohHo above but aren't really free to allocate a second time.
+  const openOutboundHo = Math.min(sohHo, Number(bd.openOutbound) || 0);
+  const availableHo = Math.max(0, sohHo - openOutboundHo - (Number(buffer) || 0));
 
   const perBranch = branchPlants.map(p => {
     const soh    = mosSohFor(sohMap, row, p);
@@ -653,7 +706,7 @@ function brdComputeMaterialAllocation(row, sohMap, buffer, ho01Breakdown) {
   const scalePct = totalNeed > 0 ? Math.min(1, availableHo / totalNeed) : 1;
 
   return {
-    sohHo, qcHo, availableHo, totalNeed, isPartial, scalePct,
+    sohHo, qcHo, openOutboundHo, availableHo, totalNeed, isPartial, scalePct,
     perBranch: perBranch.map((b, i) => ({
       ...b,
       allocComputed: allocRounded[i],
@@ -782,6 +835,7 @@ function brdBuildLines(sohMap) {
     // stock exists but isn't releasable yet.
     const qcOnly = calc.sohHo === 0 && calc.qcHo > 0;
     if (calc.sohHo === 0 && calc.qcHo === 0) { hiddenNoStockCount++; return; }
+    const hasOpenOutbound = calc.openOutboundHo > 0;
 
     calc.perBranch.forEach(b => {
       if (!viewPlants.includes(b.plant)) return;
@@ -821,7 +875,8 @@ function brdBuildLines(sohMap) {
       lines.push({
         plant: b.plant, code: row.code, desc: row.desc, origCodes: row.origCodes,
         soh: b.soh, amc: b.amc, hasAmc: b.hasAmc, mosNow: b.mosNow,
-        sohHo: calc.sohHo, qcHo: calc.qcHo, qcOnly, availableHo: calc.availableHo,
+        sohHo: calc.sohHo, qcHo: calc.qcHo, qcOnly,
+        openOutboundHo: calc.openOutboundHo, hasOpenOutbound, availableHo: calc.availableHo,
         need: b.need, alloc, mosAfter, status,
         totalNeed: calc.totalNeed, isPartial: calc.isPartial, scalePct: calc.scalePct,
         priorityTier: b.tier, priorityLabel: b.tierLabel, fillPct: b.fillPct,
@@ -864,6 +919,7 @@ function brdKpiRow(lines) {
   const noAmcCount  = lines.filter(l => l.status === "no-amc").length;
   const approvedCount = lines.filter(l => l.approved).length;
   const qcOnlyCount = new Set(lines.filter(l => l.qcOnly).map(l => l.code)).size;
+  const openOutboundCount = new Set(lines.filter(l => l.hasOpenOutbound).map(l => l.code)).size;
   const hiddenNoStock = lines.hiddenNoStockCount || 0;
 
   setKpis("brd-kpis", [
@@ -873,6 +929,7 @@ function brdKpiRow(lines) {
     ["Target MOS Band", `${REQUEST_ELIGIBILITY_MOS}–${TARGET_MOS}`, `request below ${REQUEST_ELIGIBILITY_MOS}, fill to ${TARGET_MOS}`, "purple"],
     ["Short / Zero Lines", partialCount.toLocaleString(), "HO01 couldn't fully cover", "red"],
     ["HO01 Stock in Quality Inspection", qcOnlyCount.toLocaleString(), "materials, not yet releasable", "amber"],
+    ["HO01 Stock in Pending Dispatch", openOutboundCount.toLocaleString(), "materials, already committed to Open Outbound", "amber"],
     ["No AMC", noAmcCount.toLocaleString(), "manual entry needed", "muted"],
     ["Approved", approvedCount.toLocaleString(), `of ${lines.length.toLocaleString()} shown`, "purple"],
     ["Hidden — No HO01 Stock", hiddenNoStock.toLocaleString(), "materials with nothing at HO01", "muted"],
@@ -1082,6 +1139,7 @@ function brdRenderTables(lines, canEdit) {
       fmt: (v, r) => {
         const bits = [];
         if (r.qcOnly) bits.push(`<span class="brd-status-pill brd-status-amber" title="HO01 stock (${fmtQty(r.qcHo)}) is still in Quality Inspection — not yet releasable">🧪 ${fmtQty(r.qcHo)} Quality Inspection</span>`);
+        if (r.hasOpenOutbound) bits.push(`<span class="brd-status-pill brd-status-amber" title="HO01 stock (${fmtQty(r.openOutboundHo)}) is already committed to an Open Outbound / Pending Dispatch delivery (Goods Issue not yet posted) — excluded from what's available to allocate">📦 ${fmtQty(r.openOutboundHo)} Pending Dispatch</span>`);
         if (r.isPartial) bits.push(`<span class="brd-status-pill brd-status-amber" title="HO01 short overall for this material (covers ${Math.round(r.scalePct * 100)}% of combined need) — priority allocation filled THIS branch's own need ${Math.round(r.fillPct * 100)}% (${escHtml(r.priorityLabel)} priority)">⚖️ ${Math.round(r.fillPct * 100)}%</span>`);
         if (r.surplusPlants && r.surplusPlants.length) bits.push(`<span class="brd-status-pill brd-status-blue" title="Surplus (>8mo) at: ${r.surplusPlants.map(escHtml).join(", ")}">↔️ ${r.surplusPlants.length}</span>`);
         if (!r.hasAmc) bits.push(`<span class="brd-status-pill brd-status-muted" title="No AMC on file — enter quantity manually">✏️ Manual</span>`);
