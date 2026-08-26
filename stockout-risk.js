@@ -192,21 +192,30 @@ function buildNationalExpiryDetailMap(thresholdMonths) {
 //         "overstock" → MOS ≥ 12       → OVERSTOCK
 // Only ZME/ZMS/ZLC types are ever included, and only materials where National
 // MOS is a real, finite number (null/Infinity dropped).
-function buildStockoutSnapshot(typeFilter, searchQ) {
+function buildStockoutSnapshot(typeFilter, searchQ, clsFilter) {
   if (typeof mosMerged === "undefined" || !mosMerged.length) return [];
 
   const sohMap = buildMosSohMap();          // from mos.js
 
-  // getMosFilteredRows() already applies the global personFilter before
-  // type/search, exactly like MOS by Plant / Expiry Risk.
+  // getMosFilteredRows() already applies the global personFilter and
+  // Program Classification filter before search — Type (ZME/ZMS/ZLC) is
+  // intentionally NOT passed to it: that's Q/RDF (Special Stock Type), a
+  // different axis from this page's ZME/ZMS/ZLC Type dropdown, checked
+  // separately below via materialTypeMap.
   let rows = (typeof getMosFilteredRows === "function")
-    ? getMosFilteredRows(typeFilter || "", searchQ || "")
-    : mosMerged.filter(r => (!typeFilter || r.type === typeFilter));
+    ? getMosFilteredRows("", searchQ || "", clsFilter || "")
+    : mosMerged.filter(r => (!clsFilter || r.programClass === clsFilter));
 
   // Hard scope: only ZME/ZMS/ZLC, regardless of the dropdown value —
   // "All Types" on this page still means "all of ZME/ZMS/ZLC," never ZMD
-  // or anything else.
-  rows = rows.filter(r => STOCKOUT_ALLOWED_TYPES.has(r.type));
+  // or anything else. Checked against the material's actual valuation type
+  // (buildCodeMaterialTypeMap, mos.js), not mosMerged's own Q/RDF `type`
+  // field — those are two unrelated axes and this used to compare the
+  // wrong one, so this scope (and the dropdown itself) silently matched
+  // nothing.
+  const materialTypeMap = buildCodeMaterialTypeMap();
+  rows = rows.filter(r => STOCKOUT_ALLOWED_TYPES.has(materialTypeMap.get(r.code)));
+  if (typeFilter) rows = rows.filter(r => materialTypeMap.get(r.code) === typeFilter);
 
   // Widened to STOCKOUT_OPTIMAL_THRESHOLD (12mo) so the cross-check works
   // across the FULL range, not just the <3mo High-Risk boundary — a batch
@@ -275,7 +284,7 @@ function buildStockoutSnapshot(typeFilter, searchQ) {
     }
 
     out.push({
-      code: r.code, desc: r.desc, type: r.type,
+      code: r.code, desc: r.desc, type: materialTypeMap.get(r.code) || "",
       isMerged: r.isMerged, origCodes: r.origCodes,
       totalSoh: nat.totalSoh, totalAmc: nat.totalAmc, mos: nat.mos,
       atRisk, status,
@@ -580,11 +589,13 @@ function renderStockoutRisk() {
 
   const searchEl     = document.getElementById("stko-search");
   const typeEl       = document.getElementById("stko-type");
+  const clsEl        = document.getElementById("stko-program-class");
 
   const searchQ    = searchEl ? searchEl.value.trim() : "";
   const typeVal    = typeEl   ? typeEl.value.trim()   : "";
+  const clsVal     = clsEl    ? clsEl.value.trim()    : "";
 
-  const snapshot = buildStockoutSnapshot(typeVal, searchQ);
+  const snapshot = buildStockoutSnapshot(typeVal, searchQ, clsVal);
 
   const screenedCount = snapshot.length;
   const atRiskRows     = snapshot.filter(r => r.atRisk);                // MOS < 3 (out + high combined)
@@ -757,13 +768,15 @@ let stkoSuggestItems = [];
 // same as the table itself — no point suggesting a code you can't see here.
 function stkoSuggestionSource() {
   if (typeof mosMerged === "undefined" || !mosMerged.length) return [];
+  const materialTypeMap = (typeof buildCodeMaterialTypeMap === "function") ? buildCodeMaterialTypeMap() : new Map();
   const seen = new Set();
   const out = [];
   for (const r of mosMerged) {
-    if (!STOCKOUT_ALLOWED_TYPES.has(r.type)) continue;
+    const mType = materialTypeMap.get(r.code);
+    if (!STOCKOUT_ALLOWED_TYPES.has(mType)) continue;
     if (seen.has(r.code)) continue;
     seen.add(r.code);
-    out.push({ code: r.code, desc: r.desc || "", type: r.type });
+    out.push({ code: r.code, desc: r.desc || "", type: mType });
   }
   return out;
 }
@@ -869,6 +882,7 @@ function stkoSetActiveSuggestion(idx) {
       "stko-clear": () => {
         const s = document.getElementById("stko-search");            if (s) s.value = "";
         const t = document.getElementById("stko-type");              if (t) t.value = "";
+        const g = document.getElementById("stko-program-class");     if (g) g.value = "";
         stkoCardFilter = null;
         renderStockoutRisk();
       },
