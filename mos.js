@@ -304,25 +304,31 @@ function buildMosMerged() {
       // guard is false for undefined) — so any mapped material's
       // classification (RDF-CDSS / Program-Reportable / etc.) vanished from
       // every AMC-derived view (Dashboard classification filter, MOS,
-      // National table, Expiry Risk...), same as applyMaterialMapping()
-      // would have gotten wrong had it not already unwrapped the stock-type
-      // Map correctly on the inventory side. Mirrors that same stock-type
-      // selection here: prefer the entry matching this code's own Q/RDF
-      // type (via sstMap, keyed by each candidate's own target code since
-      // sstMap is keyed by canonical/target codes); fall back to the single
-      // entry when the code only has one stock-type rule; default to the
-      // RDF entry when ambiguous (matches resolveProgramTypeAndClass's own
-      // blank/unknown-defaults-to-RDF convention).
+      // National table, Expiry Risk...).
+      //
+      // FIX-MOS-MAP-STOCKTYPE-MATCH: when a source code has mapping rules for
+      // BOTH stock types (~15 codes in this dataset — e.g. "105-AMIT-0101-03"
+      // maps to a DIFFERENT target under "RDF" than under "Q"), the correct
+      // variant to pick is whichever one matches THIS AMC ROW's own
+      // classification text: an "RDF-CDSS"/"RDF-Non-CDSS" row is inherently
+      // the RDF stream and must resolve through the mapping's RDF-tagged
+      // target; a "Program-Reportable"/"Program-Non-Reportable" row is
+      // inherently the Q stream and must resolve through the Q-tagged
+      // target. Picking the wrong one (as an inventory-lookup-based guess
+      // could) silently misattributes this row's AMC numbers and
+      // classification onto the WRONG canonical material — e.g. an
+      // RDF-CDSS row's data landing on the Q-stream's target code instead.
+      // Falls back to the single available entry when the code only has one
+      // stock-type rule, or to an RDF-then-Q preference when this row has no
+      // AMC classification text to go on at all (nothing else to tell the
+      // two streams apart by).
       const stypeMap = mappingTable.get(String(row.code || "").trim().toUpperCase());
       let entry;
-      if (stypeMap && stypeMap.size === 1) {
-        entry = [...stypeMap.values()][0];
-      } else if (stypeMap && stypeMap.size > 1) {
-        const qEntry   = stypeMap.get("Q");
-        const rdfEntry = stypeMap.get("RDF");
-        entry = (qEntry && sstMap.get(String(qEntry.targetCode || "").trim().toUpperCase()) === "Q")
-          ? qEntry
-          : (rdfEntry || qEntry);
+      if (stypeMap && stypeMap.size) {
+        const clsNorm = String(row.rawProgramType || "").trim().toUpperCase().replace(/[\s_]+/g, "-").replace(/-+/g, "-");
+        const wantStype = clsNorm.startsWith("RDF") ? "RDF" : (clsNorm.startsWith("PROGRAM") ? "Q" : null);
+        entry = (wantStype && stypeMap.get(wantStype))
+          || (stypeMap.size === 1 ? [...stypeMap.values()][0] : (stypeMap.get("RDF") || stypeMap.get("Q")));
       }
       if (entry) {
         canonical = entry.targetCode;
