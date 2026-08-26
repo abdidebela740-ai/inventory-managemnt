@@ -29,16 +29,17 @@
 //   - Respects the global sidebar Person Filter (rows are still scoped by it,
 //     same as every other MOS-derived page) — but the Person column itself is
 //     NOT displayed on this page or in its export.
-//   - ONLY these three material types are ever in scope, regardless of the
-//     Type dropdown selection: ZME, ZMS, ZLC. Any other type (e.g. ZMD) is
-//     excluded from this page entirely, even under "All Types."
+//   - ONLY these four material types are ever in scope, regardless of the
+//     Type dropdown selection: ZME, ZMS, ZLC, ZMD — read entirely from the
+//     inventory file's Inventory Valuation Type (the AMC file no longer
+//     carries type info).
 //   - Materials with National MOS = null (no branch committed at all) or
 //     = Infinity (stock but zero branch demand) are EXCLUDED from this page —
 //     there's no finite MOS to place in a band.
 //   - No Material Group filter — removed per product decision.
 //   - NO ETB value anywhere on this page, NO chart — KPIs + table only.
-//   - KPI row shows a per-type at-risk breakdown (ZME / ZMS / ZLC counts,
-//     Stockout + High Risk only) instead of an average-MOS figure.
+//   - KPI row shows a per-type at-risk breakdown (ZME / ZMS / ZLC / ZMD
+//     counts, Stockout + High Risk only) instead of an average-MOS figure.
 //
 // Requires: script.js (fmtQty, escHtml, wireTableExport, downloadCSV,
 //           downloadExcel, PAGE_RENDERERS, renderPage, currentPage,
@@ -52,7 +53,7 @@ const STOCKOUT_OUT_THRESHOLD     = 1;  // months — below this: STOCKOUT
 const STOCKOUT_HIGH_THRESHOLD    = 3;  // months — below this (and >= out): HIGH RISK; also the "at risk" / expiry cross-check ceiling
 const STOCKOUT_MEDIUM_THRESHOLD  = 6;  // months — below this (and >= high): MEDIUM RISK
 const STOCKOUT_OPTIMAL_THRESHOLD = 12; // months — below this (and >= medium): OPTIMAL; at/above this: OVERSTOCK
-const STOCKOUT_ALLOWED_TYPES = new Set(["ZME", "ZMS", "ZLC"]); // page scope is fixed to these three
+const STOCKOUT_ALLOWED_TYPES = new Set(["ZME", "ZMS", "ZLC", "ZMD"]); // page scope: all four valuation types read from the inventory file
 
 // Classify a finite National MOS value into one of the five status bands.
 function stkoClassifyStatus(mos) {
@@ -190,7 +191,7 @@ function buildNationalExpiryDetailMap(thresholdMonths) {
 //         "medium"    → 3 ≤ MOS < 6    → MEDIUM RISK
 //         "optimal"   → 6 ≤ MOS < 12   → OPTIMAL
 //         "overstock" → MOS ≥ 12       → OVERSTOCK
-// Only ZME/ZMS/ZLC types are ever included, and only materials where National
+// Only ZME/ZMS/ZLC/ZMD types are ever included, and only materials where National
 // MOS is a real, finite number (null/Infinity dropped).
 function buildStockoutSnapshot(typeFilter, searchQ, clsFilter) {
   if (typeof mosMerged === "undefined" || !mosMerged.length) return [];
@@ -206,13 +207,14 @@ function buildStockoutSnapshot(typeFilter, searchQ, clsFilter) {
     ? getMosFilteredRows("", searchQ || "", clsFilter || "")
     : mosMerged.filter(r => (!clsFilter || r.programClass === clsFilter));
 
-  // Hard scope: only ZME/ZMS/ZLC, regardless of the dropdown value —
-  // "All Types" on this page still means "all of ZME/ZMS/ZLC," never ZMD
-  // or anything else. Checked against the material's actual valuation type
-  // (buildCodeMaterialTypeMap, mos.js), not mosMerged's own Q/RDF `type`
-  // field — those are two unrelated axes and this used to compare the
-  // wrong one, so this scope (and the dropdown itself) silently matched
-  // nothing.
+  // Hard scope: ZME/ZMS/ZLC/ZMD, regardless of the dropdown value — "All
+  // Types" on this page means all four valuation types (the AMC file no
+  // longer carries its own type info, so this is read entirely from the
+  // inventory file's Inventory Valuation Type). Checked against the
+  // material's actual valuation type (buildCodeMaterialTypeMap, mos.js),
+  // not mosMerged's own Q/RDF `type` field — those are two unrelated axes
+  // and this used to compare the wrong one, so this scope (and the
+  // dropdown itself) silently matched nothing.
   const materialTypeMap = buildCodeMaterialTypeMap();
   rows = rows.filter(r => STOCKOUT_ALLOWED_TYPES.has(materialTypeMap.get(r.code)));
   if (typeFilter) rows = rows.filter(r => materialTypeMap.get(r.code) === typeFilter);
@@ -305,7 +307,7 @@ function buildStockoutSnapshot(typeFilter, searchQ, clsFilter) {
 // Clicking a KPI card on this page filters the table below to just the
 // materials behind that number. Clicking the same (active) card again clears
 // the filter. filterKey values: "out" | "high" | "medium" | "optimal" |
-// "overstock" | "ZME" | "ZMS" | "ZLC" | "exprAdj" | "all" (the "Materials
+// "overstock" | "ZME" | "ZMS" | "ZLC" | "ZMD" | "exprAdj" | "all" (the "Materials
 // Screened" card, which always resets).
 let stkoCardFilter = null;
 
@@ -606,11 +608,12 @@ function renderStockoutRisk() {
   const overstockRows  = snapshot.filter(r => r.status === "overstock"); // MOS ≥ 12
   const exprAdjRows    = snapshot.filter(r => r.exprAdjustedRisk);       // looks safe today, but not once near-expiry stock excluded
 
-  // ── Per-type breakdown (ZME / ZMS / ZLC), split by status ──────────────────
+  // ── Per-type breakdown (ZME / ZMS / ZLC / ZMD), split by status ────────────
   const countByType = {
     ZME: { out: 0, high: 0 },
     ZMS: { out: 0, high: 0 },
     ZLC: { out: 0, high: 0 },
+    ZMD: { out: 0, high: 0 },
   };
   atRiskRows.forEach(r => {
     const t = countByType[r.type];
@@ -622,13 +625,14 @@ function renderStockoutRisk() {
     ZME: countByType.ZME.out + countByType.ZME.high,
     ZMS: countByType.ZMS.out + countByType.ZMS.high,
     ZLC: countByType.ZLC.out + countByType.ZLC.high,
+    ZMD: countByType.ZMD.out + countByType.ZMD.high,
   };
-  const TYPE_LABELS = { ZME: "Medicines", ZMS: "Medical Supplies", ZLC: "ZLC" };
+  const TYPE_LABELS = { ZME: "Medicines", ZMS: "Medical Supplies", ZLC: "ZLC", ZMD: "ZMD" };
   const typeSub = (t) => `${TYPE_LABELS[t]} · ${countByType[t].out.toLocaleString()} stockout · ${countByType[t].high.toLocaleString()} high risk`;
 
   // ── KPIs ──────────────────────────────────────────────────────────────────
   stkoKpiRow([
-    stkoKpiCard("Materials Screened", screenedCount.toLocaleString(), "ZME · ZMS · ZLC · National MOS only", "blue", "all"),
+    stkoKpiCard("Materials Screened", screenedCount.toLocaleString(), "ZME · ZMS · ZLC · ZMD · National MOS only", "blue", "all"),
     stkoKpiCard(`Stockout (<${STOCKOUT_OUT_THRESHOLD}mo)`, outRows.length.toLocaleString(), "Needs emergency action now", "red", "out"),
     stkoKpiCard(`High Risk (${STOCKOUT_OUT_THRESHOLD}–${STOCKOUT_HIGH_THRESHOLD}mo)`, highRows.length.toLocaleString(), "Window to act before it runs out", "red", "high"),
     stkoKpiCard(`Medium Risk (${STOCKOUT_HIGH_THRESHOLD}–${STOCKOUT_MEDIUM_THRESHOLD}mo)`, mediumRows.length.toLocaleString(), "Worth monitoring", "amber", "medium"),
@@ -637,6 +641,7 @@ function renderStockoutRisk() {
     stkoKpiCard("ZME Flagged", totalByType.ZME.toLocaleString(), typeSub("ZME"), "amber", "ZME"),
     stkoKpiCard("ZMS Flagged", totalByType.ZMS.toLocaleString(), typeSub("ZMS"), "purple", "ZMS"),
     stkoKpiCard("ZLC Flagged", totalByType.ZLC.toLocaleString(), typeSub("ZLC"), "blue", "ZLC"),
+    stkoKpiCard("ZMD Flagged", totalByType.ZMD.toLocaleString(), typeSub("ZMD"), "green", "ZMD"),
     stkoKpiCard("⚠ Expiry-Adjusted Risk", exprAdjRows.length.toLocaleString(), `Would drop a band once stock expiring within ${STOCKOUT_OPTIMAL_THRESHOLD}mo is excluded`, "amber", "exprAdj"),
   ]);
 
@@ -667,7 +672,7 @@ function renderStockoutRisk() {
   } else if (stkoCardFilter === "overstock") {
     cardFilteredRows = overstockRows;
     cardFilterLabel = `Overstock (≥${STOCKOUT_OPTIMAL_THRESHOLD}mo)`;
-  } else if (stkoCardFilter === "ZME" || stkoCardFilter === "ZMS" || stkoCardFilter === "ZLC") {
+  } else if (stkoCardFilter === "ZME" || stkoCardFilter === "ZMS" || stkoCardFilter === "ZLC" || stkoCardFilter === "ZMD") {
     cardFilteredRows = atRiskRows.filter(r => r.type === stkoCardFilter);
     cardFilterLabel = `${stkoCardFilter} Flagged (stockout + high risk)`;
   } else if (stkoCardFilter === "exprAdj") {
@@ -764,7 +769,7 @@ function renderStockoutRisk() {
 let stkoSuggestActiveIdx = -1;
 let stkoSuggestItems = [];
 
-// Suggestion source respects the page's fixed type scope (ZME/ZMS/ZLC only),
+// Suggestion source respects the page's fixed type scope (ZME/ZMS/ZLC/ZMD),
 // same as the table itself — no point suggesting a code you can't see here.
 function stkoSuggestionSource() {
   if (typeof mosMerged === "undefined" || !mosMerged.length) return [];
