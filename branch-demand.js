@@ -1113,11 +1113,11 @@ function brdRenderTables(lines, canEdit) {
     { key: "mosNow", label: "MOS Now", fmt: v => `<span style="${mosCellStyle(v)}">${fmtMosVal(v)}</span>`, raw: true },
     { key: "priorityTier", label: "Priority", raw: true, fmt: (v, r) => brdPriorityBadge(v) },
     { key: "sohHo", label: "SOH HO01", raw: true, fmt: (v, r) => r.qcOnly
-        ? `<span class="brd-note-qc" title="No unrestricted (usable) HO01 stock. Total quantity in Quality Inspection: ${fmtQty(r.qcHo)}">0 <span class="brd-status-pill brd-status-amber">🧪 ${fmtQty(r.qcHo)} in Quality Inspection</span></span>`
+        ? `<span class="brd-note-qc" title="No unrestricted (usable) HO01 stock — ${fmtQty(r.qcHo)} in Quality Inspection (see Notes column)">0</span>`
         : fmtQty(v) },
     { key: "netSohHo", label: "Net SOH HO01 (after Open Outbound)", raw: true,
       fmt: (v, r) => r.outboundTotal > 0
-        ? `${fmtQty(v)} <span class="brd-note-scale" title="${fmtQty(r.sohHo)} raw SOH − ${fmtQty(r.outboundTotal)} already committed to open (not-yet-issued) outbound deliveries, across all branches — this is the number allocation actually uses">(−${fmtQty(r.outboundTotal)})</span>`
+        ? `<span class="brd-note-scale" title="${fmtQty(r.sohHo)} raw SOH − ${fmtQty(r.outboundTotal)} already committed to open (not-yet-issued) outbound deliveries, across all branches — this is the number allocation actually uses">${fmtQty(v)}</span>`
         : fmtQty(v) },
     { key: "need", label: `Need (to ${TARGET_MOS})`, fmt: v => fmtQty(v) },
     { key: "alloc", label: "Allocated", raw: true,
