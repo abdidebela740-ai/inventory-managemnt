@@ -625,8 +625,16 @@
     });
 
     // HO01 stock that never shows up (under its canonical code) in the request at all
+    //
+    // FIX-SOH-STREAM-SPLIT: buildMosSohMap() (mos.js) now ALSO stores
+    // stream-scoped entries under "code\u241Ftype" keys alongside each
+    // plain-code entry, for MOS's per-stream SOH split. Those composite keys
+    // aren't real material codes — skip them here or they'd surface as bogus
+    // "codes" (with the separator character baked in) that never match
+    // requestedCanonical and get misreported as unrequested HO01 stock.
     const ho01NotRequestedAll = [];
     sohMap.forEach((plantMap, code) => {
+      if (code.includes("\u241F")) return;
       const qty = plantMap[hub] || 0;
       if (qty > 0 && !requestedCanonical.has(code)) {
         ho01NotRequestedAll.push({ code, desc: descMap.get(code) || "", qty, person: personMap.get(code) || "", materialType: matTypeMap.get(code) || "", materialGroup: matGroupMap.get(code) || "" });
