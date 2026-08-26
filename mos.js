@@ -201,7 +201,6 @@ function finishMosAmcLoad(file, detectedPlants, statusEl, btnEl) {
   document.getElementById("mos-content").style.display = "block";
 
   if (currentPage === "mos-plant") renderMosPlant();
-  if (currentPage === "dashboard" && typeof renderDashboardProgramClassPanel === "function") renderDashboardProgramClassPanel();
 }
 
 // ── DESCRIPTION FALLBACK (from the main inventory file) ───────────────────────
@@ -733,53 +732,6 @@ async function renderMosPlant() {
 function mosKpiRow(cards) {
   const el = document.getElementById("mos-kpis");
   if (el) el.innerHTML = cards.join("");
-}
-
-// ── DASHBOARD PANEL: Program Classification (CDSS / Reportable) ───────────────
-// Called from renderDashboard() in script.js. Independent of the Dashboard's
-// plant/material-group filters — this reflects the AMC upload as a whole,
-// same scope as the MOS/National Stock & MOS pages.
-function renderDashboardProgramClassPanel() {
-  const emptyEl = document.getElementById("dash-program-class-empty");
-  const kpiEl   = document.getElementById("dash-program-class-kpis");
-  const chartEl = document.getElementById("chart-program-class");
-  if (!kpiEl || !chartEl) return; // page markup not present (shouldn't happen, but stay quiet)
-
-  if (typeof mosMerged === "undefined" || !mosMerged.length) {
-    if (emptyEl) emptyEl.style.display = "block";
-    kpiEl.innerHTML = "";
-    chartEl.innerHTML = "";
-    return;
-  }
-  if (emptyEl) emptyEl.style.display = "none";
-
-  const counts = getProgramClassCounts();
-  const total  = mosMerged.length;
-
-  kpiEl.innerHTML = [
-    mosKpiCard("RDF · CDSS", counts[PROGRAM_CLASS.RDF_CDSS].toLocaleString(), `of ${total.toLocaleString()} materials`, "green"),
-    mosKpiCard("RDF · Non-CDSS", counts[PROGRAM_CLASS.RDF_NON_CDSS].toLocaleString(), `of ${total.toLocaleString()} materials`, "purple"),
-    mosKpiCard("Program (Q) · Reportable", counts[PROGRAM_CLASS.PROG_REPORT].toLocaleString(), `of ${total.toLocaleString()} materials`, "blue"),
-    mosKpiCard("Program (Q) · Non-Reportable", counts[PROGRAM_CLASS.PROG_NONREPT].toLocaleString(), `of ${total.toLocaleString()} materials`, "amber"),
-  ].join("") + (counts.unclassified ? mosKpiCard("Unclassified", counts.unclassified.toLocaleString(), "Type never resolved (skipped in prompt)", "red") : "");
-
-  const labels = ["RDF · CDSS", "RDF · Non-CDSS", "Program · Reportable", "Program · Non-Reportable"];
-  const values = [counts[PROGRAM_CLASS.RDF_CDSS], counts[PROGRAM_CLASS.RDF_NON_CDSS], counts[PROGRAM_CLASS.PROG_REPORT], counts[PROGRAM_CLASS.PROG_NONREPT]];
-  const colors = ["#3fb950", "#8763cc", "#3a8fd4", "#d29922"];
-  if (counts.unclassified) { labels.push("Unclassified"); values.push(counts.unclassified); colors.push("#f85149"); }
-
-  if (typeof Plotly !== "undefined") {
-    Plotly.newPlot(chartEl, [{
-      type: "bar", x: labels, y: values, marker: { color: colors }, text: values.map(v => v.toLocaleString()),
-      textposition: "outside", hovertemplate: "<b>%{x}</b><br>%{y} materials<extra></extra>",
-    }], {
-      ...(typeof PLOTLY_LAYOUT !== "undefined" ? PLOTLY_LAYOUT : {}),
-      height: 300, margin: { l: 50, r: 20, t: 20, b: 70 },
-      xaxis: { tickfont: { size: 10 } },
-      yaxis: { title: "Materials" },
-      paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
-    }, typeof PLOTLY_CONFIG !== "undefined" ? PLOTLY_CONFIG : {});
-  }
 }
 
 // ── WIRE INTO PAGE_RENDERERS AND EVENT LISTENERS ──────────────────────────────
