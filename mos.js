@@ -327,6 +327,25 @@ function buildCodeMaterialTypeMap() {
   return out;
 }
 
+// ── CANONICAL CODE → PROGRAM CLASSIFICATION (RDF·CDSS / RDF·Non-CDSS / ──────
+//    Program(Q)·Reportable / Program(Q)·Non-Reportable) ─────────────────────
+// Exposes mosMerged's per-item `programClass` keyed by canonical material
+// code, so any page's generic filter bar (Dashboard, Transit, Expiry
+// Watchlist, QC, Blocked, Restricted, Stock Concentration, etc. — see
+// applyPageFilter() in script.js) can offer a "Classification Type" filter
+// without needing its own copy of the AMC merge/resolution logic. Returns an
+// empty map (never throws) when the AMC file hasn't been uploaded yet, so
+// callers on pages that don't require AMC data degrade gracefully — the
+// Classification Type control simply has no options / matches nothing.
+function buildCodeProgramClassMap() {
+  const out = new Map();
+  if (typeof mosMerged === "undefined" || !mosMerged.length) return out;
+  mosMerged.forEach(m => {
+    if (m.code && m.programClass) out.set(String(m.code).trim().toUpperCase(), m.programClass);
+  });
+  return out;
+}
+
 // ── FIND A mosMerged ROW BY CODE, TYPE-AWARE ──────────────────────────────────
 // Since the same code can now have separate Q and RDF rows, any caller that
 // needs "the one row for this material" must say which type it means when it
