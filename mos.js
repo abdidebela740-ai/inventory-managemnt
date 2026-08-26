@@ -88,8 +88,14 @@ function resolveProgramTypeAndClass(code, rawProgramType, sstMap) {
 //      falls into (see the defaulting pass in finishMosAmcLoad below).
 function buildSpecialStockTypeMap() {
   const map = new Map();
-  const base = (typeof getReconciledBase === "function")
-    ? getReconciledBase()
+  // FIX-CLS-PERSON-LEAK: was getReconciledBase(), which narrows to whichever
+  // person is currently selected in the global filter. Special Stock Type
+  // is a stable per-material fact that feeds classification (see
+  // getMappingReconciledBase() in script.js for the full story) — it must
+  // never depend on the person filter's state at whatever moment this
+  // happened to run.
+  const base = (typeof getMappingReconciledBase === "function")
+    ? getMappingReconciledBase()
     : (typeof rawDf !== "undefined" ? rawDf : []);
   base.forEach(row => {
     const code = String(row._mappedMaterial || row["Material"] || "").trim().toUpperCase();
@@ -249,8 +255,10 @@ function finishMosAmcLoad(file, detectedPlants, statusEl, btnEl) {
 // whole inventory file per material.
 function buildInventoryDescMap() {
   const map = new Map();
-  const base = (typeof getReconciledBase === "function")
-    ? getReconciledBase()
+  // FIX-CLS-PERSON-LEAK: see buildSpecialStockTypeMap() above — this feeds
+  // mosMerged too and must stay person-filter-independent.
+  const base = (typeof getMappingReconciledBase === "function")
+    ? getMappingReconciledBase()
     : (typeof rawDf !== "undefined" ? rawDf : []);
   base.forEach(row => {
     const code = String(row._mappedMaterial || row["Material"] || "").trim();
@@ -387,7 +395,11 @@ function buildMosMerged() {
 // so any page can use it.
 function buildCodeMaterialTypeMap() {
   const out = new Map();
-  const base = (typeof getReconciledBase === "function") ? getReconciledBase() : (typeof rawDf !== "undefined" ? rawDf : []);
+  // FIX-CLS-PERSON-LEAK: was getReconciledBase() — see
+  // buildSpecialStockTypeMap() above. Valuation type (ZME/ZMS/etc.) is a
+  // material-level fact too, so it must not vanish for materials outside
+  // whichever person is currently selected.
+  const base = (typeof getMappingReconciledBase === "function") ? getMappingReconciledBase() : (typeof rawDf !== "undefined" ? rawDf : []);
   base.forEach(row => {
     const code = String(row._mappedMaterial || row["Material"] || "").trim();
     if (!code || out.has(code)) return;
