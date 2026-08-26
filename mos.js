@@ -121,14 +121,40 @@ function loadMosAmcFile(file) {
 
       if (!rows.length) throw new Error("AMC file is empty.");
 
-      // "Description" and the type column are both optional in the source
-      // file. Some AMC exports use "Material Type Code"; others (e.g. the
-      // Q/RDF-style export) use "PROGRAM TYPE" instead and drop Description
-      // entirely. Both are recognized here so neither gets mistaken for a
-      // plant column.
-      const META = ["Material Code", "Description", "Material Type Code", "PROGRAM TYPE", "PERSON"];
+      // FIX-AMC-HEADER-ALIASES: match META columns by normalized header text
+      // (trim + collapse internal whitespace + uppercase) rather than exact
+      // string equality. Real-world AMC exports vary the classification
+      // column's name and whitespace — seen so far: "PROGRAM TYPE",
+      // "Material Type Code", and " CLASSIFICATION TYPE" (leading space).
+      // Before this fix, any header not hitting an exact string match (1)
+      // was NOT excluded from detectedPlants, so it got misparsed as a bogus
+      // plant column, and (2) was never read into rawProgramType, so every
+      // material silently fell back to the "Non-CDSS"/"Non-Reportable"
+      // bucket — e.g. a whole file classified as RDF-CDSS / Program-
+      // Reportable would show zero materials in those filters everywhere
+      // downstream (Dashboard, MOS, Branch Demand, etc.) even though the
+      // data was present in the file, just under an unrecognized header.
+      const normHeader = k => String(k || "").trim().toUpperCase().replace(/\s+/g, " ");
+      const META_ALIASES = {
+        code:  ["MATERIAL CODE"],
+        desc:  ["DESCRIPTION"],
+        type:  ["MATERIAL TYPE CODE"],
+        // "PROGRAM TYPE" and "CLASSIFICATION TYPE" are the same concept
+        // under different export names — both resolve to rawProgramType.
+        cls:   ["PROGRAM TYPE", "CLASSIFICATION TYPE"],
+        person:["PERSON"],
+      };
       const firstRow = rows[0];
-      const detectedPlants = Object.keys(firstRow).filter(k => !META.includes(k));
+      const actualKeys = Object.keys(firstRow);
+      // Map each recognized alias category to whichever actual column name
+      // (verbatim, original casing/whitespace) is present in this file, if any.
+      const resolvedMeta = {};
+      Object.entries(META_ALIASES).forEach(([slot, aliases]) => {
+        const hit = actualKeys.find(k => aliases.includes(normHeader(k)));
+        if (hit) resolvedMeta[slot] = hit;
+      });
+      const metaKeysPresent = Object.values(resolvedMeta);
+      const detectedPlants = actualKeys.filter(k => !metaKeysPresent.includes(k));
       if (!detectedPlants.length) throw new Error("No plant columns found in AMC file.");
 
       // Normalize plant codes the SAME way buildMosSohMap() normalizes the
@@ -149,19 +175,26 @@ function loadMosAmcFile(file) {
         // (common in real SAP exports), those rows silently failed to match
         // and the material looked "Not found" on Branch Demand even though
         // it was genuinely present in the AMC upload.
-        const code = String(r["Material Code"] || "").trim().toUpperCase();
+        const code = String(r[resolvedMeta.code || "Material Code"] || "").trim().toUpperCase();
 
         // Raw classification text only — NOT used to determine Q/RDF `type`
         // anymore (see resolveProgramTypeAndClass above). Kept verbatim here
         // and matched against "RDF-CDSS" / "Program-Reportable" later, once
-        // per merged material, in buildMosMerged().
-        const rawProgramType = String(r["PROGRAM TYPE"] || r["Material Type Code"] || "").trim();
+        // per merged material, in buildMosMerged(). Sourced from whichever
+        // actual column resolvedMeta.cls found (PROGRAM TYPE / CLASSIFICATION
+        // TYPE / etc. — see FIX-AMC-HEADER-ALIASES above), falling back to
+        // the type-code column for older exports that use that name instead.
+        const rawProgramType = String(
+          (resolvedMeta.cls  && r[resolvedMeta.cls])  ||
+          (resolvedMeta.type && r[resolvedMeta.type]) ||
+          ""
+        ).trim();
 
         return {
           code,
-          desc:   String(r["Description"] || "").trim(),
+          desc:   String(r[resolvedMeta.desc || "Description"] || "").trim(),
           rawProgramType,
-          person: String(r["PERSON"] || "").trim(),
+          person: String(r[resolvedMeta.person || "PERSON"] || "").trim(),
           amcs: Object.fromEntries(
             detectedPlants.map(p => [String(p).trim().toUpperCase(), (r[p] == null || r[p] === "" || typeof r[p] === "string") ? null : Number(r[p])])
           ),
