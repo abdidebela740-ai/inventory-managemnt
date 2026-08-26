@@ -292,7 +292,38 @@ function buildMosMerged() {
       // file's code exactly as typed. A casing mismatch here (e.g. lowercase
       // in AMC.xlsx) makes this lookup miss even when a mapping genuinely
       // exists, silently leaving the material unmapped in mosMerged.
-      const entry = mappingTable.get(String(row.code || "").trim().toUpperCase());
+      //
+      // FIX-MOS-MAP-NESTED: mappingTable.get(code) returns a Map keyed by
+      // stock type ("Q"/"RDF" → {targetCode, targetDesc, factor}) — see
+      // "Build the mapping table" in script.js's loadMappingFile — NOT a
+      // flat {targetCode,...} object. Reading entry.targetCode/.targetDesc
+      // directly off that Map (as this used to) always returned undefined,
+      // silently collapsing EVERY AMC material with a mapping-file entry
+      // into a single `canonical: undefined` bucket that
+      // buildCodeProgramClassMap() then drops entirely (its `m.code &&`
+      // guard is false for undefined) — so any mapped material's
+      // classification (RDF-CDSS / Program-Reportable / etc.) vanished from
+      // every AMC-derived view (Dashboard classification filter, MOS,
+      // National table, Expiry Risk...), same as applyMaterialMapping()
+      // would have gotten wrong had it not already unwrapped the stock-type
+      // Map correctly on the inventory side. Mirrors that same stock-type
+      // selection here: prefer the entry matching this code's own Q/RDF
+      // type (via sstMap, keyed by each candidate's own target code since
+      // sstMap is keyed by canonical/target codes); fall back to the single
+      // entry when the code only has one stock-type rule; default to the
+      // RDF entry when ambiguous (matches resolveProgramTypeAndClass's own
+      // blank/unknown-defaults-to-RDF convention).
+      const stypeMap = mappingTable.get(String(row.code || "").trim().toUpperCase());
+      let entry;
+      if (stypeMap && stypeMap.size === 1) {
+        entry = [...stypeMap.values()][0];
+      } else if (stypeMap && stypeMap.size > 1) {
+        const qEntry   = stypeMap.get("Q");
+        const rdfEntry = stypeMap.get("RDF");
+        entry = (qEntry && sstMap.get(String(qEntry.targetCode || "").trim().toUpperCase()) === "Q")
+          ? qEntry
+          : (rdfEntry || qEntry);
+      }
       if (entry) {
         canonical = entry.targetCode;
         canonDesc = entry.targetDesc || row.desc;
