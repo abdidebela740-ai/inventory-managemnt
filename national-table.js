@@ -121,7 +121,7 @@ function buildNatlTableRows(typeFilter, searchQ, clsFilter) {
     }
 
     return { sn: i + 1, code: r.code, desc: r.desc, type: r.type, programClass: r.programClass,
-             isMerged: r.isMerged, origCodes: r.origCodes,
+             isMerged: r.isMerged, origCodes: r.origCodes, personClsConflict: r.personClsConflict,
              soh, amc, mos, shelf, excludedQty, adjSoh, adjMos };
   });
 }
@@ -200,7 +200,17 @@ function renderNatlTable() {
     { key: "desc", label: "Material Description", cellClass: "col-mat-desc-wrap" },
     { key: "type", label: "Type" },
     { key: "programClass", label: "Classification",
-      fmt: v => (typeof programClassBadge === "function") ? programClassBadge(v) : (v || "—"), raw: true },
+      fmt: (v, r) => {
+        const badge = (typeof programClassBadge === "function") ? programClassBadge(v) : escHtml(v || "—");
+        // FIX-PERSON-CLS-COUPLING: flag rows where this canonical code's
+        // Person/RDF-CDSS classification came from disagreeing AMC entries
+        // (see buildMosMerged() in mos.js) — the classification shown may
+        // not be the one that actually belongs to the assigned Person.
+        return r && r.personClsConflict
+          ? `${badge} <span title="Person and RDF-CDSS classification for this merged code come from disagreeing AMC entries — check AMC.xlsx" style="cursor:help">⚠️</span>`
+          : badge;
+      },
+      raw: true },
     { key: "soh", label: "SOH", fmt: v => fmtQty(v), cellClass: "col-qty" },
     { key: "excludedQty", label: "<6mo SOH Excluded",
       fmt: v => v > 0 ? `<b style="color:#b45309">${fmtQty(v)}</b>` : fmtQty(0), raw: true, cellClass: "col-qty" },
