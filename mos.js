@@ -34,6 +34,68 @@ const HUB_PLANT = "HO01"; // the distribution hub — never has its own consumpt
 // being silently kept as whatever raw string the file had.
 const VALID_MOS_TYPES = ["Q", "RDF"];
 
+// ── PROGRAM CLASSIFICATION (CDSS / Reportable) ─────────────────────────────────
+// A second, independent dimension on top of Q/RDF, introduced by the
+// "PROGRAM TYPE" column of the newer-style AMC export. Every RDF item is
+// either CDSS or Non-CDSS; every Q ("Health Program") item is either
+// Reportable or Non-Reportable. This does NOT replace the Q/RDF `type` field
+// or its manual assignment prompt — VALID_MOS_TYPES / promptForMosTypeAssignment
+// below are unchanged and still run for anything that isn't recognizably Q or
+// RDF. Classification is an extra label layered on top once `type` is known.
+const PROGRAM_CLASS = {
+  RDF_CDSS:     "RDF-CDSS",
+  RDF_NON_CDSS: "RDF-Non-CDSS",
+  PROG_REPORT:  "PROGRAM-Reportable",
+  PROG_NONREPT: "PROGRAM-Non-Reportable",
+};
+const PROGRAM_CLASS_LABELS = {
+  [PROGRAM_CLASS.RDF_CDSS]:     "RDF · CDSS",
+  [PROGRAM_CLASS.RDF_NON_CDSS]: "RDF · Non-CDSS",
+  [PROGRAM_CLASS.PROG_REPORT]:  "Program · Reportable",
+  [PROGRAM_CLASS.PROG_NONREPT]: "Program · Non-Reportable",
+};
+
+// Parses a raw "PROGRAM TYPE" cell from the AMC file. The newer export
+// encodes BOTH dimensions in one string — e.g. "RDF-CDSS" or
+// "PROGRAM-Reportable" — so a match here gives us the Q/RDF `type` AND the
+// new classification in one shot. Tolerant of spacing/hyphen variations
+// ("RDF CDSS", "RDF_NON_CDSS", "program non reportable", etc.).
+// Returns { type: "Q"|"RDF", cls: PROGRAM_CLASS.* } or null if the raw value
+// doesn't match this compound format at all (e.g. it's blank, or a plain
+// "Q"/"RDF" with no CDSS/Reportable suffix).
+function parseProgramType(raw) {
+  const norm = String(raw || "").trim().toUpperCase().replace(/[\s_]+/g, "-").replace(/-+/g, "-");
+  if (!norm) return null;
+  if (/^RDF-NON-CDSS$/.test(norm))      return { type: "RDF", cls: PROGRAM_CLASS.RDF_NON_CDSS };
+  if (/^RDF-CDSS$/.test(norm))          return { type: "RDF", cls: PROGRAM_CLASS.RDF_CDSS };
+  if (/^PROGRAM-NON-REPORTABLE$/.test(norm)) return { type: "Q", cls: PROGRAM_CLASS.PROG_NONREPT };
+  if (/^PROGRAM-REPORTABLE$/.test(norm))     return { type: "Q", cls: PROGRAM_CLASS.PROG_REPORT };
+  return null;
+}
+
+// code (upper) → "Q" | "RDF", derived from the main inventory file's own
+// Special Stock Type column (Q = Health Program; blank/anything else = RDF).
+// Used two ways for the new AMC format:
+//   1. as a fallback source for the Q/RDF `type` itself when the AMC file
+//      doesn't say (this new export has no "Material Type Code" column), so
+//      the manual assignment prompt only fires for materials this can't
+//      resolve either — not for every row in the file.
+//   2. to decide which "Non-" bucket a resolved-but-unclassified RDF/Q item
+//      falls into (see the defaulting pass in finishMosAmcLoad below).
+function buildSpecialStockTypeMap() {
+  const map = new Map();
+  const base = (typeof getReconciledBase === "function")
+    ? getReconciledBase()
+    : (typeof rawDf !== "undefined" ? rawDf : []);
+  base.forEach(row => {
+    const code = String(row._mappedMaterial || row["Material"] || "").trim().toUpperCase();
+    if (!code || map.has(code)) return;
+    const sst = String(row["Special Stock Type"] || "").trim().toUpperCase();
+    map.set(code, sst === "Q" ? "Q" : "RDF");
+  });
+  return map;
+}
+
 // ── MOS STATE ────────────────────────────────────────────────────────────────
 let mosAmcRaw    = [];          // parsed rows from AMC.xlsx: { code, desc, type, person, amcs:{plant:val} }
 let mosPlants    = [];          // ordered plant code list detected from AMC.xlsx
@@ -72,7 +134,13 @@ function loadMosAmcFile(file) {
       // match the SOH map's keys, and that plant's stock is dropped to 0
       // everywhere it's looked up — including in National SOH/MOS.
       mosPlants  = detectedPlants.map(p => String(p).trim().toUpperCase());
-      mosAmcRaw  = rows.map(r => ({
+
+      // Needed to (a) fall back to for the Q/RDF `type` itself when the file
+      // doesn't carry a plain Material Type Code, and (b) decide the default
+      // "Non-" bucket for anything resolved but not explicitly classified.
+      const sstMap = buildSpecialStockTypeMap();
+
+      mosAmcRaw  = rows.map(r => {
         // FIX-AMC-CODE-CASE: uppercase here too (not just trim) — every other
         // material-code comparison in the app normalizes with
         // .trim().toUpperCase() (see FIX-MOS-MAP-CASE below and
@@ -82,14 +150,45 @@ function loadMosAmcFile(file) {
         // (common in real SAP exports), those rows silently failed to match
         // and the material looked "Not found" on Branch Demand even though
         // it was genuinely present in the AMC upload.
-        code:   String(r["Material Code"] || "").trim().toUpperCase(),
-        desc:   String(r["Description"]   || "").trim(),
-        type:   String(r["Material Type Code"] || r["PROGRAM TYPE"] || "").trim().toUpperCase(),
-        person: String(r["PERSON"] || "").trim(),
-        amcs: Object.fromEntries(
-          detectedPlants.map(p => [String(p).trim().toUpperCase(), (r[p] == null || r[p] === "" || typeof r[p] === "string") ? null : Number(r[p])])
-        ),
-      }));
+        const code = String(r["Material Code"] || "").trim().toUpperCase();
+
+        // CDSS/Reportable-aware type resolution:
+        //   1. If "PROGRAM TYPE" is the new compound format ("RDF-CDSS",
+        //      "PROGRAM-Non-Reportable", etc.), it gives us both the Q/RDF
+        //      type AND the classification in one read.
+        //   2. Otherwise fall back to the old sources: "Material Type Code",
+        //      or a plain "Q"/"RDF" value in "PROGRAM TYPE" — classification
+        //      stays unresolved for now (filled in after the manual-assign
+        //      prompt, see finishMosAmcLoad).
+        //   3. If type is STILL unresolved, try the main inventory file's
+        //      Special Stock Type before giving up and routing to the
+        //      manual-assignment prompt.
+        const rawProgramType = r["PROGRAM TYPE"] || "";
+        const parsed = parseProgramType(rawProgramType);
+
+        let type = "";
+        let programClass = null;
+
+        if (parsed) {
+          type = parsed.type;
+          programClass = parsed.cls;
+        } else {
+          const plain = String(r["Material Type Code"] || rawProgramType || "").trim().toUpperCase();
+          type = VALID_MOS_TYPES.includes(plain) ? plain : "";
+          if (!type && sstMap.has(code)) type = sstMap.get(code);
+        }
+
+        return {
+          code,
+          desc:   String(r["Description"] || "").trim(),
+          type,
+          programClass,       // filled in for every row once type is known — see finishMosAmcLoad
+          person: String(r["PERSON"] || "").trim(),
+          amcs: Object.fromEntries(
+            detectedPlants.map(p => [String(p).trim().toUpperCase(), (r[p] == null || r[p] === "" || typeof r[p] === "string") ? null : Number(r[p])])
+          ),
+        };
+      });
 
       // Expose sorted unique person list for the global person filter dropdown
       mosPersons = [...new Set(mosAmcRaw.map(r => r.person).filter(Boolean))].sort();
@@ -183,7 +282,22 @@ function promptForMosTypeAssignment(items, onDone) {
   render();
 }
 
+// Defaulting pass for program classification — runs after type resolution
+// (including any manual assignment via the popup) is fully settled. Any row
+// whose type is now Q or RDF but has no explicit CDSS/Reportable label from
+// the file falls into the "Non-" bucket for its family: Q → Program-Non-
+// Reportable, RDF → RDF-Non-CDSS. A row whose type is STILL blank (user hit
+// "Skip" in the prompt) is left unclassified rather than guessed.
+function applyProgramClassDefaults() {
+  mosAmcRaw.forEach(r => {
+    if (r.programClass) return;
+    if (r.type === "Q")   r.programClass = PROGRAM_CLASS.PROG_NONREPT;
+    else if (r.type === "RDF") r.programClass = PROGRAM_CLASS.RDF_NON_CDSS;
+  });
+}
+
 function finishMosAmcLoad(file, detectedPlants, statusEl, btnEl) {
+  applyProgramClassDefaults();
   mosMerged = buildMosMerged();
 
   const count = mosMerged.length;
@@ -198,6 +312,7 @@ function finishMosAmcLoad(file, detectedPlants, statusEl, btnEl) {
   document.getElementById("mos-content").style.display = "block";
 
   if (currentPage === "mos-plant") renderMosPlant();
+  if (currentPage === "dashboard" && typeof renderDashboardProgramClassPanel === "function") renderDashboardProgramClassPanel();
 }
 
 // ── DESCRIPTION FALLBACK (from the main inventory file) ───────────────────────
@@ -269,6 +384,7 @@ function buildMosMerged() {
         origCodes: new Set([row.code]),
         desc: canonDesc,
         type: row.type,
+        programClass: row.programClass || null,
         person: row.person || "",
         amcs: Object.fromEntries(mosPlants.map(p => [p, null])),
         isMerged: false,
@@ -278,6 +394,7 @@ function buildMosMerged() {
     m.origCodes.add(row.code);
     if (m.origCodes.size > 1) m.isMerged = true;
     if (!m.desc && canonDesc) m.desc = canonDesc; // fill in if an earlier dup left it blank
+    if (!m.programClass && row.programClass) m.programClass = row.programClass; // fill in if an earlier dup left it blank
 
     for (const p of mosPlants) {
       const v = row.amcs[p];
@@ -456,7 +573,7 @@ function mosCellStyle(mos) {
   return isMosCritical(mos) ? "color:var(--red);font-weight:700" : "color:var(--text)";
 }
 
-function getMosFilteredRows(typeFilter, searchQ) {
+function getMosFilteredRows(typeFilter, searchQ, clsFilter) {
   if (!mosMerged.length) return [];
   let rows = mosMerged;
   // Global person filter — applied before any per-page filters
@@ -464,6 +581,7 @@ function getMosFilteredRows(typeFilter, searchQ) {
     rows = rows.filter(r => r.person && personFilter.has(r.person));
   }
   if (typeFilter) rows = rows.filter(r => r.type === typeFilter);
+  if (clsFilter)  rows = rows.filter(r => r.programClass === clsFilter);
   if (searchQ) {
     const q = searchQ.toLowerCase();
     rows = rows.filter(r => r.code.toLowerCase().includes(q) || r.desc.toLowerCase().includes(q));
@@ -473,6 +591,37 @@ function getMosFilteredRows(typeFilter, searchQ) {
 
 function mosKpiCard(label, value, sub, color) {
   return `<div class="kpi-card"><div class="kpi-label">${escHtml(label)}</div><div class="kpi-value" style="color:var(--${color||'blue'})">${value}</div>${sub ? `<div class="kpi-sub">${sub}</div>` : ""}</div>`;
+}
+
+// ── PROGRAM CLASS BADGE / COUNTS (used on MOS/National table + Dashboard) ─────
+function programClassBadge(cls) {
+  if (!cls) return '<span class="amc-na-badge" title="No AMC classification data">Unclassified</span>';
+  const colorMap = {
+    [PROGRAM_CLASS.RDF_CDSS]:     "#3fb950",
+    [PROGRAM_CLASS.RDF_NON_CDSS]: "#8763cc",
+    [PROGRAM_CLASS.PROG_REPORT]:  "#3a8fd4",
+    [PROGRAM_CLASS.PROG_NONREPT]: "#d29922",
+  };
+  const label = PROGRAM_CLASS_LABELS[cls] || cls;
+  return `<span style="color:${colorMap[cls] || 'var(--text)'};font-weight:600">${escHtml(label)}</span>`;
+}
+
+// Counts every mosMerged row (one per canonical code+type) into the four
+// program-class buckets, plus however many are still unclassified (type
+// itself never got resolved, e.g. user hit "Skip" in the assignment prompt).
+// Used by the Dashboard's classification panel.
+function getProgramClassCounts() {
+  const counts = {
+    [PROGRAM_CLASS.RDF_CDSS]: 0, [PROGRAM_CLASS.RDF_NON_CDSS]: 0,
+    [PROGRAM_CLASS.PROG_REPORT]: 0, [PROGRAM_CLASS.PROG_NONREPT]: 0,
+    unclassified: 0,
+  };
+  if (typeof mosMerged === "undefined") return counts;
+  mosMerged.forEach(r => {
+    if (r.programClass && counts.hasOwnProperty(r.programClass)) counts[r.programClass]++;
+    else counts.unclassified++;
+  });
+  return counts;
 }
 
 // ── MAIN RENDER ────────────────────────────────────────────────────────────────
@@ -613,6 +762,7 @@ async function renderMosPlant() {
       raw: true, cellClass: "col-mat-code-wrap" },
     { key: "desc", label: "Description", cellClass: "col-mat-desc-wrap" },
     { key: "type", label: "Type" },
+    { key: "programClass", label: "Classification", fmt: v => programClassBadge(v), raw: true },
     { key: "_national", label: "National MOS",
       fmt: (v) => {
         if (!v || v.mos === null) return mosNABadge();
@@ -658,7 +808,7 @@ async function renderMosPlant() {
   // table/chart above it are showing.
   const exportRows = scored.flatMap(r =>
     r._plantMos.filter(m => displayPlants.includes(m.plant) && (!plantVal || m.plant === plantVal)).map(m => ({
-      code: r.code, desc: r.desc, type: r.type,
+      code: r.code, desc: r.desc, type: r.type, programClass: PROGRAM_CLASS_LABELS[r.programClass] || "Unclassified",
       nationalMos: r._national.mos, nationalSoh: r._national.totalSoh, nationalAmc: r._national.totalAmc,
       plant: m.plant, isHub: m.isHub ? "Yes (vs. total branch demand)" : "No",
       soh: m.soh, amc: m.amc, mos: m.mos,
@@ -666,6 +816,7 @@ async function renderMosPlant() {
   );
   const exportCols = [
     { key: "code", label: "Material Code" }, { key: "desc", label: "Description" }, { key: "type", label: "Type" },
+    { key: "programClass", label: "Classification (CDSS/Reportable)" },
     { key: "nationalMos", label: "National MOS (months)", fmt: v => v === null ? "N/A" : v === Infinity ? "Infinite" : Number(v).toFixed(2) },
     { key: "nationalSoh", label: "National SOH (all plants incl. " + HUB_PLANT + ")", fmt: v => Number(v || 0).toFixed(2) },
     { key: "nationalAmc", label: "National AMC (branches only)", fmt: v => v === null ? "N/A" : Number(v).toFixed(2) },
@@ -685,6 +836,53 @@ async function renderMosPlant() {
 function mosKpiRow(cards) {
   const el = document.getElementById("mos-kpis");
   if (el) el.innerHTML = cards.join("");
+}
+
+// ── DASHBOARD PANEL: Program Classification (CDSS / Reportable) ───────────────
+// Called from renderDashboard() in script.js. Independent of the Dashboard's
+// plant/material-group filters — this reflects the AMC upload as a whole,
+// same scope as the MOS/National Stock & MOS pages.
+function renderDashboardProgramClassPanel() {
+  const emptyEl = document.getElementById("dash-program-class-empty");
+  const kpiEl   = document.getElementById("dash-program-class-kpis");
+  const chartEl = document.getElementById("chart-program-class");
+  if (!kpiEl || !chartEl) return; // page markup not present (shouldn't happen, but stay quiet)
+
+  if (typeof mosMerged === "undefined" || !mosMerged.length) {
+    if (emptyEl) emptyEl.style.display = "block";
+    kpiEl.innerHTML = "";
+    chartEl.innerHTML = "";
+    return;
+  }
+  if (emptyEl) emptyEl.style.display = "none";
+
+  const counts = getProgramClassCounts();
+  const total  = mosMerged.length;
+
+  kpiEl.innerHTML = [
+    mosKpiCard("RDF · CDSS", counts[PROGRAM_CLASS.RDF_CDSS].toLocaleString(), `of ${total.toLocaleString()} materials`, "green"),
+    mosKpiCard("RDF · Non-CDSS", counts[PROGRAM_CLASS.RDF_NON_CDSS].toLocaleString(), `of ${total.toLocaleString()} materials`, "purple"),
+    mosKpiCard("Program (Q) · Reportable", counts[PROGRAM_CLASS.PROG_REPORT].toLocaleString(), `of ${total.toLocaleString()} materials`, "blue"),
+    mosKpiCard("Program (Q) · Non-Reportable", counts[PROGRAM_CLASS.PROG_NONREPT].toLocaleString(), `of ${total.toLocaleString()} materials`, "amber"),
+  ].join("") + (counts.unclassified ? mosKpiCard("Unclassified", counts.unclassified.toLocaleString(), "Type never resolved (skipped in prompt)", "red") : "");
+
+  const labels = ["RDF · CDSS", "RDF · Non-CDSS", "Program · Reportable", "Program · Non-Reportable"];
+  const values = [counts[PROGRAM_CLASS.RDF_CDSS], counts[PROGRAM_CLASS.RDF_NON_CDSS], counts[PROGRAM_CLASS.PROG_REPORT], counts[PROGRAM_CLASS.PROG_NONREPT]];
+  const colors = ["#3fb950", "#8763cc", "#3a8fd4", "#d29922"];
+  if (counts.unclassified) { labels.push("Unclassified"); values.push(counts.unclassified); colors.push("#f85149"); }
+
+  if (typeof Plotly !== "undefined") {
+    Plotly.newPlot(chartEl, [{
+      type: "bar", x: labels, y: values, marker: { color: colors }, text: values.map(v => v.toLocaleString()),
+      textposition: "outside", hovertemplate: "<b>%{x}</b><br>%{y} materials<extra></extra>",
+    }], {
+      ...(typeof PLOTLY_LAYOUT !== "undefined" ? PLOTLY_LAYOUT : {}),
+      height: 300, margin: { l: 50, r: 20, t: 20, b: 70 },
+      xaxis: { tickfont: { size: 10 } },
+      yaxis: { title: "Materials" },
+      paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
+    }, typeof PLOTLY_CONFIG !== "undefined" ? PLOTLY_CONFIG : {});
+  }
 }
 
 // ── WIRE INTO PAGE_RENDERERS AND EVENT LISTENERS ──────────────────────────────
