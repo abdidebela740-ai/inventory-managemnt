@@ -486,6 +486,27 @@ function mosFindRow(code, type) {
 // and same getMappedQty/getVerifiedTransitQty helpers Branch Comparison's
 // "Total Quantity" metric uses (see script.js matPlantMap[mat][pln].TotalQty),
 // so the two pages agree on the same number for the same material.
+//
+// FIX-SOH-STREAM-SPLIT: a material code can carry BOTH an RDF-stream
+// mosMerged row and a Program(Q)-stream row (see buildMosMerged's LAW
+// comment). Before this fix, SOH here was keyed by code+plant ONLY, so
+// both streams' rows read the exact same code-level total — e.g. filtering
+// to "RDF-CDSS" would show the correct row, but its SOH figure silently
+// included Q-stock too (and the Program-Reportable row for the same code
+// showed that identical inflated number back). The inventory file's own
+// Special Stock Type column (the SAME field that decides a row's Q/RDF
+// `type` everywhere else in this app — see the TYPE SOURCE OF TRUTH comment
+// above) already tells us which stream each physical stock line belongs to,
+// so it's used here too: every code gets its normal map.get(code)[plant]
+// TOTAL entry (unchanged, still used by callers like request-analysis.js/
+// who-responsible.js that intentionally want the whole-material figure),
+// PLUS a stream-scoped map.get(code+"\u241F"+"RDF"/"Q")[plant] entry —
+// same "code\u241Ftype" key convention buildMosMerged() already uses.
+// mosSohFor()/computeNationalMOS() prefer the stream-scoped entry when the
+// caller's row knows its own type, falling back to the total for backward
+// compatibility (e.g. a stream that has AMC data but literally zero
+// inventory rows of its own — see resolveProgramTypeAndClass's fallback —
+// would otherwise show 0 instead of the only stock that actually exists).
 function buildMosSohMap() {
   const map = new Map();
   // Use the mapping-reconciled base (mappedDf when a mapping file is loaded)
@@ -509,13 +530,26 @@ function buildMosSohMap() {
     const qc            = (typeof getMappedQty === "function") ? getMappedQty(row, "Stock in Quality Inspection") : Number(row["Stock in Quality Inspection"] || 0);
     const qty = (Number(unrestricted) || 0) + (Number(transit) || 0) + (Number(qc) || 0);
 
+    // Stream source of truth: this row's own Special Stock Type — same rule
+    // used everywhere else (Q = Health Program, anything else/blank = RDF).
+    const sst = String(row["Special Stock Type"] || "").trim().toUpperCase() === "Q" ? "Q" : "RDF";
+
     if (!map.has(mat)) map.set(mat, {});
     map.get(mat)[plt] = (map.get(mat)[plt] || 0) + qty;
+
+    const streamKey = mat + "\u241F" + sst;
+    if (!map.has(streamKey)) map.set(streamKey, {});
+    map.get(streamKey)[plt] = (map.get(streamKey)[plt] || 0) + qty;
   }
   return map;
 }
 
 function mosSohFor(sohMap, row, plant) {
+  const streamEntry = sohMap.get(row.code + "\u241F" + row.type);
+  if (streamEntry && plant in streamEntry) return streamEntry[plant] ?? 0;
+  // Fallback: no inventory rows recorded under this row's own stream for
+  // this code (e.g. AMC-only Q classification with no physical Q stock on
+  // file yet) — use the code-level total rather than showing a false zero.
   return sohMap.get(row.code)?.[plant] ?? 0;
 }
 
@@ -595,7 +629,13 @@ function computeNationalMOS(row, sohMap) {
   // uploaded AMC file. Previously this summed mosPlants only, which silently
   // dropped stock sitting at any plant absent from the AMC upload (or whose
   // plant code didn't match an AMC column), undercounting national SOH.
-  const allPlantsForRow = sohMap.get(row.code) || {};
+  //
+  // FIX-SOH-STREAM-SPLIT: prefer this row's own stream-scoped entry (see
+  // buildMosSohMap above) so a Program(Q) row's National SOH doesn't include
+  // an RDF row's stock for the same code, and vice versa. Falls back to the
+  // code-level total only when this stream has no inventory rows of its own.
+  const streamEntry = sohMap.get(row.code + "\u241F" + row.type);
+  const allPlantsForRow = streamEntry || sohMap.get(row.code) || {};
   const totalSoh = Object.values(allPlantsForRow).reduce((s, v) => s + (Number(v) || 0), 0);
   const hasHo01  = mosPlants.includes(HUB_PLANT);
 
