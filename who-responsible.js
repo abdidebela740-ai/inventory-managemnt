@@ -193,6 +193,11 @@
       nationalSoh: nat ? nat.totalSoh : null,
       atRiskCount: atRisk ? atRisk.materialCount : null,
       atRiskVal: atRisk ? atRisk.totalVal : null,
+      // FIX-PERSON-CLS-COUPLING: true when this canonical code consolidates
+      // multiple AMC source rows whose Person/RDF-CDSS classification
+      // disagree — see buildMosMerged() in mos.js. Surfaced so the person
+      // and classification shown here aren't mistaken for a confirmed pair.
+      personClsConflict: !!r.personClsConflict,
     };
   }
 
@@ -254,6 +259,9 @@
             <div class="who-resp-stat-value">${data.nationalSoh === null ? "—" : fmtQty(data.nationalSoh)}</div>
           </div>
         </div>
+        ${data.personClsConflict
+          ? `<div class="alert-info" style="margin-top:0.2rem;border-color:#d29922;color:#d29922">⚠ This material's Person and RDF-CDSS classification come from AMC entries that disagree with each other. Values shown reflect the first entry on file — check AMC.xlsx for this code.</div>`
+          : ""}
         ${data.person
           ? `<button type="button" class="apply-btn who-resp-view-all" id="who-resp-view-all">View all of ${escHtml(data.person)}'s items →</button>`
           : `<div class="alert-info" style="margin-top:0.2rem">No responsible person on file for this material.</div>`}
