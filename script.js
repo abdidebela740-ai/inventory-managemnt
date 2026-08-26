@@ -2485,12 +2485,9 @@ function applyMaterialMapping() {
         _cvTransit:         row["Stock in Transit"],
         _cvQC:              row["Stock in Quality Inspection"],
         _cvBlocked:         row["Blocked Stock"],
-        _cvRestricted:      row["Restricted Stock"],
         _cvValUnrestricted: row["Value of Unrestricted Stock"],
         _cvValTransit:      row["Value of Stock in Transit"],
         _cvValQC:           row["Value of Stock in Quality Inspection"],
-        _cvValBlocked:      row["Value of Blocked Stock"],
-        _cvValRestricted:   row["Value of Restricted Stock"],
         _cvTotalQty:        row["Total Qty"],
         _cvTotalValue:      row["Total Value"],
       };
@@ -2502,12 +2499,9 @@ function applyMaterialMapping() {
     const cvTransit         = parseFloat(((row["Stock in Transit"]                || 0) * f).toFixed(9));
     const cvQC              = parseFloat(((row["Stock in Quality Inspection"]     || 0) * f).toFixed(9));
     const cvBlocked         = parseFloat(((row["Blocked Stock"]                   || 0) * f).toFixed(9));
-    const cvRestricted      = parseFloat(((row["Restricted Stock"]                || 0) * f).toFixed(9));
     const cvValUnrestricted = parseFloat(((row["Value of Unrestricted Stock"]     || 0) * f).toFixed(9));
     const cvValTransit      = parseFloat(((row["Value of Stock in Transit"]       || 0) * f).toFixed(9));
     const cvValQC           = parseFloat(((row["Value of Stock in Quality Inspection"] || 0) * f).toFixed(9));
-    const cvValBlocked      = parseFloat(((row["Value of Blocked Stock"]          || 0) * f).toFixed(9));
-    const cvValRestricted   = parseFloat(((row["Value of Restricted Stock"]       || 0) * f).toFixed(9));
     const cvTotalQty        = cvUnrestricted + cvTransit + cvQC;
     const cvTotalValue      = cvValUnrestricted + cvValTransit + cvValQC;
 
@@ -2527,12 +2521,9 @@ function applyMaterialMapping() {
       _cvTransit:         cvTransit,
       _cvQC:              cvQC,
       _cvBlocked:         cvBlocked,
-      _cvRestricted:      cvRestricted,
       _cvValUnrestricted: cvValUnrestricted,
       _cvValTransit:      cvValTransit,
       _cvValQC:           cvValQC,
-      _cvValBlocked:      cvValBlocked,
-      _cvValRestricted:   cvValRestricted,
       _cvTotalQty:        cvTotalQty,
       _cvTotalValue:      cvTotalValue,
     };
@@ -2613,12 +2604,12 @@ const renderMappedMatDesc = renderMappedMatDesc_early;
  */
 function getMappedQty(row, field) {
   if (!row._isMapped) return row[field] || 0;
-  const cv = { "Unrestricted Stock": "_cvUnrestricted", "Stock in Transit": "_cvTransit", "Stock in Quality Inspection": "_cvQC", "Blocked Stock": "_cvBlocked", "Restricted Stock": "_cvRestricted" };
+  const cv = { "Unrestricted Stock": "_cvUnrestricted", "Stock in Transit": "_cvTransit", "Stock in Quality Inspection": "_cvQC", "Blocked Stock": "_cvBlocked" };
   return (cv[field] !== undefined ? row[cv[field]] : row[field]) || 0;
 }
 function getMappedVal(row, field) {
   if (!row._isMapped) return row[field] || 0;
-  const cv = { "Value of Unrestricted Stock": "_cvValUnrestricted", "Value of Stock in Transit": "_cvValTransit", "Value of Stock in Quality Inspection": "_cvValQC", "Value of Blocked Stock": "_cvValBlocked", "Value of Restricted Stock": "_cvValRestricted" };
+  const cv = { "Value of Unrestricted Stock": "_cvValUnrestricted", "Value of Stock in Transit": "_cvValTransit", "Value of Stock in Quality Inspection": "_cvValQC" };
   return (cv[field] !== undefined ? row[cv[field]] : row[field]) || 0;
 }
 
@@ -2659,21 +2650,8 @@ function _hasTrueTransit(row) {
  */
 function aggregateByMappedMaterial(df) {
   const useMapped = mappingTable.size > 0;
-  // BUGFIX-BLOCKED-RESTRICTED-AGG: Blocked/Restricted Stock qty and value
-  // used to be missing from these lists. Any row after the FIRST one seen
-  // for a given (mapped) material only had its Unrestricted/QC/Transit
-  // fields folded into the running total below — Blocked Stock value and
-  // the entire Restricted Stock qty+value just sat at whatever the first
-  // row happened to have, silently dropping every other plant's amount for
-  // that material. This is exactly why "Total Value Blocked/Restricted" on
-  // those two pages (which read off this aggregated df) came out lower than
-  // both the page's own per-plant chart just below it (built straight off
-  // the un-aggregated rows) AND the Dashboard's Blocked/Restricted KPI
-  // cards (also un-aggregated) — for any material recorded across more than
-  // one plant, which is the common case. See renderBlocked()/
-  // renderRestricted() in script.js.
-  const QTY_FIELDS = ["Unrestricted Stock","Stock in Quality Inspection","Blocked Stock","Restricted Stock","Stock in Transit"];
-  const VAL_FIELDS = ["Value of Unrestricted Stock","Value of Stock in Quality Inspection","Value of Blocked Stock","Value of Restricted Stock","Value of Stock in Transit"];
+  const QTY_FIELDS = ["Unrestricted Stock","Stock in Quality Inspection","Blocked Stock","Stock in Transit","Restricted Stock"];
+  const VAL_FIELDS = ["Value of Unrestricted Stock","Value of Stock in Quality Inspection","Value of Stock in Transit","Value of Blocked Stock","Value of Restricted Stock"];
 
   const matMap = {};
   df.forEach(row => {
@@ -4529,11 +4507,14 @@ function aggregateByMaterial(df) {
   const QTY_COLS = [
     "Unrestricted Stock", "Stock in Quality Inspection",
     "Blocked Stock",      "Stock in Transit",
+    "Restricted Stock",
   ];
   const VAL_COLS = [
     "Value of Unrestricted Stock",
     "Value of Stock in Quality Inspection",
     "Value of Stock in Transit",
+    "Value of Blocked Stock",
+    "Value of Restricted Stock",
     // BUG-FIX-4: "Total Value" removed — it is recomputed from components below
     // (line ~2081). Accumulating it here then overwriting it was wasted work and
     // would double-count if the recompute step were ever skipped.
