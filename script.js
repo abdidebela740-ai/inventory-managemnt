@@ -556,8 +556,37 @@ let mappingStats   = null;        // { mapped, total, valuePct } — shown in si
 // in lockstep with getPersonFilteredCodes(), which now returns canonical
 // codes too — otherwise every row whose raw code differs from its target
 // code would silently fail to match again.
+// Returns the base dataset with material standardization applied (if mapping
+// loaded), WITHOUT narrowing by the currently-selected person(s). Use this
+// (not getReconciledBase() below) any time you're computing a MATERIAL-LEVEL
+// property that must be a stable fact about the material — its Special Stock
+// Type (Q/RDF), its AMC/CDSS classification, its valuation type, its
+// description — rather than page display rows.
+//
+// FIX-CLS-PERSON-LEAK: buildSpecialStockTypeMap()/buildInventoryDescMap()/
+// buildCodeMaterialTypeMap() (mos.js) used to call getReconciledBase()
+// directly. mos.js's buildMosMerged() — which resolves and permanently
+// caches every material's Q/RDF type and RDF-CDSS/Program-Reportable
+// classification into mosMerged — is ONLY re-run when the inventory file or
+// mapping file (re)loads, never when the global person filter changes. If a
+// person filter happened to be active at that exact reload moment, every
+// OTHER material's inventory row was invisible to
+// buildSpecialStockTypeMap(), so its Special Stock Type silently defaulted
+// to RDF and its classification got resolved wrong — permanently, until the
+// next file/mapping reload, regardless of who's selected in the person
+// filter now. That produced exactly this symptom: a material could look
+// right in a context that happens to filter by the person it belongs to,
+// while the "RDF · CDSS" classification checkbox — reading the same
+// corrupted cached value — never matches it. Material identity/classifi-
+// cation must never depend on which unrelated person happens to be selected
+// at rebuild time, so those three builders now read this unfiltered base
+// instead.
+function getMappingReconciledBase() {
+  return mappingTable.size > 0 ? mappedDf : rawDf;
+}
+
 function getReconciledBase() {
-  const base = mappingTable.size > 0 ? mappedDf : rawDf;
+  const base = getMappingReconciledBase();
   const codes = getPersonFilteredCodes();
   if (!codes) return base;
   return base.filter(r => {
