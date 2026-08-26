@@ -2090,11 +2090,6 @@ function renderDashboard() {
     {key:"Total Qty",          label:"Total Qty",         fmt:fmtQty, rawKey:"Total Qty"},
   ];
   const aggForDl = groupBy(df, "Plant Name", [["Total Value","Total Value"],["Total Qty","Total Qty"]]);
-
-  // Program Classification panel (RDF CDSS/Non-CDSS, Program Reportable/Non-Reportable)
-  // — sourced from the AMC upload (mos.js), independent of this page's own
-  // plant/material-group filters.
-  if (typeof renderDashboardProgramClassPanel === "function") renderDashboardProgramClassPanel();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
