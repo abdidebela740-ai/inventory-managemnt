@@ -1577,7 +1577,13 @@ function applyPageFilter(page) {
   const clsLabelOf = (r) => {
     if (!clsMap) return "";
     const code = String(r._mappedMaterial || r["Material"] || "").trim().toUpperCase();
-    const raw  = clsMap.get(code);
+    // A code can legitimately have BOTH an RDF classification and a
+    // Program(Q) classification (see mos.js buildMosMerged's LAW comment).
+    // This row's own Special Stock Type says which stream it's actually in,
+    // so check the type-aware key first and only fall back to the plain
+    // code (whichever stream happened to be seen first) if that misses.
+    const sst  = String(r["Special Stock Type"] || "").trim().toUpperCase() === "Q" ? "Q" : "RDF";
+    const raw  = clsMap.get(code + "\u241F" + sst) || clsMap.get(code);
     if (!raw) return "";
     return (typeof PROGRAM_CLASS_LABELS !== "undefined" && PROGRAM_CLASS_LABELS[raw]) || raw;
   };
