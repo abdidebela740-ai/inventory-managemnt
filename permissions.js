@@ -416,6 +416,7 @@ function roleBadgeTooltip() {
 // through their own separate flow.)
 const NAVIGABLE_MODULE_KEYS = [
   "dashboard", "pending-dispatch", "transit", "branch", "expiry", "qc",
+  "blocked", "restricted",
   "expiry-risk", "stockout-risk", "natl-table", "concentration",
   "request-analysis", "mos-plant", "branch-demand",
 ];
