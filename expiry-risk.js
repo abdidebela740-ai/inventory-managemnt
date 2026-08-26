@@ -126,7 +126,7 @@ function unitValueFor(entry) {
 // ── BUILD THE FULL PLANT × ITEM RISK SNAPSHOT ─────────────────────────────────
 // Returns an array of { code, desc, type, plant, isHub, soh, amc, mos,
 //                        shelfLeftMo, unitVal, atRisk, atRiskQty, atRiskVal }
-function buildRiskSnapshot(typeFilter, searchQ, plantFilter) {
+function buildRiskSnapshot(typeFilter, searchQ, plantFilter, clsFilter) {
   if (typeof mosMerged === "undefined" || !mosMerged.length) return [];
 
   const sohMap    = buildMosSohMap();   // from mos.js — materialCode → plant → SOH
@@ -134,10 +134,19 @@ function buildRiskSnapshot(typeFilter, searchQ, plantFilter) {
   const today     = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // getMosFilteredRows already applies the global personFilter before type/search
+  // getMosFilteredRows already applies the global personFilter and the
+  // Program Classification (CDSS/Reportable) filter before search — Type
+  // (ZME/ZMS) is intentionally NOT passed to it: that filter is Q/RDF
+  // (Special Stock Type), a different axis from this page's ZME/ZMS Type
+  // dropdown, which is checked separately below via materialTypeMap.
   let rows = (typeof getMosFilteredRows === "function")
-    ? getMosFilteredRows(typeFilter || "", searchQ || "")
-    : mosMerged.filter(r => (!typeFilter || r.type === typeFilter));
+    ? getMosFilteredRows("", searchQ || "", clsFilter || "")
+    : mosMerged.filter(r => (!clsFilter || r.programClass === clsFilter));
+
+  const materialTypeMap = buildCodeMaterialTypeMap();
+  if (typeFilter) {
+    rows = rows.filter(r => materialTypeMap.get(r.code) === typeFilter);
+  }
 
   const out = [];
   for (const r of rows) {
@@ -161,7 +170,7 @@ function buildRiskSnapshot(typeFilter, searchQ, plantFilter) {
       const atRiskVal  = atRiskQty * unitVal;
 
       out.push({
-        code: r.code, desc: r.desc, type: r.type,
+        code: r.code, desc: r.desc, type: materialTypeMap.get(r.code) || "",
         isMerged: r.isMerged, origCodes: r.origCodes,
         plant: pm.plant, isHub: pm.isHub,
         soh: pm.soh, amc: pm.amc, mos: pm.mos,
@@ -383,9 +392,11 @@ async function renderExpiryRisk() {
   const searchEl = document.getElementById("exprisk-search");
   const plantEl  = document.getElementById("exprisk-plant");
   const typeEl   = document.getElementById("exprisk-type");
+  const clsEl    = document.getElementById("exprisk-program-class");
   const searchQ  = searchEl ? searchEl.value.trim() : "";
   const plantVal = plantEl  ? plantEl.value.trim()  : "";
   const typeVal  = typeEl   ? typeEl.value.trim()   : "";
+  const clsVal   = clsEl    ? clsEl.value.trim()    : "";
 
   if (plantEl && plantEl.options.length <= 1 && typeof mosPlants !== "undefined") {
     mosPlants.forEach(p => {
@@ -397,7 +408,7 @@ async function renderExpiryRisk() {
 
   // ── Build snapshot (unfiltered by plant, so redistribution can see all plants
   // for each item) then apply plant filter only to the BEFORE view ──────────────
-  const fullSnapshot = buildRiskSnapshot(typeVal, searchQ, "");
+  const fullSnapshot = buildRiskSnapshot(typeVal, searchQ, "", clsVal);
   const beforeRows   = plantVal ? fullSnapshot.filter(r => r.plant === plantVal) : fullSnapshot;
   const atRiskBefore = beforeRows.filter(r => r.atRisk && r.atRiskQty > 0);
 
@@ -619,6 +630,7 @@ async function renderExpiryRisk() {
         const s = document.getElementById("exprisk-search"); if (s) s.value = "";
         const p = document.getElementById("exprisk-plant");  if (p) p.value = "";
         const t = document.getElementById("exprisk-type");   if (t) t.value = "";
+        const g = document.getElementById("exprisk-program-class"); if (g) g.value = "";
         renderExpiryRisk();
       },
     };
