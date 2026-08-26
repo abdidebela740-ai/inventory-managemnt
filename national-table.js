@@ -96,12 +96,12 @@ function buildNatlShelfLifeMap() {
 }
 
 // ── BUILD ONE ROW PER MATERIAL ────────────────────────────────────────────────
-function buildNatlTableRows(typeFilter, searchQ) {
+function buildNatlTableRows(typeFilter, searchQ, clsFilter) {
   if (typeof mosMerged === "undefined" || !mosMerged.length) return [];
   const sohMap   = buildMosSohMap();
   const shelfMap = buildNatlShelfLifeMap();
   const rows     = (typeof getMosFilteredRows === "function")
-    ? getMosFilteredRows(typeFilter || "", searchQ || "")
+    ? getMosFilteredRows(typeFilter || "", searchQ || "", clsFilter || "")
     : mosMerged.filter(r => !typeFilter || r.type === typeFilter);
 
   return rows.map((r, i) => {
@@ -120,7 +120,8 @@ function buildNatlTableRows(typeFilter, searchQ) {
       adjMos = amc > 0 ? adjSoh / amc : (adjSoh > 0 ? Infinity : null);
     }
 
-    return { sn: i + 1, code: r.code, desc: r.desc, type: r.type, isMerged: r.isMerged, origCodes: r.origCodes,
+    return { sn: i + 1, code: r.code, desc: r.desc, type: r.type, programClass: r.programClass,
+             isMerged: r.isMerged, origCodes: r.origCodes,
              soh, amc, mos, shelf, excludedQty, adjSoh, adjMos };
   });
 }
@@ -151,12 +152,14 @@ function renderNatlTable() {
 
   const searchEl = document.getElementById("natl-search");
   const typeEl   = document.getElementById("natl-type");
+  const clsEl    = document.getElementById("natl-program-class");
   const searchQ  = searchEl ? searchEl.value.trim() : "";
   const typeVal  = typeEl   ? typeEl.value.trim()   : "";
+  const clsVal   = clsEl    ? clsEl.value.trim()    : "";
 
   const sohMap   = buildMosSohMap();
   const hasSoh   = sohMap.size > 0;
-  const data     = buildNatlTableRows(typeVal, searchQ);
+  const data     = buildNatlTableRows(typeVal, searchQ, clsVal);
 
   // ── KPIs ─────────────────────────────────────────────────────────────────────
   const withMos       = data.filter(d => d.mos !== null && d.mos !== Infinity);
@@ -165,11 +168,16 @@ function renderNatlTable() {
   const avgShelf        = withShelf.length ? withShelf.reduce((s, d) => s + d.shelf, 0) / withShelf.length : null;
   const overstocked    = data.filter(d => d.adjMos !== null && d.mos !== null && d.mos !== Infinity && d.adjMos < d.mos).length;
 
+  const clsBreakdown = data.reduce((m, d) => { const k = d.programClass || "unclassified"; m[k] = (m[k]||0)+1; return m; }, {});
+  const clsSub = [PROGRAM_CLASS.RDF_CDSS, PROGRAM_CLASS.RDF_NON_CDSS, PROGRAM_CLASS.PROG_REPORT, PROGRAM_CLASS.PROG_NONREPT]
+    .map(c => `${PROGRAM_CLASS_LABELS[c].split("·")[1].trim()}: ${(clsBreakdown[c]||0).toLocaleString()}`).join(" · ");
+
   natlKpiRow([
     mosKpiCard("Materials", data.length.toLocaleString(), typeVal || "All types", "blue"),
     mosKpiCard("National MOS Critical (<1mo)", criticalCount.toLocaleString(), `of ${withMos.length.toLocaleString()} with national MOS`, "red"),
     mosKpiCard("At Expiry Risk", overstocked.toLocaleString(), "Adjusted MOS < MOS (some stock may expire unused)", "orange"),
     mosKpiCard("Avg Shelf Life", avgShelf !== null ? `${avgShelf.toFixed(1)} mo` : "N/A", `of ${withShelf.length.toLocaleString()} items with expiry data`, "purple"),
+    mosKpiCard("Classification", clsVal ? "1 selected" : "All", clsVal ? PROGRAM_CLASS_LABELS[clsVal] : clsSub, "purple"),
     mosKpiCard("SOH Data Loaded", hasSoh ? "Yes" : "No", hasSoh ? "From inventory file" : "Upload inventory Excel for SOH", hasSoh ? "green" : "amber"),
   ]);
 
@@ -190,6 +198,9 @@ function renderNatlTable() {
         : `<span class="col-mat-code">${escHtml(v)}</span>`,
       raw: true, cellClass: "col-mat-code-wrap" },
     { key: "desc", label: "Material Description", cellClass: "col-mat-desc-wrap" },
+    { key: "type", label: "Type" },
+    { key: "programClass", label: "Classification",
+      fmt: v => (typeof programClassBadge === "function") ? programClassBadge(v) : (v || "—"), raw: true },
     { key: "soh", label: "SOH", fmt: v => fmtQty(v), cellClass: "col-qty" },
     { key: "excludedQty", label: "<6mo SOH Excluded",
       fmt: v => v > 0 ? `<b style="color:#b45309">${fmtQty(v)}</b>` : fmtQty(0), raw: true, cellClass: "col-qty" },
@@ -212,6 +223,7 @@ function renderNatlTable() {
   // ── EXPORT ───────────────────────────────────────────────────────────────────
   const exportRows = data.map(d => ({
     code: d.code, desc: d.desc, type: d.type,
+    programClass: (typeof PROGRAM_CLASS_LABELS !== "undefined" ? PROGRAM_CLASS_LABELS[d.programClass] : null) || "Unclassified",
     soh: natlExportNum(d.soh),
     excludedQty: natlExportNum(d.excludedQty),
     adjSoh: d.adjSoh === null ? "N/A" : natlExportNum(d.adjSoh),
@@ -223,6 +235,7 @@ function renderNatlTable() {
     { key: "code", label: "Material Code" },
     { key: "desc", label: "Material Description" },
     { key: "type", label: "Type" },
+    { key: "programClass", label: "Classification (CDSS/Reportable)" },
     { key: "soh", label: "SOH / Total Qty (all plants incl. " + ((typeof HUB_PLANT !== "undefined") ? HUB_PLANT : "HO01") + ")" },
     { key: "excludedQty", label: "<6mo SOH Excluded (from shelf-life avg)" },
     { key: "adjSoh", label: "Adjusted SOH for Expiry" },
@@ -252,6 +265,7 @@ function renderNatlTable() {
       "natl-clear": () => {
         const s = document.getElementById("natl-search"); if (s) s.value = "";
         const t = document.getElementById("natl-type");   if (t) t.value = "";
+        const c = document.getElementById("natl-program-class"); if (c) c.value = "";
         renderNatlTable();
       },
     };
