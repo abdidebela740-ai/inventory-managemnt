@@ -77,6 +77,22 @@
     return v === "Q" ? "Q" : "RDF";
   }
 
+  // ── Cross-page read access (Branch Demand HO01-outbound subtraction) ────
+  // STATE.rows is private to this closure like everything else in the file,
+  // but branch-demand.js needs the raw Open Outbound rows to know how much
+  // HO01 stock is already committed to a delivery that hasn't been goods-
+  // issued yet (every row in this file, by definition — "Open"/"Pending
+  // Dispatch" means GI hasn't happened; once GI posts, SAP drops the row
+  // from this extract). Exposed read-only: callers get a shallow copy so
+  // they can't mutate STATE.rows out from under this page's own rendering.
+  // Deliberately returns the scope-filtered rows (same canAccessDispatchRow
+  // filter already applied on load) so a caller never sees rows outside the
+  // current user's permitted plants/stock types just by going through this
+  // door instead of the page itself.
+  window.getOpenOutboundRows = function () {
+    return STATE.rows.slice();
+  };
+
   // ── Data-scope access control ───────────────────────────────
   // The Open Outbound file has no "Inventory Valuation Type" column, so
   // unlike script.js/permissions.js's getRowScopeCode() we can't compute a
