@@ -68,9 +68,22 @@ const PROGRAM_CLASS_LABELS = {
 // keyed. `rawProgramType` is whatever the AMC file's "PROGRAM TYPE" /
 // "Material Type Code" cell contained for this material, verbatim (may be
 // blank if the material wasn't found in the AMC file at all).
+//
+// LAW (per business rule): the SAME material code can legitimately be
+// carried under BOTH streams at once — some units as regular RDF stock,
+// others as Health-Program-funded (Q) stock — so an AMC row's OWN
+// classification text is the primary signal for which stream that row
+// belongs to: "RDF-..." always means RDF, "PROGRAM-..." always means Q.
+// Each row is treated as-is; one stream's row is never used to overrule or
+// dedupe the other. The inventory file's Special Stock Type (sstMap) is
+// only a fallback for rows whose AMC text is blank/unrecognized (e.g. the
+// material wasn't found in the AMC file at all), since only then is there
+// no row-level signal to go on.
 function resolveProgramTypeAndClass(code, rawProgramType, sstMap) {
-  const type = sstMap.get(code) === "Q" ? "Q" : "RDF";
   const norm = String(rawProgramType || "").trim().toUpperCase().replace(/[\s_]+/g, "-").replace(/-+/g, "-");
+  const type = norm.startsWith("RDF")     ? "RDF"
+             : norm.startsWith("PROGRAM") ? "Q"
+             : (sstMap.get(code) === "Q" ? "Q" : "RDF");
   const cls = type === "RDF"
     ? (norm === "RDF-CDSS" ? PROGRAM_CLASS.RDF_CDSS : PROGRAM_CLASS.RDF_NON_CDSS)
     : (norm === "PROGRAM-REPORTABLE" ? PROGRAM_CLASS.PROG_REPORT : PROGRAM_CLASS.PROG_NONREPT);
@@ -273,12 +286,15 @@ function buildInventoryDescMap() {
 // a mapping file is loaded, summing AMC per plant across duplicates — same
 // approach used elsewhere in the app for inventory rows.
 //
-// KEYED BY CANONICAL CODE ALONE: type is no longer read off the AMC row (see
-// resolveProgramTypeAndClass) — it's a property of the material itself,
-// sourced from the inventory file's Special Stock Type, so a material can
-// only have one type. Any duplicate AMC rows for the same canonical code
-// (e.g. two source codes mapping to one target) are summed together, and
-// whichever row's rawProgramType is non-blank wins if they disagree.
+// KEYED BY CANONICAL CODE + STREAM (RDF vs Program/Q): per the LAW in
+// resolveProgramTypeAndClass, a material can legitimately be carried under
+// BOTH streams at once, so merging only collapses duplicate AMC rows within
+// the SAME stream (e.g. two source codes mapping to one RDF target) — it
+// never merges an RDF row and a Program(Q) row for the same code into one,
+// since that would silently sum their AMCs together and pick only one
+// rawProgramType to represent both. Downstream code that expects "a code
+// can have two mosMerged rows" (see brdResolveCode/brdDedupeByOwnType in
+// branch-demand.js and the type-aware lookup in mosFindRow) relies on this.
 //
 // Rebuilt on every AMC/inventory/mapping change (see wireMosModule below),
 // so sstMap here always reflects the CURRENT inventory upload — no stale
@@ -347,71 +363,28 @@ function buildMosMerged() {
     // AMC file had nothing for this material — try the inventory file.
     if (!canonDesc) canonDesc = invDescMap.get(canonical) || "";
 
-    if (!merged.has(canonical)) {
-      merged.set(canonical, {
+    // This row's own stream — see the LAW in resolveProgramTypeAndClass.
+    // Computed up front so it can be folded into the merge key below.
+    const { type: rowType } = resolveProgramTypeAndClass(canonical, row.rawProgramType, sstMap);
+    const mergeKey = canonical + "\u241F" + rowType;
+
+    if (!merged.has(mergeKey)) {
+      merged.set(mergeKey, {
         code: canonical,
         origCodes: new Set([row.code]),
         desc: canonDesc,
-        rawProgramType: "",
-        person: "",
-        // FIX-PERSON-CLS-COUPLING: which raw AMC code the current
-        // person/rawProgramType PAIR was adopted from — see below.
-        _pairSourceCode: null,
-        // True when a later raw row consolidated into this same canonical
-        // code disagrees with the pairing we already adopted (different
-        // Person and/or different RDF-CDSS classification on file for the
-        // same target material). Surfaced in the UI so a real data
-        // inconsistency is flagged instead of silently blended.
-        personClsConflict: false,
+        rawProgramType: row.rawProgramType || "",
+        person: row.person || "",
         amcs: Object.fromEntries(mosPlants.map(p => [p, null])),
         isMerged: false,
       });
     }
-    const m = merged.get(canonical);
+    const m = merged.get(mergeKey);
     m.origCodes.add(row.code);
     if (m.origCodes.size > 1) m.isMerged = true;
     if (!m.desc && canonDesc) m.desc = canonDesc; // fill in if an earlier dup left it blank
-
-    // FIX-PERSON-CLS-COUPLING: Person and RDF-CDSS classification (rawProgramType)
-    // must always be read off the SAME underlying AMC row, since they describe
-    // one material line. Previously each field was filled independently
-    // ("first non-blank wins" per field, checked separately) — so when a
-    // mapping file consolidated two DIFFERENT source materials onto one
-    // canonical code, the merged record could end up showing one source
-    // row's Person next to a completely different source row's RDF-CDSS
-    // classification (whichever happened to arrive first for each field).
-    // That produced exactly the reported symptom: selecting a Person and
-    // cross-checking RDF-CDSS showed a classification that didn't actually
-    // belong to that person's material.
-    //
-    // Now: the first row that has any person/classification data "claims"
-    // the pairing for this canonical code. A later row is only allowed to
-    // fill in a field that's still blank (no conflict). If a later row
-    // actively disagrees with a field we already have, that's a genuine
-    // data inconsistency in the AMC file — we flag it (personClsConflict)
-    // and log it, rather than silently overwriting/blending the two rows.
-    if (row.person || row.rawProgramType) {
-      if (!m._pairSourceCode) {
-        m.person = row.person || "";
-        m.rawProgramType = row.rawProgramType || "";
-        m._pairSourceCode = row.code;
-      } else {
-        const personConflict = row.person && m.person && row.person !== m.person;
-        const clsConflict = row.rawProgramType && m.rawProgramType && row.rawProgramType !== m.rawProgramType;
-        if (personConflict || clsConflict) {
-          m.personClsConflict = true;
-          console.warn(
-            `[mos] AMC Person/Classification conflict for canonical code "${canonical}": ` +
-            `row "${m._pairSourceCode}" has Person="${m.person}" / Type="${m.rawProgramType}", ` +
-            `row "${row.code}" has Person="${row.person}" / Type="${row.rawProgramType}". ` +
-            `Keeping "${m._pairSourceCode}"'s pairing; flagging for review.`
-          );
-        } else {
-          if (!m.person && row.person) m.person = row.person;
-          if (!m.rawProgramType && row.rawProgramType) m.rawProgramType = row.rawProgramType;
-        }
-      }
-    }
+    if (!m.rawProgramType && row.rawProgramType) m.rawProgramType = row.rawProgramType; // fill in if an earlier dup left it blank
+    if (!m.person && row.person) m.person = row.person;
 
     for (const p of mosPlants) {
       const v = row.amcs[p];
@@ -423,9 +396,8 @@ function buildMosMerged() {
 
   return Array.from(merged.values()).map(m => {
     const { type, cls } = resolveProgramTypeAndClass(m.code, m.rawProgramType, sstMap);
-    const { _pairSourceCode, ...rest } = m; // internal bookkeeping only, not needed downstream
     return {
-      ...rest,
+      ...m,
       origCodes: [...m.origCodes].join(", "),
       type,
       programClass: cls,
@@ -468,11 +440,23 @@ function buildCodeMaterialTypeMap() {
 // empty map (never throws) when the AMC file hasn't been uploaded yet, so
 // callers on pages that don't require AMC data degrade gracefully — the
 // Classification Type control simply has no options / matches nothing.
+// Returns a Map with TWO kinds of keys so callers can go either way:
+//   - "CODE"            → first-seen programClass (back-compat for callers
+//                          that don't know/care which stream a row is in)
+//   - "CODE\u241FTYPE"  → the programClass for that code's RDF row or its
+//                          Program(Q) row specifically. Since a code can
+//                          legitimately have both (see buildMosMerged's LAW
+//                          comment), callers that DO know a row's own
+//                          Special Stock Type should look up the type-aware
+//                          key first and only fall back to the plain code.
 function buildCodeProgramClassMap() {
   const out = new Map();
   if (typeof mosMerged === "undefined" || !mosMerged.length) return out;
   mosMerged.forEach(m => {
-    if (m.code && m.programClass) out.set(String(m.code).trim().toUpperCase(), m.programClass);
+    if (!m.code || !m.programClass) return;
+    const code = String(m.code).trim().toUpperCase();
+    if (!out.has(code)) out.set(code, m.programClass);
+    out.set(code + "\u241F" + (m.type || "RDF"), m.programClass);
   });
   return out;
 }
