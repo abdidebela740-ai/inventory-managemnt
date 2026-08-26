@@ -833,6 +833,9 @@
 
     <div class="nav-group" data-group="analytics">
       <div class="nav-group-title"><span class="nav-group-icon">📈</span> Analytics</div>
+      <button class="nav-btn" data-page="mos-plant">
+        <span class="nav-icon">📐</span> MOS by Plant
+      </button>
       <button class="nav-btn" data-page="natl-table">
         <span class="nav-icon">🗂️</span> National Stock &amp; MOS
       </button>
@@ -1745,6 +1748,55 @@
       <div id="stko-card-filter-banner"></div>
       <div id="stko-dl-row" style="display:flex;justify-content:flex-end;gap:0.6rem;margin-top:1rem"></div>
       <div id="stko-table" style="margin-top:0.5rem"></div>
+    </div>
+  </section>
+
+  <!-- ── MOS BY PLANT ── -->
+  <section id="page-mos-plant" class="page" style="display:none">
+    <div class="page-header-row">
+      <div>
+        <div class="page-title">📐 MOS by Plant</div>
+        <div class="page-subtitle">Months of Stock per plant, from the uploaded AMC file — Stock on Hand ÷ Average Monthly Consumption, with HO01 measured against total branch demand.</div>
+      </div>
+      <div id="mos-dl-row" style="display:flex;gap:0.6rem"></div>
+    </div>
+    <div id="mos-no-amc" class="alert-info" style="margin-bottom:1rem">Upload <b>AMC.xlsx</b> using the <b>📐 Upload AMC.xlsx</b> button in the sidebar to enable this page.</div>
+    <div id="mos-content" style="display:none">
+      <div class="filter-bar" style="gap:0.6rem;flex-wrap:wrap;align-items:center">
+        <input
+          type="text"
+          id="mos-search"
+          placeholder="Material code or name…"
+          autocomplete="off"
+          spellcheck="false"
+          class="filter-input"
+        />
+        <select id="mos-plant-filter" class="filter-select">
+          <option value="">All Plants</option>
+        </select>
+        <select id="mos-type" class="filter-select">
+          <option value="">All Types</option>
+          <option value="Q">Q (Health Program)</option>
+          <option value="RDF">RDF</option>
+        </select>
+        <select id="mos-program-class" class="filter-select" title="RDF items are CDSS or Non-CDSS; Program (Q) items are Reportable or Non-Reportable.">
+          <option value="">All Classifications</option>
+          <option value="RDF-CDSS">RDF · CDSS</option>
+          <option value="RDF-Non-CDSS">RDF · Non-CDSS</option>
+          <option value="PROGRAM-Reportable">Program (Q) · Reportable</option>
+          <option value="PROGRAM-Non-Reportable">Program (Q) · Non-Reportable</option>
+        </select>
+        <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.82rem;color:var(--muted);white-space:nowrap">
+          <input type="checkbox" id="mos-critical-only" /> Critical (&lt;1mo) only
+        </label>
+        <button class="apply-btn small" id="mos-apply">Apply</button>
+        <button class="apply-btn secondary small" id="mos-clear">Clear</button>
+      </div>
+      <div class="kpi-row" id="mos-kpis" style="margin:1rem 0"></div>
+      <div class="section-header">📊 Average MOS by Plant</div>
+      <div class="chart-box full"><div id="chart-mos-plant" style="min-height:360px"></div></div>
+      <div class="section-header">📋 MOS Detail</div>
+      <div id="mos-table"></div>
     </div>
   </section>
 
