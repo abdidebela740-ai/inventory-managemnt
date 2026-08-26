@@ -3178,20 +3178,35 @@ function renderExpiryTimelineChart(suffix, rowsForChart) {
   const uniqMap = {};
   ms.forEach(m => { uniqMap[m] = uniqMatSets[m].size; });
 
+  // FIX-SINGLE-MONTH-AXIS: previously x:ms passed raw "YYYY-MM" strings and
+  // let Plotly auto-detect the axis type. With 2+ months Plotly's date
+  // heuristic happens to autorange fine, but with exactly ONE data point
+  // (e.g. RDF often has only one expiring month) Plotly can't derive a
+  // sensible padding around a single date and collapses the range to a
+  // fraction of a millisecond — producing the garbled "23:59:59.9996" /
+  // "00:00:00.0002" axis ticks and a single full-width bar. Fix: format
+  // human-readable labels ourselves and force xaxis.type:"category" so
+  // Plotly never attempts date-autoranging, regardless of point count. The
+  // original "YYYY-MM" key is preserved in customdata for the click handler.
+  const monthLabels = ms.map(m => {
+    const [y, mo] = m.split("-").map(Number);
+    return new Date(y, mo - 1, 1).toLocaleString("default", {month:"short", year:"numeric"});
+  });
+
   Plotly.newPlot(chartElId, [
-    {type:"bar",    name:"Value at Risk (ETB)", x:ms, y:ms.map(m=>valMap[m]), yaxis:"y",  marker:{color:"#d29922"}, hovertemplate:"<b>%{x}</b><br>ETB %{y:,.0f}<extra></extra>"},
-    {type:"scatter",mode:"lines+markers",name:"Unique Materials", x:ms, y:ms.map(m=>uniqMap[m]), yaxis:"y2", marker:{color:"#f85149",size:8}, line:{color:"#f85149"}, hovertemplate:"<b>%{x}</b><br>Materials: %{y}<extra></extra>"},
+    {type:"bar",    name:"Value at Risk (ETB)", x:monthLabels, y:ms.map(m=>valMap[m]), customdata:ms, yaxis:"y",  marker:{color:"#d29922"}, hovertemplate:"<b>%{x}</b><br>ETB %{y:,.0f}<extra></extra>"},
+    {type:"scatter",mode:"lines+markers",name:"Unique Materials", x:monthLabels, y:ms.map(m=>uniqMap[m]), customdata:ms, yaxis:"y2", marker:{color:"#f85149",size:8}, line:{color:"#f85149"}, hovertemplate:"<b>%{x}</b><br>Materials: %{y}<extra></extra>"},
   ], pl({
     height:280,
     margin:{l:60,r:70,t:20,b:60},
-    xaxis:{title:{text:"Expiry Month",font:{size:10}}, tickfont:{size:10}, automargin:true},
+    xaxis:{type:"category", title:{text:"Expiry Month",font:{size:10}}, tickfont:{size:10}, automargin:true},
     yaxis:{title:{text:"Value at Risk (ETB)",font:{size:10,color:"#d29922"}}, tickfont:{color:"#d29922"}, automargin:true},
     yaxis2:{overlaying:"y",side:"right",gridcolor:"transparent",tickfont:{color:"#f85149"},tickformat:",d",title:{text:"Unique Materials",font:{size:10,color:"#f85149"}}},
   }), PLOTLY_CONFIG);
 
   document.getElementById(chartElId).on("plotly_click", function(data) {
     const pt = data.points[0];
-    const monthKey = pt.x;
+    const monthKey = pt.customdata;
     const [yr, mo] = monthKey.split("-").map(Number);
     const monthItems = rowsForChart.filter(r => r._expiry.getFullYear() === yr && r._expiry.getMonth() + 1 === mo);
     // FIX-QC-EXPIRY: _qty/_val roll Unrestricted + QC together so QC-only
