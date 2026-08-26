@@ -1286,6 +1286,16 @@
     <div id="dash-phantom-alert"></div>
     <div id="dash-mapping-banner"></div>
     <div class="chart-box full">
+      <div class="section-header" style="display:flex;align-items:center;gap:0.5rem;padding-bottom:0.25rem">
+        <span style="font-size:1.1em">🏷️</span>
+        <span>Program Classification</span>
+        <span style="font-size:0.7rem;font-weight:400;color:var(--muted);margin-left:0.25rem">— RDF: CDSS vs Non-CDSS · Health Program (Q): Reportable vs Non-Reportable, from the AMC upload</span>
+      </div>
+      <div id="dash-program-class-empty" class="alert-info" style="margin:0 0 1rem 0;display:none">Upload the AMC file (sidebar → 📐 Upload AMC.xlsx) to see the CDSS / Reportable breakdown.</div>
+      <div class="kpi-row" id="dash-program-class-kpis"></div>
+      <div id="chart-program-class"></div>
+    </div>
+    <div class="chart-box full">
       <div class="section-header">Inventory Value &amp; Quantity by Plant</div>
       <div id="chart-plant-val"></div>
     </div>
@@ -1762,6 +1772,13 @@
           <option value="">All Types</option>
           <option value="ZME">ZME (Medicines)</option>
           <option value="ZMS">ZMS (Medical Supplies)</option>
+        </select>
+        <select id="natl-program-class" class="filter-select" title="RDF items are CDSS or Non-CDSS; Program (Q) items are Reportable or Non-Reportable.">
+          <option value="">All Classifications</option>
+          <option value="RDF-CDSS">RDF · CDSS</option>
+          <option value="RDF-Non-CDSS">RDF · Non-CDSS</option>
+          <option value="PROGRAM-Reportable">Program · Reportable</option>
+          <option value="PROGRAM-Non-Reportable">Program · Non-Reportable</option>
         </select>
         <button class="apply-btn small" id="natl-apply">Apply</button>
         <button class="apply-btn secondary small" id="natl-clear">Clear</button>
