@@ -291,7 +291,7 @@ function modalBodyHtml(mode, user) {
   const MODULE_GROUPS = {
     "Dashboard": ["dashboard:Dashboard"],
     "Inventory Ops": ["pending-dispatch:Open Outbound", "transit:Stock in Transit", "branch:Branch Comparison"],
-    "Quality & Risk": ["expiry:Expiry Watchlist", "qc:Quality Inspection", "expiry-risk:Overstock & Expiry Risk", "stockout-risk:Stockout Risk"],
+    "Quality & Risk": ["expiry:Expiry Watchlist", "qc:Quality Inspection", "blocked:Blocked Stock", "restricted:Restricted Stock", "expiry-risk:Overstock & Expiry Risk", "stockout-risk:Stockout Risk"],
     "Analytics": ["natl-table:National Stock & MOS", "concentration:Stock Concentration"],
     "Self-Service": ["request-analysis:Request Analysis", "allocation-tool:Allocation Tool", "branch-demand:Branch Demand"],
     "Person Assigned": ["person-assigned:Person Assigned (sidebar filter)"],
