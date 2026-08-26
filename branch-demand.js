@@ -222,6 +222,7 @@ const STOCK_TYPE_LABEL = { R: "RDF", Q: "Health Program (Q)" };
 let brdSelectedPlant = "";        // "" = All Branches (only offered to roles that may see it)
 let brdBuffer         = 0;        // HO01 buffer, configurable, default 0
 let brdStockType      = "";       // "" = All, "R" = RDF, "Q" = Health Program — see file header
+let brdProgramClass   = "";       // "" = All, else one of PROGRAM_CLASS.* (mos.js) — RDF·CDSS/Non-CDSS, Program(Q)·Reportable/Non-Reportable
 let brdCodes          = [];       // explicit user-pasted canonical/mapped codes (empty = auto-load)
 // brdDraft: Map<"PLANT::CODE", { approved:boolean, manualAlloc:number|null }>
 // Keyed by plant+code so edits/approvals survive a Recalculate (which only
@@ -791,7 +792,9 @@ function brdMaterialsForScope() {
   const branchPlants = mosPlants.filter(p => p !== HUB_PLANT);
   const scopePlants  = brdSelectedPlant ? [brdSelectedPlant] : branchPlants;
   rows = rows.filter(r => scopePlants.some(p => r.amcs[p] !== null && r.amcs[p] !== undefined));
-  return brdDedupeByOwnType(rows);
+  rows = brdDedupeByOwnType(rows);
+  if (brdProgramClass) rows = rows.filter(r => r.programClass === brdProgramClass);
+  return rows;
 }
 
 // ── BUILD DISPLAY LINES ─────────────────────────────────────────────────────
@@ -1015,6 +1018,9 @@ function renderBranchDemand() {
 
   const bufferEl = document.getElementById("brd-buffer");
   if (bufferEl) bufferEl.value = brdBuffer;
+
+  const clsEl = document.getElementById("brd-program-class");
+  if (clsEl) clsEl.value = brdProgramClass;
 
   const canEdit = brdCanEdit();
   document.getElementById("brd-approve-selected").style.display = canEdit ? "" : "none";
@@ -1315,6 +1321,12 @@ function brdExportTemplate() {
     const stockTypeEl = document.getElementById("brd-stocktype");
     if (stockTypeEl) stockTypeEl.addEventListener("change", () => {
       brdStockType = stockTypeEl.value;
+      renderBranchDemand();
+    });
+
+    const programClassEl = document.getElementById("brd-program-class");
+    if (programClassEl) programClassEl.addEventListener("change", () => {
+      brdProgramClass = programClassEl.value;
       renderBranchDemand();
     });
 
