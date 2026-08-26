@@ -302,14 +302,14 @@ function getGhostTransit(row) {
 
 // Page-level filter state — now arrays for multi-select support
 const pageFilters = {
-  dashboard: { plants: [], mgs: [], valTypes: [] },
-  transit:   { plants: [], mgs: [], valTypes: [], materials: [] },
-  expiry:    { plants: [], mgs: [], valTypes: [], materials: [] },
-  qc:        { plants: [], mgs: [], valTypes: [], materials: [] },
-  blocked:   { plants: [], mgs: [], valTypes: [], materials: [] },
-  restricted:{ plants: [], mgs: [], valTypes: [], materials: [] },
+  dashboard: { plants: [], mgs: [], valTypes: [], cls: [] },
+  transit:   { plants: [], mgs: [], valTypes: [], materials: [], cls: [] },
+  expiry:    { plants: [], mgs: [], valTypes: [], materials: [], cls: [] },
+  qc:        { plants: [], mgs: [], valTypes: [], materials: [], cls: [] },
+  blocked:   { plants: [], mgs: [], valTypes: [], materials: [], cls: [] },
+  restricted:{ plants: [], mgs: [], valTypes: [], materials: [], cls: [] },
   branch:    { mgs: [],             valTypes: [], materials: [] },
-  concentration: { mgs: [], valTypes: [] },
+  concentration: { mgs: [], valTypes: [], cls: [] },
 };
 
 // ── SPREAD CHART DRILLDOWN STATE ──────────────────────────────────────────
@@ -1464,6 +1464,30 @@ function populateAllFilters() {
     buildMultiSelect("ms-conc-vt", "ms-conc-vt-dd", valTypes, "All Material Types");
   })();
 
+  // Classification Type multi-selects — RDF·CDSS / RDF·Non-CDSS /
+  // Program(Q)·Reportable / Program(Q)·Non-Reportable. Sourced from the AMC
+  // file via mos.js's PROGRAM_CLASS_LABELS/buildCodeProgramClassMap(); the
+  // full label set is always offered (even before an AMC file is uploaded)
+  // so the control never disappears — see applyPageFilter() for how a
+  // selection is matched against each row once AMC data is loaded.
+  const clsLabels = (typeof PROGRAM_CLASS_LABELS !== "undefined")
+    ? Object.values(PROGRAM_CLASS_LABELS)
+    : [];
+  const clsConfigs = [
+    { wrapId:"ms-dash-cls",       ddId:"ms-dash-cls-dd",       page:"dashboard" },
+    { wrapId:"ms-transit-cls",    ddId:"ms-transit-cls-dd",    page:"transit"   },
+    { wrapId:"ms-expiry-cls",     ddId:"ms-expiry-cls-dd",     page:"expiry"    },
+    { wrapId:"ms-qc-cls",         ddId:"ms-qc-cls-dd",         page:"qc"        },
+    { wrapId:"ms-blocked-cls",    ddId:"ms-blocked-cls-dd",    page:"blocked"   },
+    { wrapId:"ms-restricted-cls", ddId:"ms-restricted-cls-dd", page:"restricted" },
+    { wrapId:"ms-conc-cls",       ddId:"ms-conc-cls-dd",       page:"concentration" },
+  ];
+  clsConfigs.forEach(cfg => {
+    const wrap = document.getElementById(cfg.wrapId);
+    if (wrap) { wrap.dataset.page = cfg.page; wrap.dataset.key = "cls"; }
+    buildMultiSelect(cfg.wrapId, cfg.ddId, clsLabels, "All Classifications");
+  });
+
   // Material multi-selects — replaces the old free-text Material Lookup search
   // boxes on Transit / Expiry / QC / Flow with a proper filter-bar control.
   const materials = [...new Set(rawDf.map(r => {
@@ -1511,6 +1535,23 @@ function applyPageFilter(page) {
   // Material filter values are stored as "CODE — Description" (or bare CODE);
   // only the code portion is matched against each row's Material field.
   const materials = (f.materials || []).map(v => String(v).split(" — ")[0].trim().toLowerCase());
+  // Classification Type — stored/selected as the human-readable label (e.g.
+  // "RDF · CDSS"); resolved per row via mos.js's buildCodeProgramClassMap()
+  // (canonical code → raw programClass) and PROGRAM_CLASS_LABELS (raw →
+  // label). Built once per call, not per row. If the AMC file hasn't been
+  // uploaded yet the map is empty and every row's label resolves to "" —
+  // rows simply won't match any selected classification until it is.
+  const clsFilter  = f.cls || [];
+  const clsMap     = (clsFilter.length && typeof buildCodeProgramClassMap === "function")
+    ? buildCodeProgramClassMap()
+    : null;
+  const clsLabelOf = (r) => {
+    if (!clsMap) return "";
+    const code = String(r._mappedMaterial || r["Material"] || "").trim().toUpperCase();
+    const raw  = clsMap.get(code);
+    if (!raw) return "";
+    return (typeof PROGRAM_CLASS_LABELS !== "undefined" && PROGRAM_CLASS_LABELS[raw]) || raw;
+  };
   return base.filter(r =>
     // Re-apply base exclusion + role/scope rules (defence-in-depth) via the
     // single central helpers in permissions.js, rather than a second copy
@@ -1533,6 +1574,7 @@ function applyPageFilter(page) {
     (!plants.length    || plants.includes(r["Plant Name"])) &&
     (!mgs.length       || mgs.includes(r["Material Group Name"])) &&
     (!valTypes.length  || valTypes.includes(getValuationType(r))) &&
+    (!clsFilter.length || clsFilter.includes(clsLabelOf(r))) &&
     // FEAT-MAPPING-SEARCH: match on the raw code OR the mapped/STD code, so
     // selecting a target (STD) material also pulls in every source code that
     // maps to it (e.g. picking 105-PHEY-0301 includes 105-PHEY-0301-01 rows
@@ -4751,21 +4793,21 @@ document.addEventListener("DOMContentLoaded", () => {
   // Each Apply/Clear button is identified by its stable ID.
 
   const PAGE_FILTER_MAP = {
-    "dash-filter-apply":    { page:"dashboard", plantWrap:"ms-dash-plant",    mgWrap:"ms-dash-mg",    vtWrap:"ms-dash-vt",    matWrap:null,             action:"apply" },
-    "dash-filter-clear":    { page:"dashboard", plantWrap:"ms-dash-plant",    mgWrap:"ms-dash-mg",    vtWrap:"ms-dash-vt",    matWrap:null,             action:"clear" },
-    "transit-filter-apply": { page:"transit",   plantWrap:"ms-transit-plant", mgWrap:"ms-transit-mg", vtWrap:"ms-transit-vt", matWrap:"ms-transit-mat", action:"apply" },
-    "transit-filter-clear": { page:"transit",   plantWrap:"ms-transit-plant", mgWrap:"ms-transit-mg", vtWrap:"ms-transit-vt", matWrap:"ms-transit-mat", action:"clear" },
-    "expiry-filter-apply":  { page:"expiry",    plantWrap:"ms-expiry-plant",  mgWrap:"ms-expiry-mg",  vtWrap:"ms-expiry-vt",  matWrap:"ms-expiry-mat",  action:"apply" },
-    "expiry-filter-clear":  { page:"expiry",    plantWrap:"ms-expiry-plant",  mgWrap:"ms-expiry-mg",  vtWrap:"ms-expiry-vt",  matWrap:"ms-expiry-mat",  action:"clear" },
-    "qc-filter-apply":      { page:"qc",        plantWrap:"ms-qc-plant",      mgWrap:"ms-qc-mg",      vtWrap:"ms-qc-vt",      matWrap:"ms-qc-mat",      action:"apply" },
-    "qc-filter-clear":      { page:"qc",        plantWrap:"ms-qc-plant",      mgWrap:"ms-qc-mg",      vtWrap:"ms-qc-vt",      matWrap:"ms-qc-mat",      action:"clear" },
-    "blocked-filter-apply": { page:"blocked",   plantWrap:"ms-blocked-plant", mgWrap:"ms-blocked-mg", vtWrap:"ms-blocked-vt", matWrap:"ms-blocked-mat", action:"apply" },
-    "blocked-filter-clear": { page:"blocked",   plantWrap:"ms-blocked-plant", mgWrap:"ms-blocked-mg", vtWrap:"ms-blocked-vt", matWrap:"ms-blocked-mat", action:"clear" },
-    "restricted-filter-apply": { page:"restricted", plantWrap:"ms-restricted-plant", mgWrap:"ms-restricted-mg", vtWrap:"ms-restricted-vt", matWrap:"ms-restricted-mat", action:"apply" },
-    "restricted-filter-clear": { page:"restricted", plantWrap:"ms-restricted-plant", mgWrap:"ms-restricted-mg", vtWrap:"ms-restricted-vt", matWrap:"ms-restricted-mat", action:"clear" },
+    "dash-filter-apply":    { page:"dashboard", plantWrap:"ms-dash-plant",    mgWrap:"ms-dash-mg",    vtWrap:"ms-dash-vt",    matWrap:null,             clsWrap:"ms-dash-cls",       action:"apply" },
+    "dash-filter-clear":    { page:"dashboard", plantWrap:"ms-dash-plant",    mgWrap:"ms-dash-mg",    vtWrap:"ms-dash-vt",    matWrap:null,             clsWrap:"ms-dash-cls",       action:"clear" },
+    "transit-filter-apply": { page:"transit",   plantWrap:"ms-transit-plant", mgWrap:"ms-transit-mg", vtWrap:"ms-transit-vt", matWrap:"ms-transit-mat", clsWrap:"ms-transit-cls",    action:"apply" },
+    "transit-filter-clear": { page:"transit",   plantWrap:"ms-transit-plant", mgWrap:"ms-transit-mg", vtWrap:"ms-transit-vt", matWrap:"ms-transit-mat", clsWrap:"ms-transit-cls",    action:"clear" },
+    "expiry-filter-apply":  { page:"expiry",    plantWrap:"ms-expiry-plant",  mgWrap:"ms-expiry-mg",  vtWrap:"ms-expiry-vt",  matWrap:"ms-expiry-mat",  clsWrap:"ms-expiry-cls",     action:"apply" },
+    "expiry-filter-clear":  { page:"expiry",    plantWrap:"ms-expiry-plant",  mgWrap:"ms-expiry-mg",  vtWrap:"ms-expiry-vt",  matWrap:"ms-expiry-mat",  clsWrap:"ms-expiry-cls",     action:"clear" },
+    "qc-filter-apply":      { page:"qc",        plantWrap:"ms-qc-plant",      mgWrap:"ms-qc-mg",      vtWrap:"ms-qc-vt",      matWrap:"ms-qc-mat",      clsWrap:"ms-qc-cls",         action:"apply" },
+    "qc-filter-clear":      { page:"qc",        plantWrap:"ms-qc-plant",      mgWrap:"ms-qc-mg",      vtWrap:"ms-qc-vt",      matWrap:"ms-qc-mat",      clsWrap:"ms-qc-cls",         action:"clear" },
+    "blocked-filter-apply": { page:"blocked",   plantWrap:"ms-blocked-plant", mgWrap:"ms-blocked-mg", vtWrap:"ms-blocked-vt", matWrap:"ms-blocked-mat", clsWrap:"ms-blocked-cls",    action:"apply" },
+    "blocked-filter-clear": { page:"blocked",   plantWrap:"ms-blocked-plant", mgWrap:"ms-blocked-mg", vtWrap:"ms-blocked-vt", matWrap:"ms-blocked-mat", clsWrap:"ms-blocked-cls",    action:"clear" },
+    "restricted-filter-apply": { page:"restricted", plantWrap:"ms-restricted-plant", mgWrap:"ms-restricted-mg", vtWrap:"ms-restricted-vt", matWrap:"ms-restricted-mat", clsWrap:"ms-restricted-cls", action:"apply" },
+    "restricted-filter-clear": { page:"restricted", plantWrap:"ms-restricted-plant", mgWrap:"ms-restricted-mg", vtWrap:"ms-restricted-vt", matWrap:"ms-restricted-mat", clsWrap:"ms-restricted-cls", action:"clear" },
 
-    "conc-filter-apply":    { page:"concentration", plantWrap:null,               mgWrap:"ms-conc-mg",    vtWrap:"ms-conc-vt",    matWrap:null,             action:"apply" },
-    "conc-filter-clear":    { page:"concentration", plantWrap:null,               mgWrap:"ms-conc-mg",    vtWrap:"ms-conc-vt",    matWrap:null,             action:"clear" },
+    "conc-filter-apply":    { page:"concentration", plantWrap:null,               mgWrap:"ms-conc-mg",    vtWrap:"ms-conc-vt",    matWrap:null,             clsWrap:"ms-conc-cls",       action:"apply" },
+    "conc-filter-clear":    { page:"concentration", plantWrap:null,               mgWrap:"ms-conc-mg",    vtWrap:"ms-conc-vt",    matWrap:null,             clsWrap:"ms-conc-cls",       action:"clear" },
   };
 
   document.body.addEventListener("click", (e) => {
@@ -4796,6 +4838,10 @@ document.addEventListener("DOMContentLoaded", () => {
         const wrap = document.getElementById(cfg.matWrap);
         pageFilters[cfg.page].materials = (wrap && wrap._getSelected) ? wrap._getSelected() : [];
       }
+      if (cfg.clsWrap) {
+        const wrap = document.getElementById(cfg.clsWrap);
+        pageFilters[cfg.page].cls = (wrap && wrap._getSelected) ? wrap._getSelected() : [];
+      }
     } else {
       if (cfg.plantWrap) {
         pageFilters[cfg.page].plants = [];
@@ -4815,6 +4861,11 @@ document.addEventListener("DOMContentLoaded", () => {
       if (cfg.matWrap) {
         pageFilters[cfg.page].materials = [];
         const wrap = document.getElementById(cfg.matWrap);
+        if (wrap && wrap._clearSelected) wrap._clearSelected();
+      }
+      if (cfg.clsWrap) {
+        pageFilters[cfg.page].cls = [];
+        const wrap = document.getElementById(cfg.clsWrap);
         if (wrap && wrap._clearSelected) wrap._clearSelected();
       }
     }
