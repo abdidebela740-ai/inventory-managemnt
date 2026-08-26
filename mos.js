@@ -28,20 +28,27 @@
 
 const HUB_PLANT = "HO01"; // the distribution hub — never has its own consumption
 
-// The only two program types this app understands. Anything an AMC file
-// carries outside this set (including blank) can't be trusted for MOS-by-type
-// filtering, so it's routed through the assignment prompt below instead of
-// being silently kept as whatever raw string the file had.
+// The only two program types this app understands.
 const VALID_MOS_TYPES = ["Q", "RDF"];
 
 // ── PROGRAM CLASSIFICATION (CDSS / Reportable) ─────────────────────────────────
-// A second, independent dimension on top of Q/RDF, introduced by the
-// "PROGRAM TYPE" column of the newer-style AMC export. Every RDF item is
-// either CDSS or Non-CDSS; every Q ("Health Program") item is either
-// Reportable or Non-Reportable. This does NOT replace the Q/RDF `type` field
-// or its manual assignment prompt — VALID_MOS_TYPES / promptForMosTypeAssignment
-// below are unchanged and still run for anything that isn't recognizably Q or
-// RDF. Classification is an extra label layered on top once `type` is known.
+// A second, independent dimension on top of Q/RDF.
+//
+// TYPE SOURCE OF TRUTH: the Q/RDF `type` is ALWAYS read from the main
+// inventory file's own "Special Stock Type" column (Q = Health Program;
+// blank, anything else, or the material not being in the inventory file at
+// all, is treated as RDF). It is NEVER read from the AMC file — the AMC
+// file's "PROGRAM TYPE" column only decides the CDSS/Reportable
+// sub-classification layered on top:
+//
+//   RDF + AMC "PROGRAM TYPE" says "RDF-CDSS"           → RDF · CDSS
+//   RDF + anything else (blank / not in AMC at all)    → RDF · Non-CDSS
+//   Q   + AMC "PROGRAM TYPE" says "Program-Reportable"  → Program (Q) · Reportable
+//   Q   + anything else (blank / not in AMC at all)    → Program (Q) · Non-Reportable
+//
+// Every material lands in exactly one of these four buckets — there is no
+// "unclassified" case and no manual assignment step is needed, since type
+// always has a deterministic answer from the inventory file.
 const PROGRAM_CLASS = {
   RDF_CDSS:     "RDF-CDSS",
   RDF_NON_CDSS: "RDF-Non-CDSS",
@@ -51,26 +58,23 @@ const PROGRAM_CLASS = {
 const PROGRAM_CLASS_LABELS = {
   [PROGRAM_CLASS.RDF_CDSS]:     "RDF · CDSS",
   [PROGRAM_CLASS.RDF_NON_CDSS]: "RDF · Non-CDSS",
-  [PROGRAM_CLASS.PROG_REPORT]:  "Program · Reportable",
-  [PROGRAM_CLASS.PROG_NONREPT]: "Program · Non-Reportable",
+  [PROGRAM_CLASS.PROG_REPORT]:  "Program (Q) · Reportable",
+  [PROGRAM_CLASS.PROG_NONREPT]: "Program (Q) · Non-Reportable",
 };
 
-// Parses a raw "PROGRAM TYPE" cell from the AMC file. The newer export
-// encodes BOTH dimensions in one string — e.g. "RDF-CDSS" or
-// "PROGRAM-Reportable" — so a match here gives us the Q/RDF `type` AND the
-// new classification in one shot. Tolerant of spacing/hyphen variations
-// ("RDF CDSS", "RDF_NON_CDSS", "program non reportable", etc.).
-// Returns { type: "Q"|"RDF", cls: PROGRAM_CLASS.* } or null if the raw value
-// doesn't match this compound format at all (e.g. it's blank, or a plain
-// "Q"/"RDF" with no CDSS/Reportable suffix).
-function parseProgramType(raw) {
-  const norm = String(raw || "").trim().toUpperCase().replace(/[\s_]+/g, "-").replace(/-+/g, "-");
-  if (!norm) return null;
-  if (/^RDF-NON-CDSS$/.test(norm))      return { type: "RDF", cls: PROGRAM_CLASS.RDF_NON_CDSS };
-  if (/^RDF-CDSS$/.test(norm))          return { type: "RDF", cls: PROGRAM_CLASS.RDF_CDSS };
-  if (/^PROGRAM-NON-REPORTABLE$/.test(norm)) return { type: "Q", cls: PROGRAM_CLASS.PROG_NONREPT };
-  if (/^PROGRAM-REPORTABLE$/.test(norm))     return { type: "Q", cls: PROGRAM_CLASS.PROG_REPORT };
-  return null;
+// Resolves the final { type, cls } pair for one canonical material code.
+// `code` must already be the canonical (mapping-resolved) code, matching how
+// `sstMap` (buildSpecialStockTypeMap) and the inventory description map are
+// keyed. `rawProgramType` is whatever the AMC file's "PROGRAM TYPE" /
+// "Material Type Code" cell contained for this material, verbatim (may be
+// blank if the material wasn't found in the AMC file at all).
+function resolveProgramTypeAndClass(code, rawProgramType, sstMap) {
+  const type = sstMap.get(code) === "Q" ? "Q" : "RDF";
+  const norm = String(rawProgramType || "").trim().toUpperCase().replace(/[\s_]+/g, "-").replace(/-+/g, "-");
+  const cls = type === "RDF"
+    ? (norm === "RDF-CDSS" ? PROGRAM_CLASS.RDF_CDSS : PROGRAM_CLASS.RDF_NON_CDSS)
+    : (norm === "PROGRAM-REPORTABLE" ? PROGRAM_CLASS.PROG_REPORT : PROGRAM_CLASS.PROG_NONREPT);
+  return { type, cls };
 }
 
 // code (upper) → "Q" | "RDF", derived from the main inventory file's own
@@ -97,7 +101,7 @@ function buildSpecialStockTypeMap() {
 }
 
 // ── MOS STATE ────────────────────────────────────────────────────────────────
-let mosAmcRaw    = [];          // parsed rows from AMC.xlsx: { code, desc, type, person, amcs:{plant:val} }
+let mosAmcRaw    = [];          // parsed rows from AMC.xlsx: { code, desc, rawProgramType, person, amcs:{plant:val} }
 let mosPlants    = [];          // ordered plant code list detected from AMC.xlsx
 let mosMerged    = [];          // deduplicated AMC rows (mapping-aware), one per canonical material
 let mosPersons   = [];          // sorted unique PERSON values from AMC.xlsx
@@ -135,11 +139,6 @@ function loadMosAmcFile(file) {
       // everywhere it's looked up — including in National SOH/MOS.
       mosPlants  = detectedPlants.map(p => String(p).trim().toUpperCase());
 
-      // Needed to (a) fall back to for the Q/RDF `type` itself when the file
-      // doesn't carry a plain Material Type Code, and (b) decide the default
-      // "Non-" bucket for anything resolved but not explicitly classified.
-      const sstMap = buildSpecialStockTypeMap();
-
       mosAmcRaw  = rows.map(r => {
         // FIX-AMC-CODE-CASE: uppercase here too (not just trim) — every other
         // material-code comparison in the app normalizes with
@@ -152,37 +151,16 @@ function loadMosAmcFile(file) {
         // it was genuinely present in the AMC upload.
         const code = String(r["Material Code"] || "").trim().toUpperCase();
 
-        // CDSS/Reportable-aware type resolution:
-        //   1. If "PROGRAM TYPE" is the new compound format ("RDF-CDSS",
-        //      "PROGRAM-Non-Reportable", etc.), it gives us both the Q/RDF
-        //      type AND the classification in one read.
-        //   2. Otherwise fall back to the old sources: "Material Type Code",
-        //      or a plain "Q"/"RDF" value in "PROGRAM TYPE" — classification
-        //      stays unresolved for now (filled in after the manual-assign
-        //      prompt, see finishMosAmcLoad).
-        //   3. If type is STILL unresolved, try the main inventory file's
-        //      Special Stock Type before giving up and routing to the
-        //      manual-assignment prompt.
-        const rawProgramType = r["PROGRAM TYPE"] || "";
-        const parsed = parseProgramType(rawProgramType);
-
-        let type = "";
-        let programClass = null;
-
-        if (parsed) {
-          type = parsed.type;
-          programClass = parsed.cls;
-        } else {
-          const plain = String(r["Material Type Code"] || rawProgramType || "").trim().toUpperCase();
-          type = VALID_MOS_TYPES.includes(plain) ? plain : "";
-          if (!type && sstMap.has(code)) type = sstMap.get(code);
-        }
+        // Raw classification text only — NOT used to determine Q/RDF `type`
+        // anymore (see resolveProgramTypeAndClass above). Kept verbatim here
+        // and matched against "RDF-CDSS" / "Program-Reportable" later, once
+        // per merged material, in buildMosMerged().
+        const rawProgramType = String(r["PROGRAM TYPE"] || r["Material Type Code"] || "").trim();
 
         return {
           code,
           desc:   String(r["Description"] || "").trim(),
-          type,
-          programClass,       // filled in for every row once type is known — see finishMosAmcLoad
+          rawProgramType,
           person: String(r["PERSON"] || "").trim(),
           amcs: Object.fromEntries(
             detectedPlants.map(p => [String(p).trim().toUpperCase(), (r[p] == null || r[p] === "" || typeof r[p] === "string") ? null : Number(r[p])])
@@ -194,17 +172,11 @@ function loadMosAmcFile(file) {
       mosPersons = [...new Set(mosAmcRaw.map(r => r.person).filter(Boolean))].sort();
       if (typeof populatePersonFilter === "function") populatePersonFilter(mosPersons);
 
-      // Any row whose type isn't Q or RDF (including blank) needs a human
-      // call — stop and ask right away instead of guessing or silently
-      // dropping it into an "other" bucket. mosAmcRaw entries are mutated
-      // in place by promptForMosTypeAssignment, so this just needs to run
-      // before mosMerged is built.
-      const ambiguous = mosAmcRaw.filter(r => !VALID_MOS_TYPES.includes(r.type));
-      if (ambiguous.length) {
-        promptForMosTypeAssignment(ambiguous, () => finishMosAmcLoad(file, detectedPlants, statusEl, btnEl));
-      } else {
-        finishMosAmcLoad(file, detectedPlants, statusEl, btnEl);
-      }
+      // No manual assignment step needed — type (Q/RDF) always comes from
+      // the inventory file's own Special Stock Type, and classification
+      // (CDSS/Reportable) is derived deterministically inside buildMosMerged
+      // via resolveProgramTypeAndClass(). See finishMosAmcLoad below.
+      finishMosAmcLoad(file, detectedPlants, statusEl, btnEl);
 
     } catch (err) {
       console.error("MOS AMC load error:", err);
@@ -214,90 +186,7 @@ function loadMosAmcFile(file) {
   reader.readAsArrayBuffer(file);
 }
 
-// ── Program-type clarification prompt ─────────────────────────────────────────
-// Walks the caller through every row whose type wasn't Q or RDF, one at a
-// time, and lets them pick which it should be (or leave it unassigned).
-// `items` are references into mosAmcRaw, so assigning here mutates the same
-// objects buildMosMerged() will read from next.
-function promptForMosTypeAssignment(items, onDone) {
-  let idx = 0;
-
-  function finish() {
-    document.removeEventListener("keydown", escHandler);
-    const el = document.getElementById("mos-type-assign-backdrop");
-    if (el) el.remove();
-    onDone();
-  }
-
-  function escHandler(e) {
-    if (e.key === "Escape") assign(""); // skip this one item, keep the queue going
-  }
-
-  function assign(value) {
-    if (value) items[idx].type = value;
-    idx++;
-    render();
-  }
-
-  function render() {
-    if (idx >= items.length) { finish(); return; }
-    const row = items[idx];
-
-    let backdrop = document.getElementById("mos-type-assign-backdrop");
-    if (!backdrop) {
-      backdrop = document.createElement("div");
-      backdrop.id = "mos-type-assign-backdrop";
-      backdrop.className = "um-modal-backdrop open";
-      document.body.appendChild(backdrop);
-      document.addEventListener("keydown", escHandler);
-    }
-
-    backdrop.innerHTML = `
-      <div class="um-modal" role="dialog" aria-modal="true" aria-label="Assign program type">
-        <div class="um-modal-header">
-          <h2>📐 Assign Program Type</h2>
-          <span style="color:var(--muted);font-size:0.8rem">${idx + 1} of ${items.length}</span>
-        </div>
-        <div class="um-modal-body">
-          <div class="alert-info" style="margin-bottom:0.9rem">
-            This material's type isn't <b>Q</b> or <b>RDF</b>${row.type ? ` (found "${escHtml(row.type)}")` : " (blank)"} — pick one to continue.
-          </div>
-          <div style="font-weight:800;margin-bottom:2px">${escHtml(row.code)}</div>
-          <div style="color:var(--muted);font-size:0.85rem">${escHtml(row.desc || "—")}${row.person ? " · " + escHtml(row.person) : ""}</div>
-        </div>
-        <div class="um-modal-footer" style="justify-content:space-between">
-          <button type="button" class="apply-btn secondary small" id="mos-type-skip">Skip (leave blank)</button>
-          <div style="display:flex;gap:10px">
-            <button type="button" class="apply-btn" id="mos-type-q">Q</button>
-            <button type="button" class="apply-btn" id="mos-type-rdf">RDF</button>
-          </div>
-        </div>
-      </div>
-    `;
-    document.getElementById("mos-type-q").addEventListener("click", () => assign("Q"));
-    document.getElementById("mos-type-rdf").addEventListener("click", () => assign("RDF"));
-    document.getElementById("mos-type-skip").addEventListener("click", () => assign(""));
-  }
-
-  render();
-}
-
-// Defaulting pass for program classification — runs after type resolution
-// (including any manual assignment via the popup) is fully settled. Any row
-// whose type is now Q or RDF but has no explicit CDSS/Reportable label from
-// the file falls into the "Non-" bucket for its family: Q → Program-Non-
-// Reportable, RDF → RDF-Non-CDSS. A row whose type is STILL blank (user hit
-// "Skip" in the prompt) is left unclassified rather than guessed.
-function applyProgramClassDefaults() {
-  mosAmcRaw.forEach(r => {
-    if (r.programClass) return;
-    if (r.type === "Q")   r.programClass = PROGRAM_CLASS.PROG_NONREPT;
-    else if (r.type === "RDF") r.programClass = PROGRAM_CLASS.RDF_NON_CDSS;
-  });
-}
-
 function finishMosAmcLoad(file, detectedPlants, statusEl, btnEl) {
-  applyProgramClassDefaults();
   mosMerged = buildMosMerged();
 
   const count = mosMerged.length;
@@ -342,19 +231,22 @@ function buildInventoryDescMap() {
 // a mapping file is loaded, summing AMC per plant across duplicates — same
 // approach used elsewhere in the app for inventory rows.
 //
-// KEYED BY CODE + TYPE, NOT CODE ALONE: the same material code can legitimately
-// appear twice in the AMC file — once under program type Q, once under RDF —
-// representing two separate consumption streams for that code. Keying by code
-// alone would collapse those two rows into one, silently summing their AMC and
-// keeping only whichever type was seen first. Keying by code+type keeps them
-// as two distinct mosMerged rows (same .code, different .type), while still
-// merging/summing multiple rows that share BOTH the same canonical code AND
-// the same type (e.g. two source codes that map to one target code, both Q).
+// KEYED BY CANONICAL CODE ALONE: type is no longer read off the AMC row (see
+// resolveProgramTypeAndClass) — it's a property of the material itself,
+// sourced from the inventory file's Special Stock Type, so a material can
+// only have one type. Any duplicate AMC rows for the same canonical code
+// (e.g. two source codes mapping to one target) are summed together, and
+// whichever row's rawProgramType is non-blank wins if they disagree.
+//
+// Rebuilt on every AMC/inventory/mapping change (see wireMosModule below),
+// so sstMap here always reflects the CURRENT inventory upload — no stale
+// type/classification left over from before the inventory file loaded.
 function buildMosMerged() {
   if (!mosAmcRaw.length) return [];
 
-  const merged = new Map(); // "canonicalCode|type" → mergedRow
+  const merged = new Map(); // canonicalCode → mergedRow
   const invDescMap = buildInventoryDescMap();
+  const sstMap = buildSpecialStockTypeMap();
 
   for (const row of mosAmcRaw) {
     let canonical = row.code;
@@ -376,25 +268,23 @@ function buildMosMerged() {
     // AMC file had nothing for this material — try the inventory file.
     if (!canonDesc) canonDesc = invDescMap.get(canonical) || "";
 
-    const dedupKey = `${canonical}|${row.type}`;
-
-    if (!merged.has(dedupKey)) {
-      merged.set(dedupKey, {
+    if (!merged.has(canonical)) {
+      merged.set(canonical, {
         code: canonical,
         origCodes: new Set([row.code]),
         desc: canonDesc,
-        type: row.type,
-        programClass: row.programClass || null,
+        rawProgramType: row.rawProgramType || "",
         person: row.person || "",
         amcs: Object.fromEntries(mosPlants.map(p => [p, null])),
         isMerged: false,
       });
     }
-    const m = merged.get(dedupKey);
+    const m = merged.get(canonical);
     m.origCodes.add(row.code);
     if (m.origCodes.size > 1) m.isMerged = true;
     if (!m.desc && canonDesc) m.desc = canonDesc; // fill in if an earlier dup left it blank
-    if (!m.programClass && row.programClass) m.programClass = row.programClass; // fill in if an earlier dup left it blank
+    if (!m.rawProgramType && row.rawProgramType) m.rawProgramType = row.rawProgramType; // fill in if an earlier dup left it blank
+    if (!m.person && row.person) m.person = row.person;
 
     for (const p of mosPlants) {
       const v = row.amcs[p];
@@ -404,10 +294,15 @@ function buildMosMerged() {
     }
   }
 
-  return Array.from(merged.values()).map(m => ({
-    ...m,
-    origCodes: [...m.origCodes].join(", "),
-  }));
+  return Array.from(merged.values()).map(m => {
+    const { type, cls } = resolveProgramTypeAndClass(m.code, m.rawProgramType, sstMap);
+    return {
+      ...m,
+      origCodes: [...m.origCodes].join(", "),
+      type,
+      programClass: cls,
+    };
+  });
 }
 
 // ── FIND A mosMerged ROW BY CODE, TYPE-AWARE ──────────────────────────────────
@@ -632,10 +527,12 @@ async function renderMosPlant() {
   const searchEl    = document.getElementById("mos-search");
   const plantEl     = document.getElementById("mos-plant-filter");
   const typeEl      = document.getElementById("mos-type");
+  const clsEl       = document.getElementById("mos-program-class");
   const criticalEl  = document.getElementById("mos-critical-only");
 
   const searchQ     = searchEl   ? searchEl.value.trim()  : "";
   const typeVal     = typeEl     ? typeEl.value.trim()    : "";
+  const clsVal      = clsEl      ? clsEl.value.trim()     : "";
   const criticalOnly= criticalEl ? criticalEl.checked     : false;
   // PLANT SCOPING: ignore a plant value the DOM happens to hold (e.g. a
   // stale selection from before the user's session/plant was known) if
@@ -666,7 +563,7 @@ async function renderMosPlant() {
   const sohMap = buildMosSohMap();
   const hasSoh = sohMap.size > 0;
 
-  let rows = getMosFilteredRows(typeVal, searchQ);
+  let rows = getMosFilteredRows(typeVal, searchQ, clsVal);
 
   // Compute per-plant MOS for every row, plus one network-wide National MOS
   let scored = rows.map(r => ({
@@ -912,6 +809,7 @@ function renderDashboardProgramClassPanel() {
         const s = document.getElementById("mos-search");         if (s) s.value = "";
         const p = document.getElementById("mos-plant-filter");   if (p) p.value = "";
         const t = document.getElementById("mos-type");           if (t) t.value = "";
+        const g = document.getElementById("mos-program-class");  if (g) g.value = "";
         const c = document.getElementById("mos-critical-only");  if (c) c.checked = false;
         renderMosPlant();
       },
