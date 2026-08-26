@@ -514,7 +514,14 @@ function waitForUploadOutcome(slot, statusId, timeoutMs = 20000) {
       const text = statusEl.textContent || "";
       if (text.includes("⏳")) { sawLoadingStart = true; return; } // this upload's own parse has genuinely started — keep waiting
       if (!sawLoadingStart) return; // stale leftover text from before this upload started — ignore, keep waiting for the real "⏳"
-      if (/✗|⚠️/.test(text) || statusEl.querySelector(".status-error")) { finish(false); return; }
+      // NOTE: don't treat a bare "⚠️" glyph as failure — some loaders (e.g.
+      // mos.js's finishMosAmcLoad) append a benign amber warning line on a
+      // GENUINELY SUCCESSFUL parse (e.g. "HO01 column not found — hub MOS
+      // rule won't apply"), which also uses ⚠️ but is NOT wrapped in
+      // .status-error. Only "✗" text or an actual .status-error element is a
+      // real failure signal — otherwise a valid file with a harmless warning
+      // gets wrongly rejected as "didn't match the expected format".
+      if (/✗/.test(text) || statusEl.querySelector(".status-error")) { finish(false); return; }
       // Left the loading state with no recognizable failure marker — treat
       // as success. (Don't require an exact "✓" match: block only on a
       // POSITIVE failure signal, so an upload never gets silently dropped
