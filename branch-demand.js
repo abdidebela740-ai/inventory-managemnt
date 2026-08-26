@@ -1115,9 +1115,9 @@ function brdRenderTables(lines, canEdit) {
     { key: "sohHo", label: "SOH HO01", raw: true, fmt: (v, r) => r.qcOnly
         ? `<span class="brd-note-qc" title="No unrestricted (usable) HO01 stock — ${fmtQty(r.qcHo)} in Quality Inspection (see Notes column)">0</span>`
         : fmtQty(v) },
-    { key: "netSohHo", label: "Net SOH HO01 (after Open Outbound)", raw: true,
+    { key: "netSohHo", label: "Net SOH HO01 (after Pending Dispatch)", raw: true,
       fmt: (v, r) => r.outboundTotal > 0
-        ? `<span class="brd-note-scale" title="${fmtQty(r.sohHo)} raw SOH − ${fmtQty(r.outboundTotal)} already committed to open (not-yet-issued) outbound deliveries, across all branches — this is the number allocation actually uses">${fmtQty(v)}</span>`
+        ? `<span class="brd-note-scale" title="${fmtQty(r.sohHo)} raw SOH − ${fmtQty(r.outboundTotal)} already committed to open (not-yet-issued) pending dispatch at HO01, across all branches — this is the number allocation actually uses">${fmtQty(v)}</span>`
         : fmtQty(v) },
     { key: "need", label: `Need (to ${TARGET_MOS})`, fmt: v => fmtQty(v) },
     { key: "alloc", label: "Allocated", raw: true,
@@ -1135,7 +1135,7 @@ function brdRenderTables(lines, canEdit) {
       fmt: (v, r) => {
         const bits = [];
         if (r.qcOnly) bits.push(`<span class="brd-status-pill brd-status-amber" title="HO01 stock (${fmtQty(r.qcHo)}) is still in Quality Inspection — not yet releasable">🧪 ${fmtQty(r.qcHo)} Quality Inspection</span>`);
-        if (r.outboundQty > 0) bits.push(`<span class="brd-status-pill brd-status-blue" title="${fmtQty(r.outboundQty)} of this material is already on an open (not-yet-issued) outbound delivery to this branch — netted out of Need below">📦 ${fmtQty(r.outboundQty)} in transit</span>`);
+        if (r.outboundQty > 0) bits.push(`<span class="brd-status-pill brd-status-blue" title="${fmtQty(r.outboundQty)} of this material is already on an open (not-yet-issued) pending dispatch from HO01 to this branch — netted out of Need below">📦 ${fmtQty(r.outboundQty)} pending dispatch (HO01)</span>`);
         if (r.isPartial) bits.push(`<span class="brd-status-pill brd-status-amber" title="HO01 short overall for this material (covers ${Math.round(r.scalePct * 100)}% of combined need) — priority allocation filled THIS branch's own need ${Math.round(r.fillPct * 100)}% (${escHtml(r.priorityLabel)} priority)">⚖️ ${Math.round(r.fillPct * 100)}%</span>`);
         if (r.surplusPlants && r.surplusPlants.length) bits.push(`<span class="brd-status-pill brd-status-blue" title="Surplus (>8mo) at: ${r.surplusPlants.map(escHtml).join(", ")}">↔️ ${r.surplusPlants.length}</span>`);
         if (!r.hasAmc) bits.push(`<span class="brd-status-pill brd-status-muted" title="No AMC on file — enter quantity manually">✏️ Manual</span>`);
