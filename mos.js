@@ -73,7 +73,16 @@ function loadMosAmcFile(file) {
       // everywhere it's looked up — including in National SOH/MOS.
       mosPlants  = detectedPlants.map(p => String(p).trim().toUpperCase());
       mosAmcRaw  = rows.map(r => ({
-        code:   String(r["Material Code"] || "").trim(),
+        // FIX-AMC-CODE-CASE: uppercase here too (not just trim) — every other
+        // material-code comparison in the app normalizes with
+        // .trim().toUpperCase() (see FIX-MOS-MAP-CASE below and
+        // BUGFIX-QC-FALSE-POSITIVE in branch-demand.js). mosFindRow()/
+        // brdResolveCode() uppercase the code they search FOR, so if this
+        // file's own "Material Code" column has lowercase/mixed-case values
+        // (common in real SAP exports), those rows silently failed to match
+        // and the material looked "Not found" on Branch Demand even though
+        // it was genuinely present in the AMC upload.
+        code:   String(r["Material Code"] || "").trim().toUpperCase(),
         desc:   String(r["Description"]   || "").trim(),
         type:   String(r["Material Type Code"] || r["PROGRAM TYPE"] || "").trim().toUpperCase(),
         person: String(r["PERSON"] || "").trim(),
