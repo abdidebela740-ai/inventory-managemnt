@@ -1,4 +1,4 @@
-// =============================================================================
+ // =============================================================================
 // PharmaTrack v2 — branch-demand.js
 // "Branch Demand" (Branch Request Helper) — module key: branch-demand
 //
@@ -1264,17 +1264,16 @@ function brdRenderTables(lines, canEdit) {
       fmt: (v, r) => `<input type="checkbox" class="brd-approve-cb" data-plant="${escHtml(r.plant)}" data-code="${escHtml(r.code)}" ${r.approved ? "checked" : ""} />` });
   }
   reqCols.push(
-    { key: "code", label: "Mapped Code", fmt: (v, r) => `<span class="col-mat-code">${escHtml(v)}</span>`, raw: true, cellClass: "col-mat-code-wrap" },
     // The code/pack size to actually PUT ON THE REQUEST — resolved from the
     // mapped (AMC-tracking) code down to whatever real, orderable source
     // code exists for this material and stock type (see reqSourceCode on
-    // brdBuildLines). Only shown as its own column when it actually differs
-    // from the Mapped Code above, so unmapped/1:1 lines don't get a
-    // redundant "same code" column repeated at every row.
-    { key: "reqSourceCode", label: "Request As (Available Code)", raw: true,
+    // brdBuildLines). Mapped Code column intentionally omitted here (it's
+    // shown on the Analysis tab) — Request Form only needs the actual
+    // material code to put on the requisition.
+    { key: "reqSourceCode", label: "Material Code", raw: true,
       fmt: (v, r) => r.reqSourceDiffers
         ? `<span class="col-mat-code" title="${r.reqSourceTypeMatched ? '' : 'No source code found for this line\'s own Q/RDF stock type — falling back to the mapping table\'s other candidate(s). Double-check before approving.'}">${escHtml(v)}${!r.reqSourceTypeMatched ? ' <span class="brd-note-noamc">⚠ check type</span>' : ""}</span>`
-        : `<span class="brd-status-muted">same as mapped</span>` },
+        : `<span class="col-mat-code">${escHtml(v)}</span>` },
     { key: "desc", label: "Description", cellClass: "col-mat-desc-wrap" },
     { key: "plant", label: "Branch" },
     { key: "priorityTier", label: "Priority", raw: true, fmt: (v, r) => brdPriorityBadge(v) },
@@ -1282,15 +1281,6 @@ function brdRenderTables(lines, canEdit) {
       fmt: (v, r) => canEdit
         ? `<input type="number" min="0" step="1" class="brd-alloc-input" data-plant="${escHtml(r.plant)}" data-code="${escHtml(r.code)}" value="${Number(v || 0)}" />`
         : `<b>${fmtQty(v)}</b>` },
-    // Same quantity, but converted into the AVAILABLE code's own pack size
-    // via the mapping factor — this, not the raw number above, is what
-    // should be written on the requisition when Request As differs from
-    // Mapped Code (e.g. mapped tracks AMC as 10x10, available pack is
-    // 10x5 → factor 0.5 → this column shows double the mapped-unit count).
-    { key: "reqSourceQty", label: "Qty (Available Pack)", raw: true,
-      fmt: (v, r) => r.reqSourceDiffers
-        ? `<b title="${fmtQty(r.alloc)} mapped-unit(s) × factor ${r.reqSourceFactor}">${fmtQty(v)}</b>`
-        : `<span class="brd-status-muted">—</span>` },
     // Nearest expiry of the branch's OWN existing stock of this item —
     // Request Form only (not Analysis, see file header / cols above).
     { key: "nearestExpiry", label: "Nearest Expiry", raw: true, fmt: v => brdFmtExpiry(v) },
