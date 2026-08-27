@@ -574,13 +574,7 @@ function renderStockoutRisk() {
   if (!hasInventory || !hasAmc) {
     const noDataEl = document.getElementById("stko-no-data");
     if (noDataEl) {
-      if (!hasAmc && !hasInventory) {
-        noDataEl.innerHTML = 'Upload the <b>main inventory Excel</b> and <b>AMC.xlsx</b> (📐 AMC upload in the sidebar) to enable this analysis.';
-      } else if (!hasAmc) {
-        noDataEl.innerHTML = 'Upload <b>AMC.xlsx</b> (📐 AMC upload in the sidebar) to enable this analysis — the main inventory file is already loaded.';
-      } else {
-        noDataEl.innerHTML = 'Upload the <b>main inventory Excel</b> to enable this analysis — AMC.xlsx is already loaded.';
-      }
+      noDataEl.innerHTML = '⚠️ This data is currently unavailable. Please contact your administrator.';
       noDataEl.style.display = "block";
     }
     document.getElementById("stko-content").style.display = "none";
