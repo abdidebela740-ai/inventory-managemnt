@@ -1518,6 +1518,11 @@ thead th {
   transition: var(--theme-transition);
 }
 thead th:last-child { border-right: none; }
+/* Two-line header titles — used for column labels too long to fit on one
+   line without forcing the whole table wider (e.g. Branch Demand's
+   "HO01 Available Stock" column). Opt-in per-column via headerClass. */
+thead th.th-wrap-2l { white-space: normal; line-height: 1.35; min-width: 120px; max-width: 150px; }
+thead th.th-wrap-2l .th-sub { display: block; text-transform: none; font-weight: 500; letter-spacing: 0.02em; opacity: 0.85; margin-top: 2px; }
 tbody tr { border-bottom: 1px solid var(--border); transition: background 0.1s; }
 tbody tr:last-child { border-bottom: none; }
 tbody tr:hover { background: var(--accent-glow); }
