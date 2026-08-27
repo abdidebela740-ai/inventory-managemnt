@@ -1020,7 +1020,15 @@ function renderBranchDemand() {
   if (bufferEl) bufferEl.value = brdBuffer;
 
   const clsEl = document.getElementById("brd-program-class");
-  if (clsEl) clsEl.value = brdProgramClass;
+  if (clsEl) {
+    clsEl.value = brdProgramClass; // restore persisted filter state into the DOM first...
+    // ...then hide any option this role can't see (e.g. Program (Q) for an
+    // RDF-only user). If that just cleared the selection, fall the
+    // persisted state back to "All" too, so a later re-render or the
+    // Recalculate handler doesn't keep filtering on a hidden value.
+    if (typeof applyProgramClassAccessToSelect === "function") applyProgramClassAccessToSelect(clsEl);
+    brdProgramClass = clsEl.value;
+  }
 
   const canEdit = brdCanEdit();
   document.getElementById("brd-approve-selected").style.display = canEdit ? "" : "none";
