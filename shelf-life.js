@@ -93,6 +93,28 @@
 
   const GR_REQUIRED_COLUMNS = ["Material", "Batch", "Posting Date"];
 
+  // BUGFIX-GR-VALTYPE-EXCLUDE-ALL: the shared passesUniversalExclusions()
+  // (permissions.js) unconditionally excludes any row whose "Inventory
+  // Valuation Type" column is blank — correct for the main inventory file,
+  // which always carries that column. But the Incoming GR export never has
+  // a column with that exact name (it uses a differently-scoped "Valuation
+  // Type" column instead), so treating it as "blank" excluded EVERY row of
+  // EVERY Incoming GR upload, always failing with "No usable rows found"
+  // regardless of how valid the file was. This local variant only enforces
+  // that rule when the column is actually present on the row, and otherwise
+  // applies the same non-medical/project-stock/excluded-location checks as
+  // passesUniversalExclusions().
+  function passesGrUniversalExclusions(r) {
+    if (!r) return false;
+    const sst = String(r["Special Stock Type"] || "").trim().toUpperCase();
+    if (sst !== "" && sst !== "Q") return false;
+    if ("Inventory Valuation Type" in r && String(r["Inventory Valuation Type"] || "").trim() === "") return false;
+    if (typeof isNonMedicalCode === "function" && isNonMedicalCode(r["Material"])) return false;
+    if (typeof isNonMedicalGroup === "function" && isNonMedicalGroup(r["Material Group Name"])) return false;
+    if (typeof isExcludedStorageLocation === "function" && isExcludedStorageLocation(r["Storage Location"])) return false;
+    return true;
+  }
+
   // ── Public accessor for other modules ────────────────────────────────────
   // grMap itself stays private (module-scoped) so nothing outside this file
   // can mutate it — other modules that need a posting date (e.g. script.js's
