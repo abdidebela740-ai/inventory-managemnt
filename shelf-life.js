@@ -221,10 +221,21 @@
           const storageLoc = String(r["Storage Location"] || "").trim().toUpperCase();
 
           const key = `${mat}|${batch}`;
+          // BUGFIX-PERSON-FILTER-EMPTY (grMap instance): stash this row's own
+          // stream so the person filter check below (which needs a
+          // TYPE-AWARE composite key — see getPersonFilteredCodes() in
+          // script.js) can be applied correctly. grMap entries previously
+          // carried no stream info at all once parsing finished, so the only
+          // check available further down was a bare-code one that could
+          // never match getPersonFilteredCodes()'s composite keys — silently
+          // hiding every Incoming batch whenever any person filter was
+          // active. Defaults to "RDF" using the same blank/other-means-RDF
+          // convention used everywhere else in the app.
+          const sst = ("Special Stock Type" in r && String(r["Special Stock Type"]).trim().toUpperCase() === "Q") ? "Q" : "RDF";
           const existing = map.get(key);
           // Earliest posting date per material+batch = the original GR date
           if (!existing || posting < existing.postingDate) {
-            map.set(key, { postingDate: posting, plant, storageLoc, hits: existing ? existing.hits + 1 : 1 });
+            map.set(key, { postingDate: posting, plant, storageLoc, hits: existing ? existing.hits + 1 : 1, sst });
           } else {
             existing.hits += 1;
           }
@@ -275,7 +286,17 @@
     let pool = rawDf;
     if (typeof personFilter !== "undefined" && personFilter.size > 0 && typeof getPersonFilteredCodes === "function") {
       const codes = getPersonFilteredCodes();
-      if (codes) pool = pool.filter(r => codes.has(String(r["Material"] || "").trim().toUpperCase()));
+      // BUGFIX-PERSON-FILTER-EMPTY (shelf-life.js instance): same bug as
+      // script.js's getReconciledBase() — getPersonFilteredCodes() returns
+      // TYPE-AWARE composite keys ("CODE\u241FSTREAM"), not bare codes, so
+      // checking codes.has(bareCode) here always failed and silently
+      // returned zero Quick Lookup matches whenever any person filter was
+      // active. Reuse the same isRowInPersonFilter() composite-key check
+      // script.js already provides, instead of a second (broken) bare-code
+      // comparison.
+      if (codes && typeof isRowInPersonFilter === "function") {
+        pool = pool.filter(r => isRowInPersonFilter(r, codes));
+      }
     }
 
     const seen = new Map(); // code → desc
@@ -802,7 +823,10 @@
       const material = key.slice(0, sep);
       const batch = key.slice(sep + 1);
       if (isNonMedicalCode(material)) continue; // belt-and-suspenders vs. filters.js exclusions
-      if (allowedCodes && !allowedCodes.has(material.toUpperCase())) continue;
+      // BUGFIX-PERSON-FILTER-EMPTY: composite-key check (see the sst capture
+      // above and script.js's getReconciledBase()) — was a bare-code check
+      // against a composite-key Set, which never matched.
+      if (allowedCodes && !allowedCodes.has(material.toUpperCase() + "\u241F" + (gr.sst || "RDF"))) continue;
 
       const stock = stockByKey.get(`${material.toUpperCase()}|${batch.toUpperCase()}`);
 
