@@ -1524,7 +1524,25 @@ function populateAllFilters() {
 
   // Material multi-selects — replaces the old free-text Material Lookup search
   // boxes on Transit / Expiry / QC / Flow with a proper filter-bar control.
-  const materials = [...new Set(rawDf.map(r => {
+  // FIX-MAT-ROLE-SCOPE: was built from raw `rawDf` directly, unlike every
+  // other filter-bar list on this page (plants, mgs, valTypes, cls), which
+  // all route through `dropdownBase` (stripHubForBranchUser(rawDf)) or an
+  // equivalent role-aware helper. rawDf itself is already access-filtered
+  // by role/scope (filterRowsByAccess, at upload time), but it deliberately
+  // KEEPS HO01 hub rows for branch-locked users (canAccessPlant()'s hub
+  // carve-out) — the same "phantom filter option" bug BUGFIX-PHANTOM-
+  // FILTER-OPTION fixed for Plant/Material Group/Material Type above: a
+  // branch user could see a Material here whose only accessible rows are
+  // at HO01, which applyPageFilter() strips back out at render time —
+  // pick it and the table always comes back empty. Switching to
+  // dropdownBase keeps the Material list in lockstep with what
+  // applyPageFilter() can actually show: options only appear if the user's
+  // role can actually see at least one row of that material, and every
+  // material they CAN see still appears. The in-box typeahead search
+  // (including the mapping-table "via <source code>" suggestion match
+  // above) is untouched — it still searches whatever list is passed in,
+  // exactly as before.
+  const materials = [...new Set(dropdownBase.map(r => {
     const code = String(r["Material"] || "").trim();
     if (!code) return "";
     const desc = String(r["Material Description"] || "").trim();
@@ -1694,7 +1712,14 @@ function buildTable(rows, cols, rowClass, extraClass="", exportOpts=null) {
     ? `<div class="tbl-export-header"><span class="tbl-export-title">${escHtml(exportOpts.title || "")}</span><div class="tbl-export-btns"><button class="dl-btn" id="${exportOpts.id}-csv">⬇ CSV</button><button class="dl-btn" id="${exportOpts.id}-xlsx">⬇ Excel</button></div></div>`
     : "";
   if (!rows.length) return `${exportHeader}<div class="alert-info">No data to display.</div>`;
-  const thead = `<thead><tr>${cols.map(c => `<th>${escHtml(c.label)}</th>`).join("")}</tr></thead>`;
+  const thead = `<thead><tr>${cols.map(c => {
+    const hCls = c.headerClass ? ` class="${c.headerClass}"` : "";
+    // headerRaw lets a column pass pre-built header HTML (e.g. a <br>-split
+    // two-line title) instead of the escaped plain label — used sparingly,
+    // only for long column titles that need to wrap to save table width.
+    const hTxt = c.headerRaw ? c.headerHtml : escHtml(c.label);
+    return `<th${hCls}>${hTxt}</th>`;
+  }).join("")}</tr></thead>`;
   const tbody = `<tbody>${rows.map(row => {
     const cls = rowClass ? rowClass(row) : "";
     return `<tr class="${cls}">${cols.map(c => {
