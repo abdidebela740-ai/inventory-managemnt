@@ -212,6 +212,15 @@ const HEAD_OFFICE_ONLY_MODULE_KEYS = [
 function canAccessModule(moduleKey) {
   if (computeIsAdmin()) return true;
   if (!window.APP_USER) return false;
+  // User Management is gated on canManageRoles() (Admin + Director + Deputy
+  // Director), not on sidebar_permissions — it's part of the Access Level
+  // matrix itself, not a togglable module (see auth.js applyRoleToUI(), which
+  // shows the nav button on that same basis). Without this, the nav button
+  // was visible to Director/Deputy Director but clicking it fell through to
+  // the sidebar_permissions check below — which is never set for a
+  // non-togglable key — so renderPage()'s SEC-ACCESS-GATE silently denied
+  // them and redirected elsewhere.
+  if (moduleKey === "user-management") return canManageRoles();
   if (HEAD_OFFICE_ONLY_MODULE_KEYS.includes(moduleKey) && !isHeadOfficeUser()) return false;
   const perms = window.APP_USER.sidebar_permissions || {};
   return perms[moduleKey] === true;
