@@ -1327,7 +1327,7 @@ function brdRenderTables(lines, canEdit) {
     { key: "nearestExpiry", label: "Nearest Expiry", raw: true, fmt: v => brdFmtExpiry(v) },
     { key: "storageLoc", label: "Storage Location", raw: true,
       fmt: (v, r) => v
-        ? `${escHtml(v)}${r.storageLocInferred ? ' <span title="No existing stock record for this material at this branch — inferred from other materials of the same type at this plant. Double-check before approving." class="brd-note-noamc">≈ inferred</span>' : ""}`
+        ? escHtml(v)
         : `<span class="brd-note-scale">— none found</span>` },
     { key: "purchGroup", label: "Purch. Group", fmt: v => v ? escHtml(v) : "—", raw: true },
     { key: "purchOrg", label: "Purch. Org", fmt: v => v ? escHtml(v) : "—", raw: true },
@@ -1387,7 +1387,7 @@ function brdExportTemplate() {
       factor: l.reqSourceFactor, codeChanged: l.reqSourceDiffers ? "Yes" : "No",
       stockType: l.stockTypeLabel || "Unclassified",
       purchGroup: l.purchGroup || "", purchOrg: l.purchOrg || "",
-      storageLoc: l.storageLoc || "", storageLocSource: l.storageLoc ? (l.storageLocInferred ? "Inferred — no existing stock record" : "From branch stock record") : "Not found",
+      storageLoc: l.storageLoc || "", storageLocSource: l.storageLoc ? (l.storageLocInferred ? "Estimated from plant data" : "From branch stock record") : "Not found",
       status: l.status, approved: l.approved ? "Yes" : "No",
     };
   });
