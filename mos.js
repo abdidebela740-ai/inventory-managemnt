@@ -479,7 +479,42 @@ function buildMosMerged() {
       programClass: resolveFinalClass(stream, hit),
     });
   });
-  return out;
+  return filterMosMergedByAccess(out);
+}
+
+// ── BUGFIX-MOS-SCOPE-LEAK: ROLE-SCOPE FILTER FOR mosMerged (AMC DATA) ───────
+// mosMerged is built straight from the uploaded AMC file, independently of
+// rawDf/mappedDf — so unlike stock rows (which always pass through
+// permissions.js's filterRowsByAccess()/canAccessRow()), it never went
+// through any role/data-scope check at all. A role scoped to Program (Q)
+// only could therefore see RDF AMC rows (and vice versa) on every page that
+// reads mosMerged: MOS by Plant, Branch Demand, National Table, Expiry
+// Risk, Stockout Risk, Who-Responsible. Fixed once here, right after
+// mosMerged is built, so every consumer inherits the fix instead of each
+// page needing its own filter (and each dropdown's "All" option actually
+// meaning "everything I'm scoped to", not "everything in the file").
+//
+// mosMerged rows don't carry a "Special Stock Type"/"Inventory Valuation
+// Type" pair the way stock rows do — they have `type` ("RDF"/"Q") and
+// `code`, so the row's scope code ("Q_ZME", "R_ZLC", etc.) has to be
+// reassembled from `type` + the code's own valuation type (ZME/ZMS/ZLC/
+// ZMD), looked up via buildCodeMaterialTypeMap() (same map Overstock &
+// Expiry Risk / Stockout Risk already use for their own Type filter).
+// A code with no resolvable valuation type is DENIED, not allowed — same
+// "unknown scope ⇒ deny" convention documented on getRowScopeCode() in
+// permissions.js, so an unclassifiable AMC line can't leak through by
+// default for a non-Admin role.
+function filterMosMergedByAccess(rows) {
+  if (typeof computeIsAdmin === "function" && computeIsAdmin()) return rows;
+  if (typeof getUserScopes !== "function") return rows; // permissions.js not loaded — don't silently hide everything
+  const scopes = new Set(getUserScopes());
+  const valTypeMap = (typeof buildCodeMaterialTypeMap === "function") ? buildCodeMaterialTypeMap() : new Map();
+  return rows.filter(r => {
+    const prefix  = r.type === "Q" ? "Q" : "R";
+    const valType = valTypeMap.get(r.code);
+    if (!valType) return false;
+    return scopes.has(`${prefix}_${valType}`);
+  });
 }
 
 // ── CANONICAL CODE → MATERIAL VALUATION TYPE (ZME/ZMS/ZLC/ZMD) ──────────────
