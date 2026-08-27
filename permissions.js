@@ -393,6 +393,51 @@ function materialGroupFilterOptions(rows) {
     .sort();
 }
 
+/**
+ * Program Classification (RDF-CDSS / RDF-NON-CDSS / Program-Reportable /
+ * Program-Non-Reportable) values the current user's role is allowed to
+ * filter by. Mirrors stockTypeFilterOptions()'s Q/R scope gate: RDF-CDSS
+ * and RDF-NON-CDSS are RDF-side classifications (need an "R_..." scope),
+ * Program-Reportable and Program-Non-Reportable are Q-side (need a
+ * "Q_..." scope). Admin/full-access always sees all four, same as every
+ * other *FilterOptions() helper in this file.
+ */
+function programClassFilterOptions() {
+  const ALL = ["RDF-CDSS", "RDF-NON-CDSS", "Program-Reportable", "Program-Non-Reportable"];
+  if (computeIsAdmin()) return ALL;
+  const scopedPrefixes = new Set(getUserScopes().map(s => String(s).split("_")[0]));
+  const out = [];
+  if (scopedPrefixes.has("R")) out.push("RDF-CDSS", "RDF-NON-CDSS");
+  if (scopedPrefixes.has("Q")) out.push("Program-Reportable", "Program-Non-Reportable");
+  return out;
+}
+
+/**
+ * Hides/disables the Program Classification <option>s a user's role isn't
+ * scoped to see in a given <select> (the six "*-program-class" filter
+ * dropdowns share one static HTML option list, so a Q-scoped user was
+ * previously shown — and could apply — "RDF · CDSS" etc, and an RDF-only
+ * user could pick "Program (Q) · Reportable" and always get zero results).
+ * The "All Classifications" (value="") option is always kept. If the
+ * select's currently-chosen value is one that's now hidden (stale value
+ * from before login, or a role change mid-session), resets it back to
+ * "All" so the page doesn't keep silently filtering on an option the user
+ * can no longer see or choose.
+ */
+function applyProgramClassAccessToSelect(selectEl) {
+  if (!selectEl) return;
+  const allowed = new Set(programClassFilterOptions());
+  let selectedHidden = false;
+  Array.from(selectEl.options).forEach(opt => {
+    if (!opt.value) return; // "All Classifications" — always shown
+    const visible = allowed.has(opt.value);
+    opt.hidden   = !visible;
+    opt.disabled = !visible;
+    if (!visible && selectEl.value === opt.value) selectedHidden = true;
+  });
+  if (selectedHidden) selectEl.value = "";
+}
+
 // ── ROLE BADGE TEXT (spec #4) ──────────────────────────────────
 // "Team Leader · Q_ZME"  |  "Team Leader · Q_ZME + Q_ZMS"  |
 // "Team Leader · 3 scopes" (tooltip should show scopes.join(", ") for this case)
@@ -476,6 +521,8 @@ window.filterRowsByAccess   = filterRowsByAccess;
 window.materialTypeFilterOptions = materialTypeFilterOptions;
 window.stockTypeFilterOptions    = stockTypeFilterOptions;
 window.materialGroupFilterOptions = materialGroupFilterOptions;
+window.programClassFilterOptions  = programClassFilterOptions;
+window.applyProgramClassAccessToSelect = applyProgramClassAccessToSelect;
 window.roleBadgeText        = roleBadgeText;
 window.roleBadgeTooltip     = roleBadgeTooltip;
 window.firstAccessibleModule = firstAccessibleModule;
