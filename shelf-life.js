@@ -91,7 +91,11 @@
   // doesn't silently break an otherwise-exact quantity match.
   const qtyKeyPart = (qty) => Number(qty).toFixed(3);
 
-  const GR_REQUIRED_COLUMNS = ["Material", "Batch", "Posting Date"];
+  const GR_REQUIRED_COLUMNS = ["Material", "Batch"];
+  // The receipt-date column has shipped under two different names depending
+  // on how the SAP export was configured — accept either. Checked in this
+  // order; the first one actually present on the parsed row wins.
+  const GR_DATE_COLUMN_ALIASES = ["Posting Date", "Entered On"];
 
   // BUGFIX-GR-VALTYPE-EXCLUDE-ALL: the shared passesUniversalExclusions()
   // (permissions.js) unconditionally excludes any row whose "Inventory
@@ -170,6 +174,13 @@
         const colsLower = Object.keys(trimmed[0]).map(c => c.toLowerCase());
         const missing = GR_REQUIRED_COLUMNS.filter(c => !colsLower.includes(c.toLowerCase()));
         if (missing.length) throw new Error(`Missing columns: ${missing.join(", ")}`);
+        // Date column is an either/or — require at least one of the aliases.
+        const dateCol = GR_DATE_COLUMN_ALIASES.find(c => colsLower.includes(c.toLowerCase()));
+        if (!dateCol) throw new Error(`Missing columns: ${GR_DATE_COLUMN_ALIASES.join(" or ")}`);
+        // Resolve to the ACTUAL header casing/spacing found in the file (colsLower
+        // was only used for the case-insensitive check above; row lookups below
+        // need the real key as it appears on `trimmed` rows).
+        const actualDateKey = Object.keys(trimmed[0]).find(k => k.toLowerCase() === dateCol.toLowerCase());
 
         // Keep only Goods Receipt rows when a Movement Type column is present.
         // (This file is typically GR-only already — movement type "101".)
@@ -228,7 +239,7 @@
             }
           }
 
-          const posting = parseExpiryDate(r["Posting Date"]);
+          const posting = parseExpiryDate(r[actualDateKey]);
           if (!posting) continue;
           const plant = String(r["Plant"] || "").trim().toUpperCase();
           // PLANT SCOPING: this GR file is uploaded separately from the main
@@ -264,7 +275,7 @@
           parsedRows++;
         }
 
-        if (!map.size) throw new Error("No usable rows found — check the Material, Batch, and Posting Date columns.");
+        if (!map.size) throw new Error(`No usable rows found — check the Material, Batch, and ${dateCol} columns.`);
 
         grMap = map;
         grLoaded = true;
