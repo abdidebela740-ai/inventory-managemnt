@@ -88,7 +88,7 @@
     activeIndex = -1;
 
     if (noData) {
-      box.innerHTML = `<div class="who-resp-empty">Upload <b>AMC.xlsx</b> in the sidebar to enable this search.</div>`;
+      box.innerHTML = `<div class="who-resp-empty">⚠️ This data is currently unavailable. Please contact your administrator.</div>`;
       positionSuggestions();
       box.classList.add("open");
       return;
