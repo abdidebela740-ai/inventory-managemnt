@@ -592,6 +592,7 @@ function renderStockoutRisk() {
   const searchEl     = document.getElementById("stko-search");
   const typeEl       = document.getElementById("stko-type");
   const clsEl        = document.getElementById("stko-program-class");
+  if (typeof applyProgramClassAccessToSelect === "function") applyProgramClassAccessToSelect(clsEl);
 
   const searchQ    = searchEl ? searchEl.value.trim() : "";
   const typeVal    = typeEl   ? typeEl.value.trim()   : "";
