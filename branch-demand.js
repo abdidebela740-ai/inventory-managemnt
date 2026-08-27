@@ -284,17 +284,52 @@ function brdLockedPlant() {
 
 // ── SOURCE-CODE / FACTOR RESOLUTION FOR SAP EXPORT ──────────────────────────
 // See file header comment for the "primary source" choice rationale.
-function brdPrimarySource(mappedCode) {
-  if (!mappingTable || mappingTable.size === 0) {
-    return { sourceCode: mappedCode, factor: 1, allSourceCodes: [mappedCode] };
-  }
+//
+// BUGFIX-MAPPING-SHAPE: mappingTable is Map<sourceCode → Map<stockType
+// ("RDF"|"Q") → { targetCode, targetDesc, factor }>> (see script.js —
+// applyMaterialMapping / the mapping-file parser). The old version of this
+// function did `mappingTable.forEach((entry, srcCode)) { if
+// (entry.targetCode === mappedCode) ... }`, treating the per-source VALUE as
+// if it were the {targetCode,factor} row directly. It's actually the nested
+// stockType map, so `entry.targetCode` was always undefined, no candidate
+// was ever found, and this silently fell back to "sourceCode = mappedCode,
+// factor = 1" for every material — i.e. the request was NEVER actually
+// converted to the real, orderable source code/pack size, which is the bug
+// being fixed here. brdAllCandidateSources() below does the nested-map walk
+// correctly.
+function brdAllCandidateSources(mappedCode) {
+  if (!mappingTable || mappingTable.size === 0) return [];
   const candidates = [];
-  mappingTable.forEach((entry, srcCode) => {
-    if (entry.targetCode === mappedCode) candidates.push({ srcCode, factor: entry.factor });
+  mappingTable.forEach((stypeMap, srcCode) => {
+    stypeMap.forEach((entry, stype) => {
+      if (entry.targetCode === mappedCode) candidates.push({ srcCode, factor: entry.factor, stockType: stype });
+    });
   });
-  if (!candidates.length) return { sourceCode: mappedCode, factor: 1, allSourceCodes: [mappedCode] };
-  if (candidates.length === 1) {
-    return { sourceCode: candidates[0].srcCode, factor: candidates[0].factor, allSourceCodes: [candidates[0].srcCode] };
+  return candidates;
+}
+
+// preferredStockType: this line's own Q/RDF classification ("Q" or "R", the
+// same convention as matScope.prefix from brdMaterialScope) — when given,
+// candidates whose mapping-row stock type matches it are preferred over
+// candidates for the OTHER stock type, so a mapped code that's fed by both a
+// Q-flagged pack size and an RDF-flagged pack size doesn't get resolved to
+// whichever one happens to hold more stock at HO01. Falls back to the full
+// candidate list (old "most stock at HO01 wins" tie-break) whenever no
+// preferred type is given, or none of the candidates match it.
+function brdPrimarySource(mappedCode, preferredStockType) {
+  const candidates = brdAllCandidateSources(mappedCode);
+  if (!candidates.length) return { sourceCode: mappedCode, factor: 1, allSourceCodes: [mappedCode], stockTypeMatched: false };
+
+  const wantStype = preferredStockType === "Q" ? "Q" : (preferredStockType === "R" ? "RDF" : null);
+  let pool = candidates;
+  let stockTypeMatched = false;
+  if (wantStype) {
+    const filtered = candidates.filter(c => c.stockType === wantStype);
+    if (filtered.length) { pool = filtered; stockTypeMatched = true; }
+  }
+
+  if (pool.length === 1) {
+    return { sourceCode: pool[0].srcCode, factor: pool[0].factor, allSourceCodes: pool.map(c => c.srcCode), stockTypeMatched };
   }
   const base = (mappingTable.size > 0 ? mappedDf : rawDf) || [];
   const qtyBySource = {};
@@ -302,16 +337,16 @@ function brdPrimarySource(mappedCode) {
     const plt = String(r["Plant"] || "").trim().toUpperCase();
     if (plt !== HUB_PLANT) return;
     const src = String(r["Material"] || "").trim().toUpperCase();
-    if (!candidates.some(c => c.srcCode === src)) return;
+    if (!pool.some(c => c.srcCode === src)) return;
     const qty = (Number(r["Unrestricted Stock"]) || 0) + (Number(r["Stock in Transit"]) || 0) + (Number(r["Stock in Quality Inspection"]) || 0);
     qtyBySource[src] = (qtyBySource[src] || 0) + qty;
   });
-  let best = candidates[0], bestQty = -1;
-  candidates.forEach(c => {
+  let best = pool[0], bestQty = -1;
+  pool.forEach(c => {
     const q = qtyBySource[c.srcCode] || 0;
     if (q > bestQty) { bestQty = q; best = c; }
   });
-  return { sourceCode: best.srcCode, factor: best.factor, allSourceCodes: candidates.map(c => c.srcCode) };
+  return { sourceCode: best.srcCode, factor: best.factor, allSourceCodes: pool.map(c => c.srcCode), stockTypeMatched };
 }
 
 // ── STOCK TYPE CLASSIFICATION (Q/RDF + valuation type) FOR ONE MATERIAL ─────
@@ -342,9 +377,15 @@ function brdScopeCodeForRow(row) {
 // upload), in which case callers should treat the line as unclassified
 // rather than silently guessing RD01/HP02.
 function brdMaterialScope(mappedCode) {
-  const src  = brdPrimarySource(mappedCode);
+  // Can't pass a preferred stock type here — determining it IS the point of
+  // this function — so gather every candidate source code regardless of
+  // type (see BUGFIX-MAPPING-SHAPE note on brdAllCandidateSources above;
+  // this used to go through brdPrimarySource(), which always came back
+  // empty and silently left most mapped materials "Unclassified").
+  const allSrc = brdAllCandidateSources(mappedCode);
+  const allSourceCodes = allSrc.length ? allSrc.map(c => c.srcCode) : [mappedCode];
   const base = (mappingTable && mappingTable.size > 0 ? mappedDf : rawDf) || [];
-  const candidateRows = base.filter(r => src.allSourceCodes.includes(String(r["Material"] || "").trim().toUpperCase()));
+  const candidateRows = base.filter(r => allSourceCodes.includes(String(r["Material"] || "").trim().toUpperCase()));
   const hubRows = candidateRows.filter(r => String(r["Plant"] || "").trim().toUpperCase() === HUB_PLANT);
   const rows = hubRows.length ? hubRows : candidateRows;
   if (!rows.length) return { scope: null, prefix: null, suffix: null };
@@ -464,7 +505,8 @@ function brdInferStorageLocation(plant, mappedCode, scopeCode) {
 // affects which SPECIFIC code is picked within a zone here, never whether
 // the item is cold or non-cold.
 function brdStorageLocationForBranch(mappedCode, plant, scopeCode) {
-  const src  = brdPrimarySource(mappedCode);
+  const wantPrefix = scopeCode ? (scopeCode.startsWith("Q_") ? "Q" : "R") : null;
+  const src  = brdPrimarySource(mappedCode, wantPrefix);
   const base = (mappingTable && mappingTable.size > 0 ? mappedDf : rawDf) || [];
   const ho01Cold = brdHo01IsCold(mappedCode); // true | false | null (unknown/mixed)
 
@@ -536,8 +578,9 @@ function brdRowExpiryDate(row) {
   }
   return null;
 }
-function brdNearestExpiryForBranch(mappedCode, plant) {
-  const src  = brdPrimarySource(mappedCode);
+function brdNearestExpiryForBranch(mappedCode, plant, scopeCode) {
+  const wantPrefix = scopeCode ? (scopeCode.startsWith("Q_") ? "Q" : "R") : null;
+  const src  = brdPrimarySource(mappedCode, wantPrefix);
   const base = (mappingTable && mappingTable.size > 0 ? mappedDf : rawDf) || [];
   let nearest = null;
   base.forEach(r => {
@@ -884,7 +927,21 @@ function brdBuildLines(sohMap) {
         : [];
 
       const storageInfo = brdStorageLocationForBranch(row.code, b.plant, matScope.scope);
-      const nearestExpiry = brdNearestExpiryForBranch(row.code, b.plant);
+      const nearestExpiry = brdNearestExpiryForBranch(row.code, b.plant, matScope.scope);
+
+      // ── REQUESTABLE (SOURCE) CODE + QUANTITY ────────────────────────────
+      // What the branch should actually put on the request, not the mapped
+      // code — resolved to the source code matching THIS line's own Q/RDF
+      // classification (matScope.prefix) where the mapping data supports
+      // it, converted to that code's own pack size via the mapping factor.
+      // E.g. mapped code tracks AMC in a 10x10 pack, but the branch's real
+      // stock/request is in a 10x5 pack with factor 0.5 → sourceQty is
+      // alloc converted into 10x5 units, not the raw mapped-unit number.
+      const reqSrc = brdPrimarySource(row.code, matScope.prefix);
+      const reqSourceCode = reqSrc.sourceCode;
+      const reqSourceFactor = reqSrc.factor;
+      const reqSourceDiffers = reqSourceCode.toUpperCase() !== String(row.code).toUpperCase() || reqSourceFactor !== 1;
+      const reqSourceQty = reqSourceFactor > 0 ? Math.round(alloc / reqSourceFactor) : alloc;
 
       lines.push({
         plant: b.plant, code: row.code, desc: row.desc, origCodes: row.origCodes,
@@ -899,6 +956,8 @@ function brdBuildLines(sohMap) {
         stockPrefix: matScope.prefix, stockTypeLabel, purchGroup, purchOrg,
         storageLoc: storageInfo.loc, storageLocInferred: storageInfo.inferred,
         nearestExpiry,
+        reqSourceCode, reqSourceFactor, reqSourceQty, reqSourceDiffers,
+        reqSourceTypeMatched: reqSrc.stockTypeMatched,
       });
     });
   });
@@ -1206,6 +1265,16 @@ function brdRenderTables(lines, canEdit) {
   }
   reqCols.push(
     { key: "code", label: "Mapped Code", fmt: (v, r) => `<span class="col-mat-code">${escHtml(v)}</span>`, raw: true, cellClass: "col-mat-code-wrap" },
+    // The code/pack size to actually PUT ON THE REQUEST — resolved from the
+    // mapped (AMC-tracking) code down to whatever real, orderable source
+    // code exists for this material and stock type (see reqSourceCode on
+    // brdBuildLines). Only shown as its own column when it actually differs
+    // from the Mapped Code above, so unmapped/1:1 lines don't get a
+    // redundant "same code" column repeated at every row.
+    { key: "reqSourceCode", label: "Request As (Available Code)", raw: true,
+      fmt: (v, r) => r.reqSourceDiffers
+        ? `<span class="col-mat-code" title="${r.reqSourceTypeMatched ? '' : 'No source code found for this line\'s own Q/RDF stock type — falling back to the mapping table\'s other candidate(s). Double-check before approving.'}">${escHtml(v)}${!r.reqSourceTypeMatched ? ' <span class="brd-note-noamc">⚠ check type</span>' : ""}</span>`
+        : `<span class="brd-status-muted">same as mapped</span>` },
     { key: "desc", label: "Description", cellClass: "col-mat-desc-wrap" },
     { key: "plant", label: "Branch" },
     { key: "priorityTier", label: "Priority", raw: true, fmt: (v, r) => brdPriorityBadge(v) },
@@ -1213,6 +1282,15 @@ function brdRenderTables(lines, canEdit) {
       fmt: (v, r) => canEdit
         ? `<input type="number" min="0" step="1" class="brd-alloc-input" data-plant="${escHtml(r.plant)}" data-code="${escHtml(r.code)}" value="${Number(v || 0)}" />`
         : `<b>${fmtQty(v)}</b>` },
+    // Same quantity, but converted into the AVAILABLE code's own pack size
+    // via the mapping factor — this, not the raw number above, is what
+    // should be written on the requisition when Request As differs from
+    // Mapped Code (e.g. mapped tracks AMC as 10x10, available pack is
+    // 10x5 → factor 0.5 → this column shows double the mapped-unit count).
+    { key: "reqSourceQty", label: "Qty (Available Pack)", raw: true,
+      fmt: (v, r) => r.reqSourceDiffers
+        ? `<b title="${fmtQty(r.alloc)} mapped-unit(s) × factor ${r.reqSourceFactor}">${fmtQty(v)}</b>`
+        : `<span class="brd-status-muted">—</span>` },
     // Nearest expiry of the branch's OWN existing stock of this item —
     // Request Form only (not Analysis, see file header / cols above).
     { key: "nearestExpiry", label: "Nearest Expiry", raw: true, fmt: v => brdFmtExpiry(v) },
@@ -1259,7 +1337,6 @@ function brdExportTemplate() {
   const approved = lines.filter(l => l.approved);
 
   const workingRows = approved.map(l => {
-    const src = brdPrimarySource(l.code);
     return {
       code: l.code, desc: l.desc, plant: l.plant,
       soh: l.soh, amc: l.hasAmc ? l.amc : "Not Committed",
@@ -1267,7 +1344,16 @@ function brdExportTemplate() {
       priority: l.priorityLabel || "",
       need: Number(l.need).toFixed(0), alloc: Number(l.alloc).toFixed(0),
       mosAfter: l.mosAfter === null ? "N/A" : (l.mosAfter === Infinity ? "Infinite" : Number(l.mosAfter).toFixed(2)),
-      sohHo: l.sohHo, factor: src.factor, sourceCodes: src.allSourceCodes.join(", "),
+      sohHo: l.sohHo,
+      // reqSourceCode/reqSourceFactor/reqSourceQty come straight off the
+      // line (see brdBuildLines) so the Working sheet and the SAP_Paste
+      // sheet below always agree with each other AND with what's shown
+      // on-screen in the Request Form tab — all three now resolve the
+      // available code via the SAME stock-type-aware brdPrimarySource()
+      // call, instead of the export recomputing it separately (which used
+      // to skip the stock-type preference the on-screen table now uses).
+      requestCode: l.reqSourceCode, requestQty: Number(l.reqSourceQty).toFixed(0),
+      factor: l.reqSourceFactor, codeChanged: l.reqSourceDiffers ? "Yes" : "No",
       stockType: l.stockTypeLabel || "Unclassified",
       purchGroup: l.purchGroup || "", purchOrg: l.purchOrg || "",
       storageLoc: l.storageLoc || "", storageLocSource: l.storageLoc ? (l.storageLocInferred ? "Inferred — no existing stock record" : "From branch stock record") : "Not found",
@@ -1278,8 +1364,10 @@ function brdExportTemplate() {
     { key: "code", label: "Mapped Code" }, { key: "desc", label: "Description" }, { key: "plant", label: "Branch" },
     { key: "soh", label: "SOH Branch" }, { key: "amc", label: "AMC" }, { key: "mosNow", label: "MOS Now" },
     { key: "priority", label: "Priority" },
-    { key: "need", label: `Need (to ${TARGET_MOS})` }, { key: "alloc", label: "Allocated" }, { key: "mosAfter", label: "MOS After" },
-    { key: "sohHo", label: "SOH HO01" }, { key: "factor", label: "Factor (source→mapped)" }, { key: "sourceCodes", label: "Source Code(s)" },
+    { key: "need", label: `Need (to ${TARGET_MOS})` }, { key: "alloc", label: "Allocated (mapped units)" }, { key: "mosAfter", label: "MOS After" },
+    { key: "sohHo", label: "SOH HO01" },
+    { key: "requestCode", label: "Request As (Available Code)" }, { key: "requestQty", label: "Qty (Available Pack)" },
+    { key: "factor", label: "Factor (available→mapped)" }, { key: "codeChanged", label: "Code Changed From Mapped?" },
     { key: "stockType", label: "Stock Type" }, { key: "purchGroup", label: "Purchasing Group" }, { key: "purchOrg", label: "Purch. Organization" },
     { key: "storageLoc", label: "Storage Location" }, { key: "storageLocSource", label: "Storage Location Source" },
     { key: "status", label: "Status" }, { key: "approved", label: "Approved" },
@@ -1299,11 +1387,9 @@ function brdExportTemplate() {
 
   const unclassified = approved.filter(l => !l.purchGroup || !l.purchOrg);
   const sapRows = approved.map(l => {
-    const src = brdPrimarySource(l.code);
-    const sourceQty = src.factor > 0 ? Math.round(l.alloc / src.factor) : l.alloc;
     return [
-      "", "", "", "U",                       // Status, Item of requisition, Acct Assignment Cat., Item Category
-      src.sourceCode, "", sourceQty, "",      // Material, Short Text (SAP derives this — leave blank), Quantity requested, Unit of Measure
+      "", "", "", "U",                        // Status, Item of requisition, Acct Assignment Cat., Item Category
+      l.reqSourceCode, "", Number(l.reqSourceQty).toFixed(0), "", // Material, Short Text (SAP derives this — leave blank), Quantity requested, Unit of Measure
       "", "", "", l.plant,                    // Deliv. date category, Delivery Date, Material Group, Plant
       l.storageLoc || "", l.purchGroup || "", "", "", // Storage Location, Purchasing Group, Requisitioner, Req. Tracking Number
       "", "", HUB_PLANT, l.purchOrg || "",    // Desired Vendor, Fixed Vendor, Supplying Plant, Purch. Organization
