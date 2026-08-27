@@ -240,13 +240,30 @@ function brdDraftKey(plant, code) { return `${plant}::${code}`; }
 // inventing a new rule. branch_demand_officer stays locked to their own
 // plant when known (see brdLockedPlant()) — this only changes their edit
 // capability within that plant, not their plant scope.
+//
+// FIX-BRD-EDIT-FOR-GRANTED-USERS: the fixed role list above used to be the
+// ONLY way in, which meant a plain "user"-role account that an Admin/
+// Director had explicitly granted the Branch Demand module (sidebar
+// permission checkbox — see canAccessModule("branch-demand")) could open
+// the page and see every line, but Approve Visible / Deselect All / Export
+// Template stayed hidden regardless — there was no way to grant edit rights
+// to anyone outside that fixed role set. Per the module's own intent
+// ("branch users placing their own demand requests is the whole point of
+// this page" — see permissions.js HEAD_OFFICE_ONLY_MODULE_KEYS comment),
+// anyone the app has actually let onto this page should be able to act on
+// it: canAccessModule() already returned true for them or they wouldn't be
+// here at all, so it's added as an additional OR below rather than
+// replacing the role list (keeps the explicit roles working even if a
+// future admin somehow revokes the sidebar checkbox for one of them).
 function brdCanEdit() {
   return (typeof computeIsAdmin === "function" && computeIsAdmin())
       || (typeof isDirectorLike === "function" && isDirectorLike())
       || (typeof currentRole === "function" && currentRole() === "team_leader")
       // POLICY UPDATE: branch_demand_officer now also gets edit/approve/export
       // access (previously read-only-only per the original spec comment above).
-      || (typeof currentRole === "function" && currentRole() === "branch_demand_officer");
+      || (typeof currentRole === "function" && currentRole() === "branch_demand_officer")
+      // Any role explicitly granted the Branch Demand module itself.
+      || (typeof canAccessModule === "function" && canAccessModule("branch-demand"));
 }
 function brdCanSeeAllBranches() { return brdCanEdit(); }
 // window.APP_USER.plant (see permissions.js "PLANT SCOPING" for the
@@ -1032,6 +1049,7 @@ function renderBranchDemand() {
 
   const canEdit = brdCanEdit();
   document.getElementById("brd-approve-selected").style.display = canEdit ? "" : "none";
+  document.getElementById("brd-deselect-all").style.display = canEdit ? "" : "none";
   document.getElementById("brd-export").style.display = canEdit ? "" : "none";
 
   // ── Codes chips ────────────────────────────────────────────────────────
@@ -1363,6 +1381,22 @@ function brdExportTemplate() {
         const key = brdDraftKey(cb.dataset.plant, cb.dataset.code);
         const d = brdDraft.get(key) || {};
         d.approved = true;
+        brdDraft.set(key, d);
+      });
+      renderBranchDemand();
+    });
+
+    // Counterpart to "Approve Visible" — clears the checkbox/approved state
+    // on every row currently on screen (both tabs, same rationale as
+    // above), so a user can back out of a bulk-select without unchecking
+    // rows one at a time. Same brdCanEdit() gate as Approve Visible /
+    // Export Template — only shown to roles that can edit this page.
+    const deselectAllBtn = document.getElementById("brd-deselect-all");
+    if (deselectAllBtn) deselectAllBtn.addEventListener("click", () => {
+      document.querySelectorAll("#brd-table .brd-approve-cb, #brd-request-table .brd-approve-cb").forEach(cb => {
+        const key = brdDraftKey(cb.dataset.plant, cb.dataset.code);
+        const d = brdDraft.get(key) || {};
+        d.approved = false;
         brdDraft.set(key, d);
       });
       renderBranchDemand();
