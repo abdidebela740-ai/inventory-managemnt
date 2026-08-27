@@ -1929,20 +1929,27 @@ function renderDashboardWelcome() {
       .slice(0, 4);
   }
 
+  // Small rotating accent palette for shortcut icon chips — module data has
+  // no color of its own, so we cycle through 4 theme accents by position for
+  // a bit of visual variety instead of one flat repeated tone.
+  const DW_ACCENTS = ["blue", "purple", "green", "amber"];
+
   el.innerHTML = `
     <div class="dw-card">
+      <div class="dw-card-glow" aria-hidden="true"></div>
       <div class="dw-greeting">
-        <div class="dw-greeting-line">${timeGreeting}, ${escapeHtml(displayName)} 👋</div>
+        <div class="dw-greeting-line"><span class="dw-wave">👋</span>${timeGreeting}, <span class="dw-name">${escapeHtml(displayName)}</span></div>
         <div class="dw-sub">
-          <span>${escapeHtml(dateStr)}</span>
+          <span class="dw-date"><span class="dw-date-dot"></span>${escapeHtml(dateStr)}</span>
           ${role ? `<span class="dw-role-badge" title="${escapeHtml(typeof roleBadgeTooltip === "function" ? roleBadgeTooltip() : "")}">${escapeHtml(role)}</span>` : ""}
         </div>
       </div>
       ${shortcuts.length ? `
         <div class="dw-shortcuts">
-          ${shortcuts.map(m => `
+          ${shortcuts.map((m, i) => `
             <button type="button" class="dw-shortcut-btn" data-dw-goto="${escapeHtml(m.key)}">
-              <span>${m.icon || "▸"}</span><span>${escapeHtml(m.label || m.key)}</span>
+              <span class="dw-shortcut-icon dw-ic-${DW_ACCENTS[i % DW_ACCENTS.length]}">${m.icon || "▸"}</span>
+              <span class="dw-shortcut-label">${escapeHtml(m.label || m.key)}</span>
             </button>
           `).join("")}
         </div>
