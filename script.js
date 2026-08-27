@@ -2148,22 +2148,35 @@ function renderDashboard() {
   // clicking it whenever a mapping file was active. Aggregating with getMappedVal
   // here makes the bar and its export agree again.
   // FEAT-BRANCH-AXIS: branch-locked roles only have one Plant, so this chart
-  // used to render as one full-width bar for them. Group by Stock Type
-  // (Q / RDF) instead for those roles; HO01/Admin keep the Plant axis. See
-  // shouldUseStockTypeAxis() in permissions.js.
+  // used to render as one full-width bar for them.
+  // FEAT-BRANCH-EXPIRY-VALTYPE: Grouping those roles by Stock Type (Q/RDF)
+  // still collapsed to one bar in practice (a branch's near-expiry stock is
+  // almost always all-Q or all-RDF), so switch the branch-locked axis to
+  // Material Valuation Type (ZME/ZMS/ZLC/ZMD — see getValuationType() in
+  // filters.js) instead, which splits more meaningfully within one plant.
+  // HO01/Admin keep the Plant axis. See shouldUseStockTypeAxis() in
+  // permissions.js (reused here only to detect branch-locked roles, not for
+  // the Q/RDF split itself).
+  // ZMD is deliberately excluded from this axis: those materials aren't
+  // tracked against an expiry date, so a "ZMD" bar on an *expiry* chart
+  // would be empty or misleadingly imply ZMD stock expires.
+  const nearUseValuationTypeAxis = typeof shouldUseStockTypeAxis === "function" && shouldUseStockTypeAxis();
+  const nearExpiryValTypeLabel = r => (typeof getValuationType === "function" ? String(getValuationType(r) || "(None)").toUpperCase() : "(None)");
+  const nearExpiryForAxis = nearUseValuationTypeAxis
+    ? nearExpiry.filter(r => nearExpiryValTypeLabel(r) !== "ZMD")
+    : nearExpiry;
   // FIX-QC-EXPIRY-DASHBOARD: now that nearExpiry includes QC-only rows (see
   // above), the value sum has to include their QC value too — otherwise a
   // QC-only material would count toward "Unique Materials at Risk" but
   // contribute ETB 0 to "Value at Risk", understating the bar.
-  const nearUseStockTypeAxis = typeof shouldUseStockTypeAxis === "function" && shouldUseStockTypeAxis();
   const nearByPlantMap = {};
-  nearExpiry.forEach(r => {
-    const k = nearUseStockTypeAxis ? getRowStockTypeLabel(r) : (r["Plant Name"] || "(Blank)");
+  nearExpiryForAxis.forEach(r => {
+    const k = nearUseValuationTypeAxis ? nearExpiryValTypeLabel(r) : (r["Plant Name"] || "(Blank)");
     if (!nearByPlantMap[k]) nearByPlantMap[k] = { "Plant Name": k, val: 0 };
     nearByPlantMap[k].val += getMappedVal(r, "Value of Unrestricted Stock") + getMappedVal(r, "Value of Stock in Quality Inspection");
   });
   const nearByPlant = sortBy(Object.values(nearByPlantMap), "val");
-  const uniqByPlantNear = countUniqueMaterialsByGroup(nearExpiry, nearUseStockTypeAxis ? null : "Plant Name", nearUseStockTypeAxis ? getRowStockTypeLabel : null);
+  const uniqByPlantNear = countUniqueMaterialsByGroup(nearExpiryForAxis, nearUseValuationTypeAxis ? null : "Plant Name", nearUseValuationTypeAxis ? nearExpiryValTypeLabel : null);
   nearByPlant.forEach(r => { r.uniqMat = uniqByPlantNear[r["Plant Name"]] || 0; });
   if (nearByPlant.length) {
     Plotly.newPlot("chart-mg-bar", [
@@ -2171,16 +2184,16 @@ function renderDashboard() {
       { type:"scatter", mode:"lines+markers", name:"Unique Materials at Risk", x:nearByPlant.map(r=>r["Plant Name"]), y:nearByPlant.map(r=>r.uniqMat), yaxis:"y2", marker:{color:"#f85149",size:8}, line:{color:"#f85149"}, hovertemplate:"<b>%{x}</b><br>Materials: %{y}<extra></extra>" },
     ], pl({
       height:420, margin:{l:60,r:80,t:20,b:110}, barmode:"group",
-      xaxis:{title:{text: nearUseStockTypeAxis ? "Stock Type" : "Plant", font:{size:10}}, tickangle:-35, tickfont:{size:10}, automargin:true},
+      xaxis:{title:{text: nearUseValuationTypeAxis ? "Material Type" : "Plant", font:{size:10}}, tickangle:-35, tickfont:{size:10}, automargin:true},
       yaxis:{title:{text:"Value at Risk (ETB)",font:{size:10,color:"#d29922"}}, tickfont:{color:"#d29922"}, automargin:true},
       yaxis2:{overlaying:"y",side:"right",gridcolor:"transparent",tickfont:{color:"#f85149"},tickformat:",d",title:{text:"Unique Materials",font:{size:10,color:"#f85149"}}},
     }), PLOTLY_CONFIG);
 
     document.getElementById("chart-mg-bar").on("plotly_click", function(data) {
       const groupLabel = data.points[0].x;
-      const items = nearUseStockTypeAxis
-        ? nearExpiry.filter(r => getRowStockTypeLabel(r) === groupLabel)
-        : nearExpiry.filter(r => (r["Plant Name"] || "(Blank)") === groupLabel);
+      const items = nearUseValuationTypeAxis
+        ? nearExpiryForAxis.filter(r => nearExpiryValTypeLabel(r) === groupLabel)
+        : nearExpiryForAxis.filter(r => (r["Plant Name"] || "(Blank)") === groupLabel);
       // Combine Unrestricted + QC so QC-only near-expiry rows show their real
       // qty/value instead of 0 (matches the Unrestricted+QC filter above).
       const rows  = buildDrillRows(
@@ -5274,13 +5287,34 @@ function renderConcentration() {
   // would be counted correctly, but the intent is unclear and inconsistent with
   // aggregateByMappedMaterial which is the canonical pattern across all pages.
   const useMapped   = mappingTable.size > 0;
+  // FIX-CONC-CLS: the Classification dropdown was wired up (saved into
+  // pageFilters.concentration.cls on Apply, same as every other page — see
+  // PAGE_FILTER_MAP's conc-filter-apply entry) but this page built its own
+  // `df` filter from scratch instead of going through applyPageFilter(), and
+  // that hand-rolled filter never looked at f.cls at all. Selecting a
+  // Classification here silently did nothing. Mirrors applyPageFilter()'s
+  // clsFilter/clsMap/clsLabelOf logic (see there for why the type-aware key
+  // is checked first).
+  const clsFilter   = f.cls || [];
+  const clsMap      = (clsFilter.length && typeof buildCodeProgramClassMap === "function")
+    ? buildCodeProgramClassMap()
+    : null;
+  const clsLabelOf  = (r) => {
+    if (!clsMap) return "";
+    const code = String(r._mappedMaterial || r["Material"] || "").trim().toUpperCase();
+    const sst  = String(r["Special Stock Type"] || "").trim().toUpperCase() === "Q" ? "Q" : "RDF";
+    const raw  = clsMap.get(code + "\u241F" + sst) || clsMap.get(code);
+    if (!raw) return "";
+    return (typeof PROGRAM_CLASS_LABELS !== "undefined" && PROGRAM_CLASS_LABELS[raw]) || raw;
+  };
 
   const df = base.filter(r =>
     passesUniversalExclusions(r) &&
     canAccessRow(r) &&
     String(r["Inventory Valuation Type"] || "").trim() !== "" &&
-    (!mgs.length      || mgs.includes(r["Material Group Name"])) &&
-    (!valTypes.length || valTypes.includes(getValuationType(r)))
+    (!mgs.length       || mgs.includes(r["Material Group Name"])) &&
+    (!valTypes.length  || valTypes.includes(getValuationType(r))) &&
+    (!clsFilter.length || clsFilter.includes(clsLabelOf(r)))
   );
 
 
