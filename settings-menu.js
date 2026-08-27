@@ -246,8 +246,14 @@
   // that share the same open/close/outside-click/Escape mechanics.
   function makeDropdown(wrapId, btnId, panelId, onClose) {
     function onOutsideClick(e) {
-      const wrap = document.getElementById(wrapId);
-      if (wrap && !wrap.contains(e.target)) close();
+      const wrap  = document.getElementById(wrapId);
+      const panel = document.getElementById(panelId);
+      // Panel may live outside `wrap` in the DOM (see the settings panel,
+      // which is re-parented to <body> — see wire() below), so a click
+      // inside it must still count as "inside", not trigger a close.
+      const inWrap  = wrap  && wrap.contains(e.target);
+      const inPanel = panel && panel.contains(e.target);
+      if (!inWrap && !inPanel) close();
     }
     function onEscape(e) {
       if (e.key === "Escape") close();
@@ -287,7 +293,28 @@
   const settingsDropdown = makeDropdown("settings-menu-wrap", "settings-menu-btn", "settings-menu-panel");
 
   // ── Wiring ─────────────────────────────────────────────────────────────
+
+  // The Settings button lives inline in the sidebar, but its dropdown panel
+  // is `position: fixed` and must be positioned relative to the *viewport*
+  // (positionSettingsPanel() above assumes this). On mobile the sidebar
+  // itself is `transform`-ed for the slide-in/out drawer (see the
+  // @media (max-width:640px) rules in style.css) — and a `transform` on any
+  // ancestor creates a new containing block for `position: fixed`
+  // descendants, silently re-anchoring the panel to the (shifted) sidebar
+  // box instead of the viewport. The JS math is still correct; the panel
+  // just renders off-screen. Re-parenting the panel to <body> once, up
+  // front, sidesteps this the same way #profile-menu-panel already avoids
+  // it (its wrapper was never inside #sidebar to begin with).
+  function detachSettingsPanelFromSidebar() {
+    const panel = document.getElementById("settings-menu-panel");
+    if (panel && panel.parentElement !== document.body) {
+      document.body.appendChild(panel);
+    }
+  }
+
   function wire() {
+    detachSettingsPanelFromSidebar();
+
     // Profile menu open/close
     const avatarBtn = document.getElementById("profile-menu-btn");
     if (avatarBtn) avatarBtn.addEventListener("click", (e) => { e.stopPropagation(); profileDropdown.toggle(); });
