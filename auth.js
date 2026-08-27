@@ -43,15 +43,31 @@ supabaseClient.auth.onAuthStateChange((event, session) => {
 });
 
 // ── 2) BUILD THE LANDING + LOGIN OVERLAY (injected, no HTML edits needed) ──
+// Kept in the same order as the sidebar groups (Dashboard → Inventory Ops →
+// Quality & Risk → Analytics → Self-Service) so the login page's feature
+// grid always maps 1:1 to what's actually in the app. If a nav-btn is added
+// to the sidebar in index.html, add its matching entry here too.
 const AUTH_FEATURES = [
+  // Dashboard
   { icon: "📊", title: "Dashboard Overview",        desc: "Aggregated inventory metrics across every plant and material group, updated the moment new data lands." },
+  // Inventory Ops
+  { icon: "📦", title: "Open Outbound",              desc: "Track pending dispatches so nothing gets lost between confirmation and the truck leaving." },
   { icon: "🚚", title: "Stock in Transit",           desc: "See exactly what's moving between plants and how long it's been on the road." },
+  { icon: "🏢", title: "Branch Comparison",          desc: "Compare stock positions across branches side by side to spot imbalances fast." },
+  // Quality & Risk
   { icon: "⏰", title: "Expiry Watchlist",           desc: "Catch batches heading toward expiry early enough to actually do something about it." },
   { icon: "🔬", title: "Quality Inspection",         desc: "Track material held in QC so nothing sits in limbo without anyone noticing." },
-  { icon: "🏢", title: "Branch Comparison",          desc: "Compare stock positions across branches side by side to spot imbalances fast." },
-  { icon: "🎯", title: "Stock Concentration",        desc: "Identify where inventory is overly concentrated and where it's dangerously thin." },
+  { icon: "🚫", title: "Blocked Stock",              desc: "Keep tabs on stock that's blocked from use or sale until it's cleared." },
+  { icon: "🔒", title: "Restricted Stock",           desc: "Monitor restricted-status inventory separately so it never gets shipped by mistake." },
   { icon: "🧯", title: "Overstock & Expiry Risk",    desc: "Model redistribution plans that move at-risk stock before it becomes a write-off." },
+  { icon: "📉", title: "Stockout Risk",              desc: "Spot materials heading toward a stockout early enough to reorder or redistribute." },
+  // Analytics
   { icon: "🗂️", title: "National Stock & MOS",       desc: "One row per material, network-wide — stock on hand and Months of Stock at a glance." },
+  { icon: "🎯", title: "Stock Concentration",        desc: "Identify where inventory is overly concentrated and where it's dangerously thin." },
+  // Self-Service
+  { icon: "🧾", title: "Request Analysis",           desc: "Review incoming stock requests and the reasoning behind each one." },
+  { icon: "🧭", title: "Branch Demand",              desc: "See what each branch actually needs, based on real demand rather than guesswork." },
+  { icon: "🧮", title: "Allocation Tool",             desc: "Run allocation scenarios to decide how available stock should be split across branches." },
 ];
 
 function injectAuthOverlay() {
