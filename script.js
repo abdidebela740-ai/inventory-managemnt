@@ -1993,10 +1993,17 @@ function renderDashboard() {
 
   // Build per-group risk counts using unique material codes (not row counts)
   // so a material stocked at multiple plants counts once per group.
+  // FIX-QC-EXPIRY-DASHBOARD: was Unrestricted-only, which silently dropped any
+  // material sitting entirely in QC (Unrestricted Stock = 0) from this chart
+  // even though the Expiry Watch List page (script.js renderExpiry) and the
+  // Overstock & Expiry Risk page (expiry-risk.js buildExpiryMap) both count
+  // QC-held stock as at-risk. Matching the Watch List's Unrestricted+QC
+  // definition here so a QC-only near-expiry item shows up on the Dashboard
+  // too, not just on the Watch List.
   const mgRiskMap = {};
   df.forEach(r => {
     if (!(r._expiry instanceof Date) || isNaN(r._expiry)) return;
-    if ((r["Unrestricted Stock"] || 0) <= 0) return;
+    if (((r["Unrestricted Stock"] || 0) + (r["Stock in Quality Inspection"] || 0)) <= 0) return;
     const grp = r["Material Group Name"] || "(Blank)";
     const mat = r._mappedMaterial || r["Material"];
     if (!mgRiskMap[grp]) mgRiskMap[grp] = { critical: new Set(), high: new Set() };
@@ -2077,13 +2084,19 @@ function renderDashboard() {
       const band = pt.data.name.startsWith("Critical") ? "critical" : "high";
       const items = df.filter(r => {
         if (!(r._expiry instanceof Date) || isNaN(r._expiry)) return false;
-        if ((r["Unrestricted Stock"] || 0) <= 0) return false;
+        if (((r["Unrestricted Stock"] || 0) + (r["Stock in Quality Inspection"] || 0)) <= 0) return false;
         if ((r["Material Group Name"] || "(Blank)") !== rowInfo.grp) return false;
         return band === "critical"
           ? (r._expiry >= now && r._expiry <= cut3mo)
           : (r._expiry > cut3mo && r._expiry <= cut6mo);
       });
-      const rows = buildDrillRows(items, "Unrestricted Stock", "Value of Unrestricted Stock");
+      // Combine Unrestricted + QC so QC-only at-risk rows show their real
+      // qty/value instead of 0 (matches the Unrestricted+QC filter above).
+      const rows = buildDrillRows(
+        items,
+        r => getMappedQty(r, "Unrestricted Stock") + getMappedQty(r, "Stock in Quality Inspection"),
+        r => getMappedVal(r, "Value of Unrestricted Stock") + getMappedVal(r, "Value of Stock in Quality Inspection")
+      );
       const bandLabel = band === "critical" ? "Critical (<3 mo)" : "High (3–6 mo)";
       showChartDrillModal({
         title: `⚠️ ${rowInfo.grp} — ${bandLabel}`,
@@ -2097,12 +2110,16 @@ function renderDashboard() {
   }
 
   // Near-expiry by plant (within 6 months)
+  // FIX-QC-EXPIRY-DASHBOARD: was Unrestricted-only, so a material sitting
+  // entirely in QC (Unrestricted Stock = 0) with a near-expiry date was
+  // excluded from this bar even though it appears on the Expiry Watch List
+  // page (which counts Unrestricted + QC). Matching that definition here.
   const nearCutoff = new Date(); nearCutoff.setMonth(nearCutoff.getMonth() + 6);
   const nearToday  = new Date();
   const nearExpiry = df.filter(r =>
     r._expiry instanceof Date && !isNaN(r._expiry) &&
     r._expiry >= nearToday && r._expiry <= nearCutoff &&
-    (r["Unrestricted Stock"] || 0) > 0
+    ((r["Unrestricted Stock"] || 0) + (r["Stock in Quality Inspection"] || 0)) > 0
   );
   // FIX-DASH-EXPORT-MISMATCH: was groupBy(nearExpiry, "Plant Name", [["val","Value of
   // Unrestricted Stock"]]) — that sums the RAW SAP column directly, bypassing
@@ -2116,12 +2133,16 @@ function renderDashboard() {
   // used to render as one full-width bar for them. Group by Stock Type
   // (Q / RDF) instead for those roles; HO01/Admin keep the Plant axis. See
   // shouldUseStockTypeAxis() in permissions.js.
+  // FIX-QC-EXPIRY-DASHBOARD: now that nearExpiry includes QC-only rows (see
+  // above), the value sum has to include their QC value too — otherwise a
+  // QC-only material would count toward "Unique Materials at Risk" but
+  // contribute ETB 0 to "Value at Risk", understating the bar.
   const nearUseStockTypeAxis = typeof shouldUseStockTypeAxis === "function" && shouldUseStockTypeAxis();
   const nearByPlantMap = {};
   nearExpiry.forEach(r => {
     const k = nearUseStockTypeAxis ? getRowStockTypeLabel(r) : (r["Plant Name"] || "(Blank)");
     if (!nearByPlantMap[k]) nearByPlantMap[k] = { "Plant Name": k, val: 0 };
-    nearByPlantMap[k].val += getMappedVal(r, "Value of Unrestricted Stock");
+    nearByPlantMap[k].val += getMappedVal(r, "Value of Unrestricted Stock") + getMappedVal(r, "Value of Stock in Quality Inspection");
   });
   const nearByPlant = sortBy(Object.values(nearByPlantMap), "val");
   const uniqByPlantNear = countUniqueMaterialsByGroup(nearExpiry, nearUseStockTypeAxis ? null : "Plant Name", nearUseStockTypeAxis ? getRowStockTypeLabel : null);
@@ -2142,7 +2163,13 @@ function renderDashboard() {
       const items = nearUseStockTypeAxis
         ? nearExpiry.filter(r => getRowStockTypeLabel(r) === groupLabel)
         : nearExpiry.filter(r => (r["Plant Name"] || "(Blank)") === groupLabel);
-      const rows  = buildDrillRows(items, "Unrestricted Stock", "Value of Unrestricted Stock");
+      // Combine Unrestricted + QC so QC-only near-expiry rows show their real
+      // qty/value instead of 0 (matches the Unrestricted+QC filter above).
+      const rows  = buildDrillRows(
+        items,
+        r => getMappedQty(r, "Unrestricted Stock") + getMappedQty(r, "Stock in Quality Inspection"),
+        r => getMappedVal(r, "Value of Unrestricted Stock") + getMappedVal(r, "Value of Stock in Quality Inspection")
+      );
       showChartDrillModal({
         title: `⏳ Near-Expiry Risk — ${groupLabel}`,
         meta: `${rows.length} items · within 6 months`,
