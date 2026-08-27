@@ -5,8 +5,11 @@
 //
 // isNonMedicalCode(materialCode)           → true = exclude this row
 // isNonMedicalGroup(groupName)             → true = exclude this row
-// isProjectStockDescription(description)   → true = exclude this row
 // isExcludedStorageLocation(storageLoc)    → true = exclude this row
+//
+// Special Stock Type (Q/blank-only) and Inventory Valuation Type (blank)
+// exclusions now live in permissions.js's passesUniversalExclusions() —
+// see the classification rebuild note there.
 // =============================================================================
 
 /**
@@ -72,19 +75,6 @@ function isNonMedicalGroup(groupName) {
   ];
 
   return EXCLUDED_GROUPS.some(ex => g.includes(ex));
-}
-
-/**
- * Returns true if the Special Stock Type Description indicates Project Stock.
- *
- * This catches rows where the Special Stock Type code is not "Q" but the
- * description still resolves to "Project Stock" — both must be excluded.
- */
-function isProjectStockDescription(description) {
-  if (!description) return false;
-  const d = String(description).trim().toUpperCase();
-  if (!d) return false;
-  return d === "PROJECT STOCK";
 }
 
 /**
