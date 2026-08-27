@@ -993,6 +993,8 @@
 
     const searchEl = document.getElementById("reqan-search");
     const statusEl = document.getElementById("reqan-status-filter");
+    const clsEl    = document.getElementById("reqan-program-class");
+    if (typeof applyProgramClassAccessToSelect === "function") applyProgramClassAccessToSelect(clsEl);
     const searchQ  = searchEl ? searchEl.value.trim().toLowerCase() : "";
     const statusF  = statusEl ? statusEl.value : "";
 
