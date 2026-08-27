@@ -13,7 +13,7 @@
 // file. This is what forces old clients to pick up new files.
 // ════════════════════════════════════════════════════════════════
 
-const CACHE_VERSION   = "v1.3.0";                 // ⬅ bump this on every release
+const CACHE_VERSION   = "v1.3.1";                 // ⬅ bump this on every release
 const STATIC_CACHE    = `epss-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE   = `epss-runtime-${CACHE_VERSION}`;
 const CDN_CACHE        = `epss-cdn-${CACHE_VERSION}`;
