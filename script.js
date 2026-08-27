@@ -1877,9 +1877,71 @@ function pl(extra={}) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// DASHBOARD — WELCOME HEADER
+// ═══════════════════════════════════════════════════════════════════════════
+// "Welcome back" strip at the top of the Dashboard, replacing the idea of a
+// separate landing/welcome page: same warmth (greets the user by name, shows
+// their role) without adding a click before they get to real data. Also
+// surfaces a few one-tap shortcuts to whatever modules this user's role
+// actually grants, so the first thing after login is useful, not just nice.
+function renderDashboardWelcome() {
+  const el = document.getElementById("dash-welcome");
+  if (!el || !window.APP_USER) return;
+
+  const hour = new Date().getHours();
+  const timeGreeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  const displayName = window.APP_USER.full_name || (window.APP_USER.email || "").split("@")[0] || "there";
+  const dateStr = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+  const role = typeof roleBadgeText === "function" ? roleBadgeText() : "";
+
+  // Shortcut chips: up to 4 modules (excluding Dashboard itself) this user
+  // can actually see, ordered however app_modules.sort_order says. Falls
+  // back gracefully if the module catalog hasn't loaded for some reason.
+  let shortcuts = [];
+  if (Array.isArray(window.APP_MODULES) && typeof canAccessModule === "function") {
+    shortcuts = window.APP_MODULES
+      .filter(m => m.active !== false && m.key !== "dashboard" && canAccessModule(m.key))
+      .slice(0, 4);
+  }
+
+  el.innerHTML = `
+    <div class="dw-card">
+      <div class="dw-greeting">
+        <div class="dw-greeting-line">${timeGreeting}, ${escapeHtml(displayName)} 👋</div>
+        <div class="dw-sub">
+          <span>${escapeHtml(dateStr)}</span>
+          ${role ? `<span class="dw-role-badge" title="${escapeHtml(typeof roleBadgeTooltip === "function" ? roleBadgeTooltip() : "")}">${escapeHtml(role)}</span>` : ""}
+        </div>
+      </div>
+      ${shortcuts.length ? `
+        <div class="dw-shortcuts">
+          ${shortcuts.map(m => `
+            <button type="button" class="dw-shortcut-btn" data-dw-goto="${escapeHtml(m.key)}">
+              <span>${m.icon || "▸"}</span><span>${escapeHtml(m.label || m.key)}</span>
+            </button>
+          `).join("")}
+        </div>
+      ` : ""}
+    </div>
+  `;
+
+  // Route through the real nav-btn (same pattern as the overview-card jump
+  // links) so the existing access-gate / active-state / drilldown-reset
+  // logic in navReset() is the single source of truth — this never
+  // navigates directly.
+  el.querySelectorAll("[data-dw-goto]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const navBtn = document.querySelector(`.nav-btn[data-page="${btn.dataset.dwGoto}"]`);
+      if (navBtn) navBtn.click();
+    });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // DASHBOARD
 // ═══════════════════════════════════════════════════════════════════════════
 function renderDashboard() {
+  renderDashboardWelcome();
   const df = applyPageFilter("dashboard");
 
   // FEAT-MAPPING-BANNER-EVERYWHERE: was only ever populated in the Admin-only
