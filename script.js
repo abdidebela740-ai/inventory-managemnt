@@ -2936,8 +2936,7 @@ function renderPhantomAlert(containerId, df) {
       <span class="phantom-alert-icon">⚠️</span>
       <div class="phantom-alert-body">
         <strong>Ghost Transit Stock Excluded</strong>
-        <span>${count.toLocaleString()} item${count!==1?"s":""} (${fmtQty(qty)} units · ${fmtETB(val)}) have <em>Stock in Transit</em> but
-        ${transitFileLoaded ? "don't have a matching quantity in the uploaded Stock-in-Transit file" : "no Stock-in-Transit file has been uploaded yet to verify them"}.
+        <span>${count.toLocaleString()} item${count!==1?"s":""} (${fmtETB(val)}) have <em>Stock in Transit</em> but are in the GHOST transit list and excluded from all totals.
         These items are <strong>excluded from all totals</strong> — verify first.</span>
         <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-top:0.35rem">
           ${actionHtml}
