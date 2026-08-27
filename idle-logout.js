@@ -167,9 +167,19 @@
   }
 
   function start() {
-    recordActivity(); // stamp "now" the moment the authenticated session begins
+    // IMPORTANT: check the *existing* stored timestamp BEFORE touching it.
+    // If we stamped "now" first, we'd erase the evidence that the user was
+    // away too long — reopening the app after being idle past the limit
+    // would silently reset the clock instead of logging them out.
+    const idleFor = Date.now() - getLastActivity();
+    if (idleFor >= IDLE_LIMIT_MS) {
+      forceLogout();
+      return;
+    }
+
+    recordActivity(); // now safe to stamp "now" — user wasn't already over the limit
     ACTIVITY_EVENTS.forEach(evt => window.addEventListener(evt, recordActivity, { capture: true, passive: true }));
-    checkIdle(); // covers the case where the tab was reopened after being idle past the limit
+    checkIdle();
     checkTimer = setInterval(checkIdle, CHECK_INTERVAL_MS);
   }
 
