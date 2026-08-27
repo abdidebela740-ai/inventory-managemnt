@@ -1,4 +1,4 @@
- // =============================================================================
+// =============================================================================
 // PharmaTrack v2 — branch-demand.js
 // "Branch Demand" (Branch Request Helper) — module key: branch-demand
 //
@@ -961,14 +961,10 @@ function brdBuildLines(sohMap) {
       });
     });
   });
-  // Most urgent first: status, then priority tier (Critical > High > Medium >
-  // Low/Overstocked), then by need desc.
-  const statusRank   = { none: 0, partial: 1, manual: 1, full: 2, "no-amc": 3, ok: 4 };
-  const tierRank      = { critical: 0, high: 1, medium: 2, low: 3 };
+  // Alphabetical by Description, for both Analysis and Request Form tabs
+  // (both render from this same `lines` array — see brdRenderTables below).
   const sorted = lines.sort((a, b) =>
-    (statusRank[a.status] - statusRank[b.status]) ||
-    (tierRank[a.priorityTier] - tierRank[b.priorityTier]) ||
-    (b.need - a.need));
+    String(a.desc || "").localeCompare(String(b.desc || "")));
   sorted.hiddenNoStockCount = hiddenNoStockCount; // for brdKpiRow — see caller
   return sorted;
 }
