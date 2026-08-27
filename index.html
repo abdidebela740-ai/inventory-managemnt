@@ -880,6 +880,69 @@
     </button>
   </div>
 
+  <!-- Settings — Appearance/theme controls. Moved into the sidebar (was a
+       top-right floating button) so it sits with the rest of app navigation.
+       Visible to every role. Same panel/field IDs as before so
+       settings-menu.js's localStorage keys (epss-theme, epss-font-family,
+       epss-font-size) and the pre-paint <head> script keep working
+       unchanged — only the button's position + icon changed. -->
+  <div class="sidebar-divider"></div>
+  <div class="nav-group expanded" id="settings-menu-wrap" style="margin-bottom:0">
+    <button id="settings-menu-btn" type="button" class="nav-btn nav-header-item no-chevron" title="Settings" aria-haspopup="true" aria-expanded="false">
+      <span class="nav-group-icon" id="settings-menu-icon">⚙️</span> Settings
+    </button>
+
+    <div id="settings-menu-panel" role="menu" aria-label="Settings">
+
+      <div class="settings-panel-title">⚙️ Appearance</div>
+
+      <div class="settings-panel-divider"></div>
+
+      <label class="settings-quick-toggle" for="settings-dark-light-switch">
+        <span>🌙 Dark</span>
+        <span class="settings-switch">
+          <input type="checkbox" id="settings-dark-light-switch">
+          <span class="settings-switch-track"><span class="settings-switch-thumb"></span></span>
+        </span>
+        <span>☀️ Light</span>
+      </label>
+
+      <div>
+        <label class="settings-field-label" for="settings-theme-select">Theme</label>
+        <select id="settings-theme-select" class="settings-select">
+          <option value="belize-deep">Belize Deep</option>
+          <option value="belize">Belize</option>
+          <option value="hc-black">High Contrast Black</option>
+          <option value="hc-white">High Contrast White</option>
+          <option value="horizon">Horizon (default)</option>
+          <option value="quartz-dark">Quartz Dark</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="settings-field-label" for="settings-font-family">Font style</label>
+        <select id="settings-font-family" class="settings-select">
+          <option value="jakarta">Plus Jakarta Sans (default)</option>
+          <option value="inter">Inter</option>
+          <option value="system">System UI</option>
+          <option value="georgia">Georgia (serif)</option>
+          <option value="mono">IBM Plex Mono</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="settings-field-label" for="settings-font-size">Font size</label>
+        <select id="settings-font-size" class="settings-select">
+          <option value="small">Small</option>
+          <option value="medium">Medium (default)</option>
+          <option value="large">Large</option>
+          <option value="xlarge">Extra Large</option>
+        </select>
+      </div>
+
+    </div>
+  </div>
+
   <!-- Upload controls — admin only; whole group (button + divider) hides for
        viewers. Clicking the button opens the Data Source modal (see
        #data-source-modal-backdrop below) instead of expanding inline. -->
@@ -902,8 +965,8 @@
 </div>
 
 <!-- Profile Menu — account-only: who's signed in, their role, change
-     password, sign out. Appearance/font controls live in the separate
-     Settings dropdown (#settings-menu-wrap) just to the left. -->
+     password, sign out. Appearance/font controls now live in the Settings
+     entry in the sidebar (between User Management and Data Source). -->
 <div id="profile-menu-wrap">
   <button id="profile-menu-btn" type="button" title="Profile" aria-haspopup="true" aria-expanded="false">
     <span id="profile-avatar">–</span>
@@ -944,65 +1007,7 @@
   </div>
 </div>
 
-<!-- Settings Menu — top-right dropdown (moved out of the sidebar). Same
-     field IDs as before so settings-menu.js's localStorage keys
-     (epss-theme, epss-font-family, epss-font-size) and the pre-paint
-     <head> script keep working unchanged. Visible to every role. -->
-<div id="settings-menu-wrap">
-  <button id="settings-menu-btn" type="button" title="Settings" aria-haspopup="true" aria-expanded="false">
-    <span id="settings-menu-icon">🎨</span>
-  </button>
 
-  <div id="settings-menu-panel" role="menu" aria-label="Settings">
-
-    <div class="settings-panel-title">🎨 Appearance</div>
-
-    <div class="settings-panel-divider"></div>
-
-    <label class="settings-quick-toggle" for="settings-dark-light-switch">
-      <span>🌙 Dark</span>
-      <span class="settings-switch">
-        <input type="checkbox" id="settings-dark-light-switch">
-        <span class="settings-switch-track"><span class="settings-switch-thumb"></span></span>
-      </span>
-      <span>☀️ Light</span>
-    </label>
-
-    <div>
-      <label class="settings-field-label" for="settings-theme-select">Theme</label>
-      <select id="settings-theme-select" class="settings-select">
-        <option value="belize-deep">Belize Deep</option>
-        <option value="belize">Belize</option>
-        <option value="hc-black">High Contrast Black</option>
-        <option value="hc-white">High Contrast White</option>
-        <option value="horizon">Horizon (default)</option>
-        <option value="quartz-dark">Quartz Dark</option>
-      </select>
-    </div>
-
-    <div>
-      <label class="settings-field-label" for="settings-font-family">Font style</label>
-      <select id="settings-font-family" class="settings-select">
-        <option value="jakarta">Plus Jakarta Sans (default)</option>
-        <option value="inter">Inter</option>
-        <option value="system">System UI</option>
-        <option value="georgia">Georgia (serif)</option>
-        <option value="mono">IBM Plex Mono</option>
-      </select>
-    </div>
-
-    <div>
-      <label class="settings-field-label" for="settings-font-size">Font size</label>
-      <select id="settings-font-size" class="settings-select">
-        <option value="small">Small</option>
-        <option value="medium">Medium (default)</option>
-        <option value="large">Large</option>
-        <option value="xlarge">Extra Large</option>
-      </select>
-    </div>
-
-  </div>
-</div>
 
 <!-- Data Source Modal — large popup window with all upload controls
      (admin only). Opened by clicking the "📁 Data Source" sidebar button
