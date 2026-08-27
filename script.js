@@ -621,10 +621,19 @@ function getReconciledBase() {
   const base = getMappingReconciledBase();
   const codes = getPersonFilteredCodes();
   if (!codes) return base;
-  return base.filter(r => {
-    const mat = String(r._mappedMaterial || r["Material"] || "").trim().toUpperCase();
-    return codes.has(mat);
-  });
+  // BUGFIX-PERSON-FILTER-EMPTY: getPersonFilteredCodes() returns TYPE-AWARE
+  // composite keys ("CODE\u241FSTREAM" — see FIX-PERSON-STREAM-LEAK above
+  // it), not bare codes. This used to check `codes.has(mat)` with just the
+  // bare code, which can never match a composite key — so ANY active person
+  // filter silently zeroed out every row on every page routed through
+  // applyPageFilter() (Dashboard, Transit, Expiry, QC, Branch, National,
+  // Branch Demand, MOS's SOH map, etc.), regardless of whether that person
+  // actually owns stock. Reuse the same isRowInPersonFilter() composite-key
+  // check every other consumer already uses, so this one stays in sync with
+  // them instead of carrying its own (broken) bare-code comparison.
+  return base.filter(r =>
+    (typeof isRowInPersonFilter === "function") ? isRowInPersonFilter(r, codes) : true
+  );
 }
 
 // FIX BUG-3: reset all page filters when a new file is loaded so stale plant/MG
