@@ -423,39 +423,21 @@ body { display: flex; }
 #profile-menu-panel.open { display: flex; transform: translateY(0); opacity: 1; }
 
 /* ══════════════════════════════════════════════
-   SETTINGS MENU (top-right, next to Profile menu)
-   Appearance / font controls — moved out of the sidebar. Same open/close
-   mechanics and IDs pattern as the Profile menu, wired up by
-   settings-menu.js. Sits just to the left of #profile-menu-wrap.
+   SETTINGS MENU (sidebar, between User Management and Data Source)
+   Appearance / font controls. Same open/close mechanics and IDs pattern as
+   the Profile menu, wired up by settings-menu.js. The button sits inline in
+   the sidebar's normal flow; the panel is fixed-positioned and placed by
+   settings-menu.js's positionSettingsPanel() on each open (flies out to the
+   right of the button when there's room, else opens below it) so it's never
+   clipped by the sidebar's own overflow-y:auto scroll area.
    ══════════════════════════════════════════════ */
 #settings-menu-wrap {
-  position: fixed;
-  top: 1rem;
-  right: 4.5rem;
-  z-index: 300;
+  position: relative;
 }
-#settings-menu-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  background: var(--accent-glow);
-  border: 1px solid var(--border2);
-  border-radius: 999px;
-  cursor: pointer;
-  font-size: 0.95rem;
-  transition: var(--theme-transition), transform 0.12s;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-}
-#settings-menu-btn:hover { border-color: var(--blue); background: var(--surface3); }
-#settings-menu-btn:active { transform: scale(0.95); }
-#settings-menu-btn.open { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-glow); }
+#settings-menu-btn.open { background: var(--surface2); color: var(--blue); }
 
 #settings-menu-panel {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
+  position: fixed;
   width: 260px;
   max-height: calc(100vh - 5rem);
   overflow-y: auto;
@@ -470,6 +452,7 @@ body { display: flex; }
   transform: translateY(-6px);
   opacity: 0;
   transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 300;
 }
 #settings-menu-panel.open { display: flex; transform: translateY(0); opacity: 1; }
 .settings-panel-title {
@@ -2253,10 +2236,6 @@ table.um-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm)
   #profile-menu-panel {
     width: calc(100vw - 2rem);
     max-width: 320px;
-  }
-  #settings-menu-wrap {
-    top: 1rem;
-    right: 3.7rem;
   }
   #settings-menu-panel {
     width: calc(100vw - 2rem);
