@@ -31,92 +31,201 @@ const HUB_PLANT = "HO01"; // the distribution hub — never has its own consumpt
 // The only two program types this app understands.
 const VALID_MOS_TYPES = ["Q", "RDF"];
 
-// ── PROGRAM CLASSIFICATION (CDSS / Reportable) ─────────────────────────────────
-// A second, independent dimension on top of Q/RDF.
+// ── PROGRAM CLASSIFICATION (CDSS / Reportable) — REBUILT FROM SCRATCH ───────
+// Every previous version of this logic (guessing type from AMC text,
+// treating AMC "PROGRAM TYPE" as authoritative, blending Q/RDF resolution
+// with classification resolution in one string parse) has been deleted.
+// This section implements ONLY the rules below — nothing else is assumed.
 //
-// TYPE SOURCE OF TRUTH: the Q/RDF `type` is ALWAYS read from the main
-// inventory file's own "Special Stock Type" column (Q = Health Program;
-// blank, anything else, or the material not being in the inventory file at
-// all, is treated as RDF). It is NEVER read from the AMC file — the AMC
-// file's "PROGRAM TYPE" column only decides the CDSS/Reportable
-// sub-classification layered on top:
+// THREE DATA SOURCES, each contributing one signal:
+//   1. INVENTORY — "Special Stock Type": blank = RDF, "Q" = Program. This is
+//      the row-level SOURCE OF TRUTH for which stream ("RDF" or "Q") a
+//      physical inventory line belongs to. (Rows with any other Special
+//      Stock Type value are excluded everywhere — see
+//      passesUniversalExclusions() in permissions.js — so by the time rows
+//      reach here, every row is unambiguously RDF or Q.)
+//   2. AMC — two SEPARATE columns: "STOCK TYPE" (RDF or PROGRAM/Q) and
+//      "CLASSIFICATION" (CDSS/NON-CDSS for RDF rows; Reportable/
+//      Non-reportable for Program rows). RDF can never carry a
+//      Reportable/Non-reportable classification and Program can never carry
+//      a CDSS/NON-CDSS classification — a row that breaks this pairing is
+//      invalid and is not used.
+//   3. MAPPING — the "Stock Type" column (RDF or Q). Some source codes have
+//      mapping rules for BOTH stock types; when that happens, only the rule
+//      whose Stock Type matches the AMC row's own Stock Type may be used to
+//      resolve that row's canonical/target code. If the mapping file has a
+//      rule for this source code but none of that row's own Stock Type, the
+//      row is not used (never guess/force the wrong-typed rule).
 //
-//   RDF + AMC "PROGRAM TYPE" says "RDF-CDSS"           → RDF · CDSS
-//   RDF + anything else (blank / not in AMC at all)    → RDF · Non-CDSS
-//   Q   + AMC "PROGRAM TYPE" says "Program-Reportable"  → Program (Q) · Reportable
-//   Q   + anything else (blank / not in AMC at all)    → Program (Q) · Non-Reportable
+// TRUTH TABLE (exactly as specified — no other cases exist):
+//   Inventory SST | AMC Stock Type | AMC Classification | Mapping Stock Type      | Final
+//   blank (RDF)   | RDF             | CDSS                | RDF (and not Q)         | RDF-CDSS
+//   blank (RDF)   | not found       | not found            | RDF (or not exist/not Q)| RDF-NON-CDSS
+//   blank (RDF)   | RDF             | NON-CDSS             | RDF (and not Q)         | RDF-NON-CDSS
+//   Q (Program)   | Program         | Reportable           | Q (and not RDF)         | Program-Reportable
+//   Q (Program)   | not found       | not found            | Q (or not exist/not RDF)| Program-Non-Reportable
+//   Q (Program)   | Program         | Non-reportable       | Q (and not RDF)         | Program-Non-Reportable
 //
-// Every material lands in exactly one of these four buckets — there is no
-// "unclassified" case and no manual assignment step is needed, since type
-// always has a deterministic answer from the inventory file.
+// IMPORTANT: a material code can legitimately exist under BOTH streams at
+// once (some units regular RDF, others Health-Program/Q). Every lookup
+// below is keyed by (canonical code + stream) together, never by code
+// alone, so the two streams are never mixed even when the code is
+// identical — see buildAmcClassIndex()/buildMosMerged() below.
 const PROGRAM_CLASS = {
   RDF_CDSS:     "RDF-CDSS",
-  RDF_NON_CDSS: "RDF-Non-CDSS",
-  PROG_REPORT:  "PROGRAM-Reportable",
-  PROG_NONREPT: "PROGRAM-Non-Reportable",
+  RDF_NON_CDSS: "RDF-NON-CDSS",
+  PROG_REPORT:  "Program-Reportable",
+  PROG_NONREPT: "Program-Non-Reportable",
 };
+// The Classification filter bar shows exactly these four values, verbatim —
+// no separate "pretty" label. (Kept as its own map, rather than hardcoding
+// PROGRAM_CLASS's values everywhere, so every consumer — script.js's filter
+// bar builder, badges, KPI cards — stays in sync automatically.)
 const PROGRAM_CLASS_LABELS = {
-  [PROGRAM_CLASS.RDF_CDSS]:     "RDF · CDSS",
-  [PROGRAM_CLASS.RDF_NON_CDSS]: "RDF · Non-CDSS",
-  [PROGRAM_CLASS.PROG_REPORT]:  "Program (Q) · Reportable",
-  [PROGRAM_CLASS.PROG_NONREPT]: "Program (Q) · Non-Reportable",
+  [PROGRAM_CLASS.RDF_CDSS]:     PROGRAM_CLASS.RDF_CDSS,
+  [PROGRAM_CLASS.RDF_NON_CDSS]: PROGRAM_CLASS.RDF_NON_CDSS,
+  [PROGRAM_CLASS.PROG_REPORT]:  PROGRAM_CLASS.PROG_REPORT,
+  [PROGRAM_CLASS.PROG_NONREPT]: PROGRAM_CLASS.PROG_NONREPT,
 };
 
-// Resolves the final { type, cls } pair for one canonical material code.
-// `code` must already be the canonical (mapping-resolved) code, matching how
-// `sstMap` (buildSpecialStockTypeMap) and the inventory description map are
-// keyed. `rawProgramType` is whatever the AMC file's "PROGRAM TYPE" /
-// "Material Type Code" cell contained for this material, verbatim (may be
-// blank if the material wasn't found in the AMC file at all).
-//
-// LAW (per business rule): the SAME material code can legitimately be
-// carried under BOTH streams at once — some units as regular RDF stock,
-// others as Health-Program-funded (Q) stock — so an AMC row's OWN
-// classification text is the primary signal for which stream that row
-// belongs to: "RDF-..." always means RDF, "PROGRAM-..." always means Q.
-// Each row is treated as-is; one stream's row is never used to overrule or
-// dedupe the other. The inventory file's Special Stock Type (sstMap) is
-// only a fallback for rows whose AMC text is blank/unrecognized (e.g. the
-// material wasn't found in the AMC file at all), since only then is there
-// no row-level signal to go on.
-function resolveProgramTypeAndClass(code, rawProgramType, sstMap) {
-  const norm = String(rawProgramType || "").trim().toUpperCase().replace(/[\s_]+/g, "-").replace(/-+/g, "-");
-  const type = norm.startsWith("RDF")     ? "RDF"
-             : norm.startsWith("PROGRAM") ? "Q"
-             : (sstMap.get(code) === "Q" ? "Q" : "RDF");
-  const cls = type === "RDF"
-    ? (norm === "RDF-CDSS" ? PROGRAM_CLASS.RDF_CDSS : PROGRAM_CLASS.RDF_NON_CDSS)
-    : (norm === "PROGRAM-REPORTABLE" ? PROGRAM_CLASS.PROG_REPORT : PROGRAM_CLASS.PROG_NONREPT);
-  return { type, cls };
+// Separator used for every "code + stream" composite key in this file (same
+// convention already used elsewhere in the app, e.g. buildMosSohMap()).
+const MOS_KEY_SEP = "\u241F";
+
+// ── Normalizers — the only places raw file text is interpreted ─────────────
+
+// Inventory row → "RDF" | "Q" | null. Rows that aren't blank/"Q" never reach
+// here in practice (excluded upstream by passesUniversalExclusions), but
+// this stays defensive in case a caller passes an unfiltered row.
+function normalizeInventoryStream(row) {
+  const sst = String((row && row["Special Stock Type"]) || "").trim().toUpperCase();
+  if (sst === "") return "RDF";
+  if (sst === "Q") return "Q";
+  return null;
 }
 
-// code (upper) → "Q" | "RDF", derived from the main inventory file's own
-// Special Stock Type column (Q = Health Program; blank/anything else = RDF).
-// Used two ways for the new AMC format:
-//   1. as a fallback source for the Q/RDF `type` itself when the AMC file
-//      doesn't say (this new export has no "Material Type Code" column), so
-//      the manual assignment prompt only fires for materials this can't
-//      resolve either — not for every row in the file.
-//   2. to decide which "Non-" bucket a resolved-but-unclassified RDF/Q item
-//      falls into (see the defaulting pass in finishMosAmcLoad below).
-function buildSpecialStockTypeMap() {
+// AMC "STOCK TYPE" cell → "RDF" | "Q" | null ("not found"/unusable).
+function normalizeAmcStockType(raw) {
+  const s = String(raw || "").trim().toUpperCase();
+  if (s === "RDF") return "RDF";
+  if (s === "PROGRAM" || s === "Q") return "Q";
+  return null;
+}
+
+// AMC "CLASSIFICATION" cell → normalized token, gated by the row's own AMC
+// Stock Type so an RDF row can never resolve to Reportable/Non-reportable
+// and a Program row can never resolve to CDSS/NON-CDSS. Returns null for
+// anything that isn't one of the two valid values for that stock type.
+function normalizeAmcClassification(raw, amcStockType) {
+  const s = String(raw || "").trim().toUpperCase().replace(/[\s_]+/g, "-").replace(/-+/g, "-");
+  if (amcStockType === "RDF") {
+    if (s === "CDSS") return "CDSS";
+    if (s === "NON-CDSS" || s === "NONCDSS") return "NON-CDSS";
+    return null;
+  }
+  if (amcStockType === "Q") {
+    if (s === "REPORTABLE") return "REPORTABLE";
+    if (s === "NON-REPORTABLE" || s === "NONREPORTABLE") return "NON-REPORTABLE";
+    return null;
+  }
+  return null;
+}
+
+// code (upper) → Set of streams ("RDF"/"Q") actually present in the current
+// inventory upload for that canonical material. A code can have BOTH
+// entries (see the "same code in both streams" business rule above).
+// Rebuilt fresh from getMappingReconciledBase() every time (never cached
+// across a person-filter change — see the FIX-CLS-PERSON-LEAK note that
+// used to live here: this must stay person-filter-independent, it's a
+// material-level fact, not a page-display fact).
+function buildInventoryStreamMap() {
   const map = new Map();
-  // FIX-CLS-PERSON-LEAK: was getReconciledBase(), which narrows to whichever
-  // person is currently selected in the global filter. Special Stock Type
-  // is a stable per-material fact that feeds classification (see
-  // getMappingReconciledBase() in script.js for the full story) — it must
-  // never depend on the person filter's state at whatever moment this
-  // happened to run.
   const base = (typeof getMappingReconciledBase === "function")
     ? getMappingReconciledBase()
     : (typeof rawDf !== "undefined" ? rawDf : []);
   base.forEach(row => {
     const code = String(row._mappedMaterial || row["Material"] || "").trim().toUpperCase();
-    if (!code || map.has(code)) return;
-    const sst = String(row["Special Stock Type"] || "").trim().toUpperCase();
-    map.set(code, sst === "Q" ? "Q" : "RDF");
+    if (!code) return;
+    const stream = normalizeInventoryStream(row);
+    if (!stream) return;
+    if (!map.has(code)) map.set(code, new Set());
+    map.get(code).add(stream);
   });
   return map;
+}
+
+// For one raw AMC row (source code + its own resolved stream), decides the
+// CANONICAL code that row's classification/person should be filed under —
+// applying the mapping file's Stock-Type-matching rule exactly as
+// specified. Returns { canonical, targetDesc, usable }:
+//   - No mapping entry at all for this source code → usable under its own
+//     code as-is (mapping "does not exist" is an accepted state).
+//   - A mapping entry exists for THIS row's stream → use its target code
+//     (this is the normal / common case).
+//   - A mapping entry exists ONLY for the OTHER stream → this row is not
+//     usable (the mapping file explicitly ties this source code to the
+//     other stock type; using it here would mix the two streams).
+function resolveAmcRowCanonical(srcCode, stream) {
+  const src = String(srcCode || "").trim().toUpperCase();
+  if (!mappingTable || mappingTable.size === 0) return { canonical: src, usable: true };
+  const stypeMap = mappingTable.get(src);
+  if (!stypeMap || !stypeMap.size) return { canonical: src, usable: true };
+  const entry = stypeMap.get(stream);
+  if (entry) {
+    return {
+      canonical: String(entry.targetCode || "").trim().toUpperCase() || src,
+      targetDesc: entry.targetDesc || "",
+      usable: true,
+    };
+  }
+  return { canonical: src, usable: false };
+}
+
+// Builds the AMC index: "CANONICAL_CODE⟨sep⟩STREAM" → the single AMC row
+// (classification + person + per-plant AMC figures) that determines that
+// (code, stream) pair's classification. Multiple raw AMC rows can land on
+// the same key (duplicate source codes, or several source codes mapping to
+// the same target) — their AMC figures are summed like everywhere else in
+// this app, but the CLASSIFICATION and PERSON always come from the first
+// row seen for that key, together, as a pair (never mixed from different
+// rows) — satisfying the Assigned Person rule: person must come from the
+// exact same row that supplied the classification. `conflict` is set when
+// a later duplicate row disagrees with the first on classification or
+// person, purely so the UI can flag it (see PROGRAM_CLASS_LABELS callers).
+function buildAmcClassIndex() {
+  const idx = new Map();
+  mosAmcRaw.forEach(row => {
+    const stream = normalizeAmcStockType(row.stockType);
+    if (!stream) return; // AMC Stock Type not RDF/Program — row not usable
+    const cls = normalizeAmcClassification(row.classification, stream);
+    if (!cls) return; // invalid classification for this stock type — row not usable
+    const { canonical, targetDesc, usable } = resolveAmcRowCanonical(row.code, stream);
+    if (!usable) return; // mapping only defines the OTHER stock type — discard
+
+    const key = canonical + MOS_KEY_SEP + stream;
+    const desc = row.desc || targetDesc || "";
+    if (!idx.has(key)) {
+      idx.set(key, {
+        classification: cls,
+        person: row.person || "",
+        desc,
+        amcs: Object.fromEntries(mosPlants.map(p => [p, null])),
+        origCodes: new Set([row.code]),
+        conflict: false,
+      });
+    }
+    const e = idx.get(key);
+    e.origCodes.add(row.code);
+    if (!e.desc && desc) e.desc = desc;
+    if (e.classification !== cls) e.conflict = true;
+    if (!e.person && row.person) e.person = row.person;
+    else if (e.person && row.person && e.person !== row.person) e.conflict = true;
+    for (const p of mosPlants) {
+      const v = row.amcs[p];
+      if (v !== null && v !== undefined) e.amcs[p] = (e.amcs[p] || 0) + v;
+    }
+  });
+  return idx;
 }
 
 // ── MOS STATE ────────────────────────────────────────────────────────────────
@@ -140,28 +249,21 @@ function loadMosAmcFile(file) {
 
       if (!rows.length) throw new Error("AMC file is empty.");
 
-      // FIX-AMC-HEADER-ALIASES: match META columns by normalized header text
-      // (trim + collapse internal whitespace + uppercase) rather than exact
-      // string equality. Real-world AMC exports vary the classification
-      // column's name and whitespace — seen so far: "PROGRAM TYPE",
-      // "Material Type Code", and " CLASSIFICATION TYPE" (leading space).
-      // Before this fix, any header not hitting an exact string match (1)
-      // was NOT excluded from detectedPlants, so it got misparsed as a bogus
-      // plant column, and (2) was never read into rawProgramType, so every
-      // material silently fell back to the "Non-CDSS"/"Non-Reportable"
-      // bucket — e.g. a whole file classified as RDF-CDSS / Program-
-      // Reportable would show zero materials in those filters everywhere
-      // downstream (Dashboard, MOS, Branch Demand, etc.) even though the
-      // data was present in the file, just under an unrecognized header.
+      // Match META columns by normalized header text (trim + collapse
+      // internal whitespace + uppercase) rather than exact string equality,
+      // so stray whitespace in real exports (e.g. " STOCK TYPE" with a
+      // leading space) still resolves correctly. The AMC file has TWO
+      // separate classification-relevant columns per the spec — "Stock
+      // Type" (RDF/Program) and "Classification" (CDSS/NON-CDSS or
+      // Reportable/Non-reportable) — read independently, never blended
+      // into one combined string.
       const normHeader = k => String(k || "").trim().toUpperCase().replace(/\s+/g, " ");
       const META_ALIASES = {
-        code:  ["MATERIAL CODE"],
-        desc:  ["DESCRIPTION"],
-        type:  ["MATERIAL TYPE CODE"],
-        // "PROGRAM TYPE" and "CLASSIFICATION TYPE" are the same concept
-        // under different export names — both resolve to rawProgramType.
-        cls:   ["PROGRAM TYPE", "CLASSIFICATION TYPE"],
-        person:["PERSON"],
+        code:           ["MATERIAL CODE"],
+        desc:           ["DESCRIPTION"],
+        stockType:      ["STOCK TYPE", "MATERIAL TYPE CODE"],
+        classification: ["CLASSIFICATION", "PROGRAM TYPE", "CLASSIFICATION TYPE"],
+        person:         ["PERSON"],
       };
       const firstRow = rows[0];
       const actualKeys = Object.keys(firstRow);
@@ -196,23 +298,30 @@ function loadMosAmcFile(file) {
         // it was genuinely present in the AMC upload.
         const code = String(r[resolvedMeta.code || "Material Code"] || "").trim().toUpperCase();
 
-        // Raw classification text only — NOT used to determine Q/RDF `type`
-        // anymore (see resolveProgramTypeAndClass above). Kept verbatim here
-        // and matched against "RDF-CDSS" / "Program-Reportable" later, once
-        // per merged material, in buildMosMerged(). Sourced from whichever
-        // actual column resolvedMeta.cls found (PROGRAM TYPE / CLASSIFICATION
-        // TYPE / etc. — see FIX-AMC-HEADER-ALIASES above), falling back to
-        // the type-code column for older exports that use that name instead.
-        const rawProgramType = String(
-          (resolvedMeta.cls  && r[resolvedMeta.cls])  ||
-          (resolvedMeta.type && r[resolvedMeta.type]) ||
-          ""
-        ).trim();
+        // Stock Type and Classification are read as two independent raw
+        // values, verbatim — normalization/validation (RDF can only pair
+        // with CDSS/NON-CDSS; Program can only pair with
+        // Reportable/Non-reportable) happens once per merged (code+stream)
+        // key in buildAmcClassIndex(), not here.
+        let rawStockType      = String((resolvedMeta.stockType      && r[resolvedMeta.stockType])      || "").trim();
+        let rawClassification = String((resolvedMeta.classification && r[resolvedMeta.classification]) || "").trim();
+
+        // Backward-compatible fallback ONLY: some older exports carry a
+        // single combined column (e.g. "RDF-CDSS") under the classification
+        // alias instead of two separate columns. If no dedicated Stock Type
+        // column was found at all, but the classification text itself
+        // starts with "RDF-" or "PROGRAM-", split it into its two parts.
+        if (!resolvedMeta.stockType && rawClassification) {
+          const norm = rawClassification.toUpperCase().replace(/[\s_]+/g, "-").replace(/-+/g, "-");
+          if (norm.startsWith("RDF-"))     { rawStockType = "RDF";     rawClassification = norm.slice(4); }
+          else if (norm.startsWith("PROGRAM-")) { rawStockType = "PROGRAM"; rawClassification = norm.slice(8); }
+        }
 
         return {
           code,
           desc:   String(r[resolvedMeta.desc || "Description"] || "").trim(),
-          rawProgramType,
+          stockType: rawStockType,
+          classification: rawClassification,
           person: String(r[resolvedMeta.person || "PERSON"] || "").trim(),
           amcs: Object.fromEntries(
             detectedPlants.map(p => [String(p).trim().toUpperCase(), (r[p] == null || r[p] === "" || typeof r[p] === "string") ? null : Number(r[p])])
@@ -224,10 +333,10 @@ function loadMosAmcFile(file) {
       mosPersons = [...new Set(mosAmcRaw.map(r => r.person).filter(Boolean))].sort();
       if (typeof populatePersonFilter === "function") populatePersonFilter(mosPersons);
 
-      // No manual assignment step needed — type (Q/RDF) always comes from
-      // the inventory file's own Special Stock Type, and classification
-      // (CDSS/Reportable) is derived deterministically inside buildMosMerged
-      // via resolveProgramTypeAndClass(). See finishMosAmcLoad below.
+      // No manual assignment step needed — the RDF/Program stream always
+      // comes from the inventory file's own Special Stock Type, and the
+      // CDSS/NON-CDSS/Reportable/Non-reportable classification is derived
+      // deterministically inside buildMosMerged() per the truth table above.
       finishMosAmcLoad(file, detectedPlants, statusEl, btnEl);
 
     } catch (err) {
@@ -268,8 +377,8 @@ function finishMosAmcLoad(file, detectedPlants, statusEl, btnEl) {
 // whole inventory file per material.
 function buildInventoryDescMap() {
   const map = new Map();
-  // FIX-CLS-PERSON-LEAK: see buildSpecialStockTypeMap() above — this feeds
-  // mosMerged too and must stay person-filter-independent.
+  // Person-filter-independent — this feeds mosMerged too, which must not
+  // depend on whichever person happens to be selected when it's rebuilt.
   const base = (typeof getMappingReconciledBase === "function")
     ? getMappingReconciledBase()
     : (typeof rawDf !== "undefined" ? rawDf : []);
@@ -281,128 +390,71 @@ function buildInventoryDescMap() {
   return map;
 }
 
-// ── DEDUPLICATION (mapping-aware) ─────────────────────────────────────────────
-// Collapses multiple AMC source codes onto the same canonical target code when
-// a mapping file is loaded, summing AMC per plant across duplicates — same
-// approach used elsewhere in the app for inventory rows.
-//
-// KEYED BY CANONICAL CODE + STREAM (RDF vs Program/Q): per the LAW in
-// resolveProgramTypeAndClass, a material can legitimately be carried under
-// BOTH streams at once, so merging only collapses duplicate AMC rows within
-// the SAME stream (e.g. two source codes mapping to one RDF target) — it
-// never merges an RDF row and a Program(Q) row for the same code into one,
-// since that would silently sum their AMCs together and pick only one
-// rawProgramType to represent both. Downstream code that expects "a code
-// can have two mosMerged rows" (see brdResolveCode/brdDedupeByOwnType in
-// branch-demand.js and the type-aware lookup in mosFindRow) relies on this.
-//
-// Rebuilt on every AMC/inventory/mapping change (see wireMosModule below),
-// so sstMap here always reflects the CURRENT inventory upload — no stale
-// type/classification left over from before the inventory file loaded.
+// ── FINAL CLASSIFICATION RESOLUTION (the truth table, applied) ─────────────
+// One (canonical code, stream) pair → its Final Classification, per the
+// truth table at the top of this file. `hit` is the matching entry from
+// buildAmcClassIndex() for this exact key, or undefined if AMC has nothing
+// for it — in which case the two "not found" default rows apply.
+function resolveFinalClass(stream, hit) {
+  if (hit) {
+    return stream === "RDF"
+      ? (hit.classification === "CDSS" ? PROGRAM_CLASS.RDF_CDSS : PROGRAM_CLASS.RDF_NON_CDSS)
+      : (hit.classification === "REPORTABLE" ? PROGRAM_CLASS.PROG_REPORT : PROGRAM_CLASS.PROG_NONREPT);
+  }
+  return stream === "RDF" ? PROGRAM_CLASS.RDF_NON_CDSS : PROGRAM_CLASS.PROG_NONREPT;
+}
+
+// ── BUILD ONE ROW PER (CANONICAL CODE, STREAM) ──────────────────────────────
+// Rebuilt on every AMC/inventory/mapping change (see wireMosModule below).
+// The universe of rows is the UNION of:
+//   - every (code, stream) pair actually present in the current inventory
+//     upload (buildInventoryStreamMap) — so every inventory material gets a
+//     classification even when AMC has nothing for it (the two "not found"
+//     default rows in the truth table), and
+//   - every (code, stream) pair AMC defines (buildAmcClassIndex) — so
+//     AMC-only materials (no inventory rows on file yet) still show up on
+//     AMC-driven pages (MOS by Plant, etc.), consistent with prior behavior.
+// A code with both an RDF stream and a Q/Program stream produces TWO
+// separate rows here — they are never merged into one (see the
+// "Important Business Rule" at the top of this file).
 function buildMosMerged() {
   if (!mosAmcRaw.length) return [];
 
-  const merged = new Map(); // canonicalCode → mergedRow
-  const invDescMap = buildInventoryDescMap();
-  const sstMap = buildSpecialStockTypeMap();
+  const invStreamMap = buildInventoryStreamMap(); // code -> Set("RDF","Q")
+  const invDescMap    = buildInventoryDescMap();
+  const amcIdx        = buildAmcClassIndex();      // "code⟨sep⟩stream" -> matched AMC row
 
-  for (const row of mosAmcRaw) {
-    let canonical = row.code;
-    let canonDesc = row.desc;
-
-    if (mappingTable && mappingTable.size > 0) {
-      // FIX-MOS-MAP-CASE: mappingTable's source keys are always uppercased
-      // (loadMappingFile does src.toUpperCase()), but row.code is the AMC
-      // file's code exactly as typed. A casing mismatch here (e.g. lowercase
-      // in AMC.xlsx) makes this lookup miss even when a mapping genuinely
-      // exists, silently leaving the material unmapped in mosMerged.
-      //
-      // FIX-MOS-MAP-NESTED: mappingTable.get(code) returns a Map keyed by
-      // stock type ("Q"/"RDF" → {targetCode, targetDesc, factor}) — see
-      // "Build the mapping table" in script.js's loadMappingFile — NOT a
-      // flat {targetCode,...} object. Reading entry.targetCode/.targetDesc
-      // directly off that Map (as this used to) always returned undefined,
-      // silently collapsing EVERY AMC material with a mapping-file entry
-      // into a single `canonical: undefined` bucket that
-      // buildCodeProgramClassMap() then drops entirely (its `m.code &&`
-      // guard is false for undefined) — so any mapped material's
-      // classification (RDF-CDSS / Program-Reportable / etc.) vanished from
-      // every AMC-derived view (Dashboard classification filter, MOS,
-      // National table, Expiry Risk...).
-      //
-      // FIX-MOS-MAP-STOCKTYPE-MATCH: when a source code has mapping rules for
-      // BOTH stock types (~15 codes in this dataset — e.g. "105-AMIT-0101-03"
-      // maps to a DIFFERENT target under "RDF" than under "Q"), the correct
-      // variant to pick is whichever one matches THIS AMC ROW's own
-      // classification text: an "RDF-CDSS"/"RDF-Non-CDSS" row is inherently
-      // the RDF stream and must resolve through the mapping's RDF-tagged
-      // target; a "Program-Reportable"/"Program-Non-Reportable" row is
-      // inherently the Q stream and must resolve through the Q-tagged
-      // target. Picking the wrong one (as an inventory-lookup-based guess
-      // could) silently misattributes this row's AMC numbers and
-      // classification onto the WRONG canonical material — e.g. an
-      // RDF-CDSS row's data landing on the Q-stream's target code instead.
-      // Falls back to the single available entry when the code only has one
-      // stock-type rule, or to an RDF-then-Q preference when this row has no
-      // AMC classification text to go on at all (nothing else to tell the
-      // two streams apart by).
-      const stypeMap = mappingTable.get(String(row.code || "").trim().toUpperCase());
-      let entry;
-      if (stypeMap && stypeMap.size) {
-        const clsNorm = String(row.rawProgramType || "").trim().toUpperCase().replace(/[\s_]+/g, "-").replace(/-+/g, "-");
-        const wantStype = clsNorm.startsWith("RDF") ? "RDF" : (clsNorm.startsWith("PROGRAM") ? "Q" : null);
-        entry = (wantStype && stypeMap.get(wantStype))
-          || (stypeMap.size === 1 ? [...stypeMap.values()][0] : (stypeMap.get("RDF") || stypeMap.get("Q")));
-      }
-      if (entry) {
-        canonical = entry.targetCode;
-        canonDesc = entry.targetDesc || row.desc;
-      }
-    }
-
-    // AMC file had nothing for this material — try the inventory file.
-    if (!canonDesc) canonDesc = invDescMap.get(canonical) || "";
-
-    // This row's own stream — see the LAW in resolveProgramTypeAndClass.
-    // Computed up front so it can be folded into the merge key below.
-    const { type: rowType } = resolveProgramTypeAndClass(canonical, row.rawProgramType, sstMap);
-    const mergeKey = canonical + "\u241F" + rowType;
-
-    if (!merged.has(mergeKey)) {
-      merged.set(mergeKey, {
-        code: canonical,
-        origCodes: new Set([row.code]),
-        desc: canonDesc,
-        rawProgramType: row.rawProgramType || "",
-        person: row.person || "",
-        amcs: Object.fromEntries(mosPlants.map(p => [p, null])),
-        isMerged: false,
-      });
-    }
-    const m = merged.get(mergeKey);
-    m.origCodes.add(row.code);
-    if (m.origCodes.size > 1) m.isMerged = true;
-    if (!m.desc && canonDesc) m.desc = canonDesc; // fill in if an earlier dup left it blank
-    if (!m.rawProgramType && row.rawProgramType) m.rawProgramType = row.rawProgramType; // fill in if an earlier dup left it blank
-    if (!m.person && row.person) m.person = row.person;
-
-    for (const p of mosPlants) {
-      const v = row.amcs[p];
-      if (v !== null && v !== undefined) {
-        m.amcs[p] = (m.amcs[p] || 0) + v;
-      }
-    }
-  }
-
-  return Array.from(merged.values()).map(m => {
-    const { type, cls } = resolveProgramTypeAndClass(m.code, m.rawProgramType, sstMap);
-    return {
-      ...m,
-      origCodes: [...m.origCodes].join(", "),
-      type,
-      programClass: cls,
-    };
+  const keys = new Set();
+  invStreamMap.forEach((streams, code) => {
+    streams.forEach(stream => keys.add(code + MOS_KEY_SEP + stream));
   });
+  amcIdx.forEach((_v, key) => keys.add(key));
+
+  const out = [];
+  keys.forEach(key => {
+    const sepIdx = key.lastIndexOf(MOS_KEY_SEP);
+    const code   = key.slice(0, sepIdx);
+    const stream = key.slice(sepIdx + MOS_KEY_SEP.length);
+    const hit    = amcIdx.get(key);
+
+    out.push({
+      code,
+      origCodes: hit ? [...hit.origCodes].join(", ") : code,
+      desc: (hit && hit.desc) || invDescMap.get(code) || "",
+      // ── ASSIGNED PERSON LOGIC ──────────────────────────────────────────
+      // Comes ONLY from the exact same AMC row (Stock Type + Classification
+      // match) that determined this row's classification. No AMC match for
+      // this (code, stream) → blank/null. Never borrowed from a different
+      // classification bucket, even for the same material code.
+      person: hit ? hit.person : "",
+      amcs: hit ? hit.amcs : Object.fromEntries(mosPlants.map(p => [p, null])),
+      isMerged: hit ? hit.origCodes.size > 1 : false,
+      personClsConflict: hit ? hit.conflict : false,
+      type: stream,
+      programClass: resolveFinalClass(stream, hit),
+    });
+  });
+  return out;
 }
 
 // ── CANONICAL CODE → MATERIAL VALUATION TYPE (ZME/ZMS/ZLC/ZMD) ──────────────
