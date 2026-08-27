@@ -989,20 +989,22 @@ function loadFile(file) {
         });
 
         // filterRowsByAccess (permissions.js) applies the universal
-        // invariants (W always excluded; non-medical/project-stock/excluded
-        // location always excluded) AND the signed-in user's role/scope
-        // access (Q rows now included when the user's scope allows it;
-        // Admin sees every scope).
-        let df = filterRowsByAccess(trimmed)
-          .filter(r => String(r["Inventory Valuation Type"] || "").trim() !== "");
+        // invariants — Special Stock Type must be "Q" or blank (everything
+        // else excluded), Inventory Valuation Type must not be blank,
+        // non-medical/excluded-location rows excluded — AND the signed-in
+        // user's role/scope access (Q rows included only when the user's
+        // scope allows it; Admin sees every scope). Both universal rules
+        // now live inside passesUniversalExclusions() (permissions.js), so
+        // they can never be forgotten on a page that reads rawDf directly.
+        let df = filterRowsByAccess(trimmed);
 
         // DEBUG: stock-type visibility trace. Logs, per Special Stock Type
-        // ("Q" / "W" / blank-other), how many rows existed in the raw upload
-        // vs how many survived filterRowsByAccess + the valuation-type check.
-        // Safe to remove once the "Admin only sees RDF" issue is confirmed
-        // fixed — this does not change any filtering behavior, it only reports it.
+        // ("Q" / blank(RDF) / other-excluded), how many rows existed in the
+        // raw upload vs how many survived passesUniversalExclusions (Special
+        // Stock Type must be Q or blank; Inventory Valuation Type must not
+        // be blank). Reporting only — never changes what gets filtered.
         (function debugStockTypeTrace() {
-          const bucket = v => (v === "Q" ? "Q" : v === "W" ? "W" : "(blank/other)");
+          const bucket = v => (v === "Q" ? "Q" : v === "" ? "(blank/RDF)" : "(other/excluded)");
           const rawCounts = {};
           trimmed.forEach(r => {
             const sst = String(r["Special Stock Type"] || "").trim().toUpperCase();
@@ -1017,31 +1019,8 @@ function loadFile(file) {
           });
           console.log("── Stock-type visibility trace ──");
           console.log("window.isAdmin:", window.isAdmin, "| role:", window.APP_USER && window.APP_USER.role, "| data_scopes:", window.APP_USER && window.APP_USER.data_scopes);
-          console.log("Raw Q:", rawCounts["Q"] || 0, "| Raw W:", rawCounts["W"] || 0, "| Raw blank/other:", rawCounts["(blank/other)"] || 0);
-          console.log("Kept Q:", keptCounts["Q"] || 0, "| Kept W:", keptCounts["W"] || 0, "| Kept blank/other:", keptCounts["(blank/other)"] || 0);
-          if ((rawCounts["Q"] || 0) > 0 && (keptCounts["Q"] || 0) === 0) {
-            const sampleQ = trimmed.find(r => String(r["Special Stock Type"] || "").trim().toUpperCase() === "Q");
-            if (sampleQ) {
-              const desc     = sampleQ["Special Stock Type Description"];
-              const material = sampleQ["Material"];
-              const matGroup = sampleQ["Material Group Name"];
-              const storeLoc = sampleQ["Storage Location"];
-              const valType  = sampleQ["Inventory Valuation Type"];
-              console.log("── Checking sample Q row against each exclusion rule ──");
-              console.log("Special Stock Type Description:", JSON.stringify(desc),
-                "→ isProjectStockDescription:", typeof isProjectStockDescription === "function" ? isProjectStockDescription(desc) : "(fn missing)");
-              console.log("Material:", JSON.stringify(material),
-                "→ isNonMedicalCode:", typeof isNonMedicalCode === "function" ? isNonMedicalCode(material) : "(fn missing)");
-              console.log("Material Group Name:", JSON.stringify(matGroup),
-                "→ isNonMedicalGroup:", typeof isNonMedicalGroup === "function" ? isNonMedicalGroup(matGroup) : "(fn missing)");
-              console.log("Storage Location:", JSON.stringify(storeLoc),
-                "→ isExcludedStorageLocation:", typeof isExcludedStorageLocation === "function" ? isExcludedStorageLocation(storeLoc) : "(fn missing)");
-              console.log("Inventory Valuation Type:", JSON.stringify(valType),
-                "→ blank?", String(valType || "").trim() === "",
-                "| resolved suffix:", typeof getValuationType === "function" ? getValuationType(sampleQ) : "(fn missing)");
-              console.log("→ Whichever line above says 'true' (or 'blank? true') is the rule dropping this row. That rule needs its exclusion list/logic adjusted for Q-type stock, or the source data needs correcting.");
-            }
-          }
+          console.log("Raw Q:", rawCounts["Q"] || 0, "| Raw blank/RDF:", rawCounts["(blank/RDF)"] || 0, "| Raw other/excluded:", rawCounts["(other/excluded)"] || 0);
+          console.log("Kept Q:", keptCounts["Q"] || 0, "| Kept blank/RDF:", keptCounts["(blank/RDF)"] || 0, "| Kept other/excluded:", keptCounts["(other/excluded)"] || 0);
         })();
 
         const numCols = [
@@ -3982,8 +3961,40 @@ function renderBranch() {
     // change but always read this same stale const. Both are now `let` and get
     // recomputed at the top of refreshMaterialView() below, so the checkboxes
     // re-enable themselves the moment fresh AMC data shows up.
+    //
+    // FIX-BRANCH-MOS-STREAM-MIX: a material code can legitimately have BOTH
+    // an RDF mosMerged row and a Program(Q) mosMerged row (see mos.js
+    // buildMosMerged's LAW comment — confirmed to actually occur in real AMC
+    // data, e.g. codes with both an RDF and a Q classification present).
+    // This page's own SOH figure (matPlantMap's TotalQty) already combines
+    // BOTH streams' physical stock into one whole-material total per code —
+    // but `new Map(mosMerged.map(r => [r.code, r]))` let whichever stream's
+    // row happened to be inserted last into mosMerged silently win the
+    // whole Map slot, so the MOS/AMC overlay was computed off that one
+    // arbitrary stream's AMC while SOH used the combined total — an
+    // inconsistent, insertion-order-dependent mismatch.
+    // buildCombinedAmcByCode() sums each plant's AMC across every stream
+    // sharing a code (same "not committed stays null, otherwise sum" rule
+    // buildAmcClassIndex() already uses in mos.js for merging duplicate raw
+    // AMC rows onto one key), so the whole-material AMC denominator here
+    // always agrees with the whole-material SOH numerator, no matter how
+    // many streams a code has or what order they were built in.
+    function buildCombinedAmcByCode(rows, plants) {
+      const map = new Map();
+      rows.forEach(r => {
+        if (!map.has(r.code)) {
+          map.set(r.code, { amcs: Object.fromEntries(plants.map(p => [p, null])) });
+        }
+        const entry = map.get(r.code);
+        plants.forEach(p => {
+          const v = r.amcs[p];
+          if (v !== null && v !== undefined) entry.amcs[p] = (entry.amcs[p] || 0) + v;
+        });
+      });
+      return map;
+    }
     let mosAvailable = mosAvailable0;
-    let mosByCode  = mosAvailable ? new Map(mosMerged.map(r => [r.code, r])) : new Map();
+    let mosByCode  = mosAvailable ? buildCombinedAmcByCode(mosMerged, mosPlants) : new Map();
     const mosHubCode = (typeof HUB_PLANT !== "undefined") ? HUB_PLANT : "HO01";
 
     // AMC a given plant code should be measured against for this AMC row.
@@ -4323,9 +4334,13 @@ function renderBranch() {
       // BUG-MOS-STALE-FIX: recheck AMC availability fresh on every call instead
       // of trusting the value captured when the tab first opened — see note
       // above where mosAvailable/mosByCode are declared.
+      // FIX-BRANCH-MOS-STREAM-MIX: rebuild via buildCombinedAmcByCode() (not a
+      // raw code->row Map) so a re-render after fresh AMC data loads still
+      // combines a code's RDF + Program(Q) AMC figures instead of letting one
+      // stream silently overwrite the other — see the declaration above.
       mosAvailable = typeof mosMerged !== "undefined" && mosMerged.length > 0
                   && typeof mosPlants !== "undefined" && mosPlants.length > 0;
-      mosByCode = mosAvailable ? new Map(mosMerged.map(r => [r.code, r])) : new Map();
+      mosByCode = mosAvailable ? buildCombinedAmcByCode(mosMerged, mosPlants) : new Map();
 
       const matWrap   = document.getElementById("mat-ms-wrap");
       const selected  = (matWrap && matWrap._getSelected) ? matWrap._getSelected() : [];
