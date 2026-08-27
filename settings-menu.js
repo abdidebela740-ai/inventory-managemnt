@@ -207,6 +207,39 @@
     pw2El.value = "";
   }
 
+  // ── Settings panel positioning ───────────────────────────────────────
+  // The Settings button now lives inline in the sidebar (between User
+  // Management and Data Source) instead of a fixed top-right icon, but the
+  // panel itself still needs to float free of the sidebar's own
+  // overflow-y:auto (a plain CSS anchor would get clipped/scrolled with the
+  // sidebar). Computed fresh on every open: prefers flying out to the right
+  // of the button; falls back to opening below it if there isn't enough
+  // horizontal room (narrow window / mobile drawer), then clamps to stay
+  // fully on-screen either way.
+  function positionSettingsPanel() {
+    const btn   = document.getElementById("settings-menu-btn");
+    const panel = document.getElementById("settings-menu-panel");
+    if (!btn || !panel) return;
+    const rect   = btn.getBoundingClientRect();
+    const margin = 8;
+    const panelW = panel.offsetWidth  || 260;
+    const panelH = panel.offsetHeight || 400;
+
+    let left, top;
+    if (rect.right + margin + panelW <= window.innerWidth - margin) {
+      // Room to the right of the button — fly out sideways.
+      left = rect.right + margin;
+      top  = Math.min(rect.top, window.innerHeight - panelH - margin);
+    } else {
+      // Not enough width (narrow window / mobile drawer) — open below.
+      left = Math.max(margin, Math.min(rect.left, window.innerWidth - panelW - margin));
+      top  = rect.bottom + margin;
+      if (top + panelH > window.innerHeight - margin) top = Math.max(margin, rect.top - panelH - margin);
+    }
+    panel.style.left = `${Math.max(margin, left)}px`;
+    panel.style.top  = `${Math.max(margin, top)}px`;
+  }
+
   // ── Panel open/close ─────────────────────────────────────────────────
   // Generic dropdown factory — used for both the Profile menu and the
   // Settings menu, which are independent, separately-triggered panels
@@ -259,9 +292,17 @@
     const avatarBtn = document.getElementById("profile-menu-btn");
     if (avatarBtn) avatarBtn.addEventListener("click", (e) => { e.stopPropagation(); profileDropdown.toggle(); });
 
-    // Settings menu open/close (top-right, next to Profile)
+    // Settings menu open/close (sidebar, between User Management and Data
+    // Source). Position is computed fresh right after the panel becomes
+    // visible (open() below has already added the "open"/display:flex
+    // class by this point), so offsetWidth/offsetHeight are measurable.
     const settingsBtn = document.getElementById("settings-menu-btn");
-    if (settingsBtn) settingsBtn.addEventListener("click", (e) => { e.stopPropagation(); settingsDropdown.toggle(); });
+    if (settingsBtn) settingsBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      settingsDropdown.toggle();
+      const panel = document.getElementById("settings-menu-panel");
+      if (panel && panel.classList.contains("open")) positionSettingsPanel();
+    });
 
     // Theme select
     const themeSelect = document.getElementById("settings-theme-select");
