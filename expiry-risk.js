@@ -393,6 +393,7 @@ async function renderExpiryRisk() {
   const plantEl  = document.getElementById("exprisk-plant");
   const typeEl   = document.getElementById("exprisk-type");
   const clsEl    = document.getElementById("exprisk-program-class");
+  if (typeof applyProgramClassAccessToSelect === "function") applyProgramClassAccessToSelect(clsEl);
   const searchQ  = searchEl ? searchEl.value.trim() : "";
   const plantVal = plantEl  ? plantEl.value.trim()  : "";
   const typeVal  = typeEl   ? typeEl.value.trim()   : "";
