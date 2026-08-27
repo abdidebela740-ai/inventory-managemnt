@@ -802,6 +802,7 @@ async function renderMosPlant() {
   const typeEl      = document.getElementById("mos-type");
   const clsEl       = document.getElementById("mos-program-class");
   const criticalEl  = document.getElementById("mos-critical-only");
+  if (typeof applyProgramClassAccessToSelect === "function") applyProgramClassAccessToSelect(clsEl);
 
   const searchQ     = searchEl   ? searchEl.value.trim()  : "";
   const typeVal     = typeEl     ? typeEl.value.trim()    : "";
