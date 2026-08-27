@@ -672,7 +672,7 @@
     ];
 
     const noteParts = [];
-    if (!grLoaded) noteParts.push(`📌 <b>Incoming GR.xlsx</b> hasn't been uploaded yet, so <b>GR Posting Date</b> and <b>Remaining % at Receipt</b> can't be computed. Upload it via <b>🚚 Upload Incoming GR.xlsx</b> in the sidebar to complete this view.`);
+    if (!grLoaded) noteParts.push(`⚠️ Some data required for this view is unavailable. Please contact your administrator.`);
     if (missingProd) noteParts.push(`📌 ${missingProd} batch${missingProd === 1 ? "" : "es"} above ${missingProd === 1 ? "has" : "have"} no <b>Production Date</b> on file (common — SAP doesn't always capture it per batch), so their % can't be calculated. Their Expiration Date and GR Posting Date are still shown where available.`);
     if (emptyCodes.length) noteParts.push(`📌 No batches currently on hand for: <b>${emptyCodes.map(c => escHtml(c)).join(", ")}</b>.`);
     const note = noteParts.length ? `<div class="shelf-note">${noteParts.join("<br>")}</div>` : "";
@@ -983,7 +983,7 @@
     if (noteEl) { noteEl.style.display = "none"; noteEl.innerHTML = ""; }
 
     if (!grLoaded) {
-      if (noteEl) { noteEl.style.display = "block"; noteEl.innerHTML = `📌 Upload <b>Incoming GR.xlsx</b> in the sidebar first — that's what supplies Goods Receipt dates.`; }
+      if (noteEl) { noteEl.style.display = "block"; noteEl.innerHTML = `⚠️ This data is currently unavailable. Please contact your administrator.`; }
       return;
     }
 
