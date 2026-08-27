@@ -1494,9 +1494,19 @@ function populateAllFilters() {
   // full label set is always offered (even before an AMC file is uploaded)
   // so the control never disappears — see applyPageFilter() for how a
   // selection is matched against each row once AMC data is loaded.
-  const clsLabels = (typeof PROGRAM_CLASS_LABELS !== "undefined")
-    ? Object.values(PROGRAM_CLASS_LABELS)
-    : [];
+  // FIX-CLS-ROLE-SCOPE: was Object.values(PROGRAM_CLASS_LABELS) — the raw,
+  // unfiltered full list — regardless of the signed-in user's role. An
+  // RDF-only-scoped user could tick "Program (Q) · Reportable" here and
+  // always get zero rows back, and a Q-only user could see/tick RDF
+  // classifications the same way. The single-select "-program-class"
+  // dropdown (MOS/National Table/Overstock & Expiry Risk/Stockout
+  // Risk/Request Analysis/Branch Demand) already gates this by scope via
+  // programClassFilterOptions() in permissions.js — this checklist (Dashboard/
+  // Transit/Expiry/QC/Blocked/Restricted/Concentration) is the other place
+  // the same classification values are offered, so it needs the same gate.
+  const clsLabels = (typeof programClassFilterOptions === "function")
+    ? programClassFilterOptions()
+    : (typeof PROGRAM_CLASS_LABELS !== "undefined" ? Object.values(PROGRAM_CLASS_LABELS) : []);
   const clsConfigs = [
     { wrapId:"ms-dash-cls",       ddId:"ms-dash-cls-dd",       page:"dashboard" },
     { wrapId:"ms-transit-cls",    ddId:"ms-transit-cls-dd",    page:"transit"   },
@@ -1871,6 +1881,14 @@ function pl(extra={}) {
 // ═══════════════════════════════════════════════════════════════════════════
 function renderDashboard() {
   const df = applyPageFilter("dashboard");
+
+  // FEAT-MAPPING-BANNER-EVERYWHERE: was only ever populated in the Admin-only
+  // Data Source upload modal (#mappingFileStatus), even though every page
+  // already had its own "-mapping-banner" container sitting unused in the
+  // HTML. Any user viewing a page — not just Admins uploading the file —
+  // should be able to see that Material Standardization is active and how
+  // much of what they're looking at has been standardized.
+  if (typeof renderMappingBanner === "function") renderMappingBanner("dash-mapping-banner");
 
   // FIX-NO-DASH-PHANTOM-ALERT: the "Ghost Transit Stock Excluded" banner
   // is no longer shown on the Dashboard — it now only appears on the Transit
@@ -2591,15 +2609,27 @@ function applyMaterialMapping() {
       };
     }
 
-    // Mapping found — apply conversion factor
+    // Mapping found — apply conversion factor.
+    // BUGFIX-VALUE-OVERSCALE: `factor` is a QUANTITY/UOM conversion factor
+    // only (sourced from a column literally named "conversion factor" /
+    // "qty factor" / "unit factor" — see colFactor above). Re-expressing a
+    // quantity in a different unit (e.g. 1 case = 100 tablets, factor=100)
+    // does NOT change what that stock is worth in ETB — the monetary value
+    // fields must pass through unscaled. Previously they were multiplied by
+    // the same `f` as quantity, so any material with factor > 1 had its
+    // "standardized" value wildly inflated (a factor of 100 turned real ETB
+    // 1,000 into a phantom ETB 100,000) — this is what produced the
+    // impossible "532% of total stock value standardized" reading in the
+    // Material Standardization banner, since mappedValue (converted, over-
+    // inflated) was compared against totalValue (raw, un-inflated).
     const f = entry.factor;
     const cvUnrestricted    = parseFloat(((row["Unrestricted Stock"]              || 0) * f).toFixed(9));
     const cvTransit         = parseFloat(((row["Stock in Transit"]                || 0) * f).toFixed(9));
     const cvQC              = parseFloat(((row["Stock in Quality Inspection"]     || 0) * f).toFixed(9));
     const cvBlocked         = parseFloat(((row["Blocked Stock"]                   || 0) * f).toFixed(9));
-    const cvValUnrestricted = parseFloat(((row["Value of Unrestricted Stock"]     || 0) * f).toFixed(9));
-    const cvValTransit      = parseFloat(((row["Value of Stock in Transit"]       || 0) * f).toFixed(9));
-    const cvValQC           = parseFloat(((row["Value of Stock in Quality Inspection"] || 0) * f).toFixed(9));
+    const cvValUnrestricted = row["Value of Unrestricted Stock"]             || 0;
+    const cvValTransit      = row["Value of Stock in Transit"]               || 0;
+    const cvValQC           = row["Value of Stock in Quality Inspection"]    || 0;
     const cvTotalQty        = cvUnrestricted + cvTransit + cvQC;
     const cvTotalValue      = cvValUnrestricted + cvValTransit + cvValQC;
 
@@ -2657,7 +2687,10 @@ function applyMaterialMapping() {
   });
 
   // Compute stats
-  const valuePct = totalValue > 0 ? Math.round((mappedValue / totalValue) * 100) : 0;
+  // With the value-overscale bugfix above, mappedValue is now a straight
+  // subset-sum of totalValue (both raw, unscaled), so this can't exceed
+  // 100% anymore — Math.min kept as a defensive clamp only.
+  const valuePct = totalValue > 0 ? Math.min(100, Math.round((mappedValue / totalValue) * 100)) : 0;
   mappingStats = { mapped: mappedCount, total: rawDf.length, valuePct };
 
   // Refresh sidebar status to show stats
@@ -3039,6 +3072,8 @@ function renderTransit() {
   if (gateEl) gateEl.style.display = "none";
   if (bodyEl) bodyEl.style.display = "block";
 
+  if (typeof renderMappingBanner === "function") renderMappingBanner("transit-mapping-banner");
+
   // rawDf is pre-filtered at parse time — no need to re-apply isNonMedical* guards here.
   // Simply restrict to rows with positive transit qty and value.
   // FIX-PHANTOM-HIDE: phantom transit rows (ghost against the uploaded file)
@@ -3313,6 +3348,8 @@ function renderExpiryTimelineChart(suffix, rowsForChart) {
 }
 
 function renderExpiry() {
+  if (typeof renderMappingBanner === "function") renderMappingBanner("expiry-mapping-banner");
+
   // ── Branch-Comparison material drilldown: auto-select the clicked material ──
   // _expiryDrilldownMatCode is set by goToMaterialExpiry() (see the Branch-
   // Comparison-only click override near the top of this file). We consume it
@@ -3494,6 +3531,8 @@ function renderExpiryDetailTable(baseDf, today) {
 
 
 function renderQC() {
+  if (typeof renderMappingBanner === "function") renderMappingBanner("qc-mapping-banner");
+
   // FIX BUG-6: removed "&& r["Value of Stock in Quality Inspection"] > 0"
   // SAP sometimes records QC qty > 0 with zero ETB value (non-valuated batches,
   // consignment stock) — these must still appear for physical count audits.
@@ -3590,6 +3629,8 @@ function renderQC() {
 // Stock" columns instead of the QC ones.
 // ═══════════════════════════════════════════════════════════════════════════
 function renderBlocked() {
+  if (typeof renderMappingBanner === "function") renderMappingBanner("blocked-mapping-banner");
+
   // FIX-BLOCKED-VALUE-ONLY-ROWS: was qty-only (`Blocked Stock > 0`), which silently
   // dropped rows where SAP exports a Blocked Value with a zero/blank quantity
   // (rounding, unit mismatches, adjustment postings). That caused this page's KPI
@@ -3671,6 +3712,8 @@ function renderBlocked() {
 // Stock, per a dedicated column in the source Excel).
 // ═══════════════════════════════════════════════════════════════════════════
 function renderRestricted() {
+  if (typeof renderMappingBanner === "function") renderMappingBanner("restricted-mapping-banner");
+
   // FIX-RESTRICTED-VALUE-ONLY-ROWS: was qty-only (`Restricted Stock > 0`), which
   // silently dropped rows where SAP exports a Restricted Value with a zero/blank
   // quantity (rounding, unit mismatches, adjustment postings). That caused this
@@ -3788,6 +3831,8 @@ function buildCombinedAmcByCode(rows, plants) {
 // BRANCH COMPARISON
 // ═══════════════════════════════════════════════════════════════════════════
 function renderBranch() {
+  if (typeof renderMappingBanner === "function") renderMappingBanner("branch-mapping-banner");
+
   // BUG-BRANCH-1 FIX: Use baseDf (pre-aggregation, one row per plant per material)
   // for branch totals and matPlantMap. aggregateByMaterial collapses all plants into
   // a single row per material so it CANNOT be used for per-branch breakdowns.
