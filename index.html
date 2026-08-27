@@ -840,24 +840,32 @@
         <span class="nav-icon">🎯</span> Stock Concentration
       </button>
     </div>
+
+    <!-- FIX-SELFSERVICE-NAV: moved inside #nav, right after Analytics, and
+         dropped the hardcoded "expanded" class so this group is collapsible
+         like every other one above it — it's now picked up automatically by
+         the "COLLAPSIBLE NAV GROUPS" IIFE below (which only wires up
+         `#nav .nav-group` elements), instead of sitting permanently open
+         outside the nav element with no toggle behavior. Also removes the divider that
+         used to separate it from Quick Lookup, so the gap here matches the
+         gap between every other nav group (no divider) rather than the
+         wider divider gap. -->
+    <div class="nav-group" data-group="self-service">
+      <div class="nav-group-title"><span class="nav-group-icon">🧾</span> Self-Service</div>
+      <button class="nav-btn" data-page="request-analysis">
+        <span class="nav-icon">🧾</span> Request Analysis
+      </button>
+      <button class="nav-btn" data-page="branch-demand">
+        <span class="nav-icon">🧭</span> Branch Demand
+      </button>
+      <a class="nav-btn" href="pharma-alloc.html" target="_blank" rel="noopener" style="text-decoration:none;">
+        <span class="nav-icon">🧮</span> Allocation Tool <span style="margin-left:auto;font-size:0.7rem;opacity:0.55;">↗</span>
+      </a>
+    </div>
   </nav>
 
   <div class="nav-group quick-lookup-group" id="quick-lookup-group" data-group="quick-lookup">
     <div class="nav-group-title"><span class="nav-group-icon">🔍</span> Quick Lookup</div>
-  </div>
-
-  <div class="sidebar-divider"></div>
-  <div class="nav-group expanded" data-group="self-service">
-    <div class="nav-group-title"><span class="nav-group-icon">🧾</span> Self-Service</div>
-    <button class="nav-btn" data-page="request-analysis">
-      <span class="nav-icon">🧾</span> Request Analysis
-    </button>
-    <button class="nav-btn" data-page="branch-demand">
-      <span class="nav-icon">🧭</span> Branch Demand
-    </button>
-    <a class="nav-btn" href="pharma-alloc.html" target="_blank" rel="noopener" style="text-decoration:none;">
-      <span class="nav-icon">🧮</span> Allocation Tool <span style="margin-left:auto;font-size:0.7rem;opacity:0.55;">↗</span>
-    </a>
   </div>
 
   <!-- User Management — Admin/Director/Deputy Director only; hidden via
