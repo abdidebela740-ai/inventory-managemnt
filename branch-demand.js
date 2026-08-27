@@ -349,6 +349,29 @@ function brdPrimarySource(mappedCode, preferredStockType) {
   return { sourceCode: best.srcCode, factor: best.factor, allSourceCodes: pool.map(c => c.srcCode), stockTypeMatched };
 }
 
+// Looks up a SOURCE code's OWN description off the raw inventory rows —
+// used by Request Form so the description shown matches reqSourceCode (the
+// real code on the requisition) instead of silently staying on the mapped
+// code's description once the code itself has already switched. Confirmed
+// against script.js/mos.js: raw rows carry the source code in "Material"
+// and its own description in "Material Description" (mapped/canonical
+// values live in _mappedMaterial/_mappedDesc instead — NOT what we want
+// here, since reqSourceCode is deliberately the un-mapped, orderable code).
+// Falls back to the mapped description (desc arg) if the source code isn't
+// found or has no description of its own — same "don't leave it blank"
+// convention as storageLoc/nearestExpiry elsewhere in this module.
+function brdSourceDescription(sourceCode, fallbackDesc) {
+  if (!sourceCode) return fallbackDesc;
+  const base = (typeof rawDf !== "undefined" ? rawDf : []) || [];
+  const wanted = String(sourceCode).trim().toUpperCase();
+  for (const row of base) {
+    if (String(row["Material"] || "").trim().toUpperCase() !== wanted) continue;
+    const v = row["Material Description"];
+    if (v !== undefined && v !== null && String(v).trim()) return String(v).trim();
+  }
+  return fallbackDesc;
+}
+
 // ── STOCK TYPE CLASSIFICATION (Q/RDF + valuation type) FOR ONE MATERIAL ─────
 // Reuses getRowScopeCode() from permissions.js (the same function that
 // drives row-level access control) so "what counts as RDF vs Health
@@ -942,6 +965,10 @@ function brdBuildLines(sohMap) {
       const reqSourceFactor = reqSrc.factor;
       const reqSourceDiffers = reqSourceCode.toUpperCase() !== String(row.code).toUpperCase() || reqSourceFactor !== 1;
       const reqSourceQty = reqSourceFactor > 0 ? Math.round(alloc / reqSourceFactor) : alloc;
+      // Only bother looking up a separate description when the code itself
+      // actually changed — when it didn't, row.desc already IS this code's
+      // description, no need for an extra lookup.
+      const reqSourceDesc = reqSourceDiffers ? brdSourceDescription(reqSourceCode, row.desc) : row.desc;
 
       lines.push({
         plant: b.plant, code: row.code, desc: row.desc, origCodes: row.origCodes,
@@ -956,7 +983,7 @@ function brdBuildLines(sohMap) {
         stockPrefix: matScope.prefix, stockTypeLabel, purchGroup, purchOrg,
         storageLoc: storageInfo.loc, storageLocInferred: storageInfo.inferred,
         nearestExpiry,
-        reqSourceCode, reqSourceFactor, reqSourceQty, reqSourceDiffers,
+        reqSourceCode, reqSourceFactor, reqSourceQty, reqSourceDiffers, reqSourceDesc,
         reqSourceTypeMatched: reqSrc.stockTypeMatched,
       });
     });
@@ -1270,12 +1297,25 @@ function brdRenderTables(lines, canEdit) {
       fmt: (v, r) => r.reqSourceDiffers
         ? `<span class="col-mat-code" title="${r.reqSourceTypeMatched ? '' : 'No source code found for this line\'s own Q/RDF stock type — falling back to the mapping table\'s other candidate(s). Double-check before approving.'}">${escHtml(v)}${!r.reqSourceTypeMatched ? ' <span class="brd-note-noamc">⚠ check type</span>' : ""}</span>`
         : `<span class="col-mat-code">${escHtml(v)}</span>` },
-    { key: "desc", label: "Description", cellClass: "col-mat-desc-wrap" },
+    // Description of reqSourceCode (the real code shown above), not the
+    // mapped code's own description — see brdSourceDescription(). Falls
+    // back to the mapped description when the code didn't change or no
+    // source-specific description was found.
+    { key: "reqSourceDesc", label: "Description", cellClass: "col-mat-desc-wrap" },
     { key: "plant", label: "Branch" },
     { key: "priorityTier", label: "Priority", raw: true, fmt: (v, r) => brdPriorityBadge(v) },
-    { key: "alloc", label: "Quantity to Request", raw: true,
+    // Shown (and edited) in the REAL SOURCE PACK SIZE (reqSourceQty), not
+    // raw mapped units — this now matches the Material Code column above it
+    // and what actually lands in the SAP_Paste/Working export, instead of
+    // silently editing mapped units under a "Quantity to Request" label.
+    // data-factor lets the shared change listener (see wireBrdModule)
+    // convert what the user types back into mapped units before it's
+    // stored in manualAlloc, which is what the rest of the module's math
+    // (need/mosAfter/allocation) runs on. Analysis's own Allocated input
+    // has no data-factor and stays in mapped units, unaffected by this.
+    { key: "reqSourceQty", label: "Quantity to Request", raw: true,
       fmt: (v, r) => canEdit
-        ? `<input type="number" min="0" step="1" class="brd-alloc-input" data-plant="${escHtml(r.plant)}" data-code="${escHtml(r.code)}" value="${Number(v || 0)}" />`
+        ? `<input type="number" min="0" step="1" class="brd-alloc-input" data-plant="${escHtml(r.plant)}" data-code="${escHtml(r.code)}" data-factor="${r.reqSourceFactor}" value="${Number(v || 0)}" />`
         : `<b>${fmtQty(v)}</b>` },
     // Nearest expiry of the branch's OWN existing stock of this item —
     // Request Form only (not Analysis, see file header / cols above).
@@ -1511,7 +1551,14 @@ function brdExportTemplate() {
       if (inp) {
         const key = brdDraftKey(inp.dataset.plant, inp.dataset.code);
         const d = brdDraft.get(key) || {};
-        const v = Math.max(0, Number(inp.value) || 0);
+        const rawV = Math.max(0, Number(inp.value) || 0);
+        // Request Form's input is in the source/orderable pack size
+        // (reqSourceQty) — convert back to mapped units, which is what
+        // manualAlloc/need/mosAfter/export all run on, before saving.
+        // Analysis's Allocated input carries no data-factor, so it falls
+        // through unchanged, exactly as before.
+        const factor = Number(inp.dataset.factor);
+        const v = (factor > 0) ? Math.round(rawV * factor) : rawV;
         d.manualAlloc = v;
         brdDraft.set(key, d);
         renderBranchDemand();
