@@ -2786,6 +2786,10 @@ function applyMaterialMapping() {
 function renderMappingBanner(containerId) {
   const el = document.getElementById(containerId);
   if (!el) return;
+  // Admin-only: Material Standardization is a Data Upload / mapping-file
+  // concern (same gate as the Data Upload section itself), not something
+  // regular users need to see or act on.
+  if (typeof window.isAdmin !== "undefined" && !window.isAdmin) { el.innerHTML = ""; return; }
   if (!mappingTable.size || !mappingStats) { el.innerHTML = ""; return; }
   const { mapped, total, valuePct } = mappingStats;
   el.innerHTML = `
