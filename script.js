@@ -998,31 +998,6 @@ function loadFile(file) {
         // they can never be forgotten on a page that reads rawDf directly.
         let df = filterRowsByAccess(trimmed);
 
-        // DEBUG: stock-type visibility trace. Logs, per Special Stock Type
-        // ("Q" / blank(RDF) / other-excluded), how many rows existed in the
-        // raw upload vs how many survived passesUniversalExclusions (Special
-        // Stock Type must be Q or blank; Inventory Valuation Type must not
-        // be blank). Reporting only — never changes what gets filtered.
-        (function debugStockTypeTrace() {
-          const bucket = v => (v === "Q" ? "Q" : v === "" ? "(blank/RDF)" : "(other/excluded)");
-          const rawCounts = {};
-          trimmed.forEach(r => {
-            const sst = String(r["Special Stock Type"] || "").trim().toUpperCase();
-            const b = bucket(sst);
-            rawCounts[b] = (rawCounts[b] || 0) + 1;
-          });
-          const keptCounts = {};
-          df.forEach(r => {
-            const sst = String(r["Special Stock Type"] || "").trim().toUpperCase();
-            const b = bucket(sst);
-            keptCounts[b] = (keptCounts[b] || 0) + 1;
-          });
-          console.log("── Stock-type visibility trace ──");
-          console.log("window.isAdmin:", window.isAdmin, "| role:", window.APP_USER && window.APP_USER.role, "| data_scopes:", window.APP_USER && window.APP_USER.data_scopes);
-          console.log("Raw Q:", rawCounts["Q"] || 0, "| Raw blank/RDF:", rawCounts["(blank/RDF)"] || 0, "| Raw other/excluded:", rawCounts["(other/excluded)"] || 0);
-          console.log("Kept Q:", keptCounts["Q"] || 0, "| Kept blank/RDF:", keptCounts["(blank/RDF)"] || 0, "| Kept other/excluded:", keptCounts["(other/excluded)"] || 0);
-        })();
-
         const numCols = [
           "Unrestricted Stock","Stock in Quality Inspection","Blocked Stock","Stock in Transit","Restricted Stock",
           "Value of Stock in Quality Inspection","Value of Stock in Transit","Value of Unrestricted Stock",
@@ -3734,6 +3709,44 @@ function renderRestricted() {
   );
   document.getElementById("restricted-table-wrap").innerHTML = buildTable(restrictedRows, restrictedCols, r => r["Value of Restricted Stock"] > 10000 ? "row-red" : "", "", {id:"restricted-export", title:"Restricted Stock"});
   wireTableExport("restricted-export", restrictedRows, restrictedCols, "restricted_stock");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMBINED (CROSS-STREAM) AMC LOOKUP — shared by any page that needs a
+// whole-material AMC figure
+// ═══════════════════════════════════════════════════════════════════════════
+// A material code can legitimately have BOTH an RDF mosMerged row and a
+// Program(Q) mosMerged row (see mos.js buildMosMerged's LAW comment —
+// confirmed to actually occur in real AMC data, e.g. codes with both an RDF
+// and a Q classification present). Any page whose own stock figure for a
+// code is ALREADY a whole-material total combining both streams (Branch
+// Comparison's matPlantMap, Stock Concentration's matConcentration, etc.)
+// must use an AMC denominator that agrees with that same combined total —
+// `new Map(mosMerged.map(r => [r.code, r]))` instead let whichever stream's
+// row happened to be inserted last into mosMerged silently win the whole Map
+// slot, so a whole-material SOH could get MOS'd against only one arbitrary
+// stream's AMC. buildCombinedAmcByCode() sums each plant's AMC across every
+// stream sharing a code (same "not committed stays null, otherwise sum" rule
+// buildAmcClassIndex() already uses in mos.js for merging duplicate raw AMC
+// rows onto one key), so the whole-material AMC denominator always agrees
+// with the whole-material SOH numerator, no matter how many streams a code
+// has or what order they were built in. Callers that need a SPECIFIC
+// stream's own AMC (not a combined whole-material figure) should keep using
+// mosFindRow(code, type) / mosMerged directly instead — this helper is only
+// for the "one whole-material total, no matter the stream" case.
+function buildCombinedAmcByCode(rows, plants) {
+  const map = new Map();
+  rows.forEach(r => {
+    if (!map.has(r.code)) {
+      map.set(r.code, { amcs: Object.fromEntries(plants.map(p => [p, null])) });
+    }
+    const entry = map.get(r.code);
+    plants.forEach(p => {
+      const v = r.amcs[p];
+      if (v !== null && v !== undefined) entry.amcs[p] = (entry.amcs[p] || 0) + v;
+    });
+  });
+  return map;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
