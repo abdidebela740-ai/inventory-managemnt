@@ -1301,7 +1301,12 @@ function brdRenderTables(lines, canEdit) {
     // mapped code's own description — see brdSourceDescription(). Falls
     // back to the mapped description when the code didn't change or no
     // source-specific description was found.
-    { key: "reqSourceDesc", label: "Description", cellClass: "col-mat-desc-wrap" },
+    // Kept to ONE line (nowrap + ellipsis) via inline style rather than the
+    // shared col-mat-desc-wrap class, so this doesn't affect the wrapping
+    // behavior of Material Description columns elsewhere in the app — full
+    // text is still available on hover via the title attribute.
+    { key: "reqSourceDesc", label: "Description", raw: true,
+      fmt: v => `<span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; max-width:220px;" title="${escHtml(String(v || ""))}">${escHtml(String(v || ""))}</span>` },
     { key: "plant", label: "Branch" },
     { key: "priorityTier", label: "Priority", raw: true, fmt: (v, r) => brdPriorityBadge(v) },
     // Shown (and edited) in the REAL SOURCE PACK SIZE (reqSourceQty), not
