@@ -102,13 +102,30 @@
       return;
     }
 
+    // FIX-WHORESP-STREAM-MIX: a material code can legitimately have BOTH an
+    // RDF mosMerged row and a Program(Q) mosMerged row (see mos.js
+    // buildMosMerged's LAW comment — this genuinely occurs, e.g. in real AMC
+    // data some codes carry both an RDF and a Q entry). Without a way to
+    // tell them apart, two visually-identical suggestions both opened
+    // whichever row mosMerged happened to list first — silently hiding the
+    // other stream's Person/Classification. When a code appears more than
+    // once in the results, tag each entry with its own classification so
+    // the two are distinguishable, and carry the row's own type through
+    // selectMatch()/showCard() instead of a bare code (see below).
+    const codeCounts = rows.reduce((m, r) => { m[r.code] = (m[r.code] || 0) + 1; return m; }, {});
     const q = query.trim();
-    box.innerHTML = rows.map((r, i) => `
-      <div class="who-resp-item" data-idx="${i}" data-code="${escHtml(r.code)}">
-        <span class="who-resp-item-code">${highlight(r.code, q)}</span>
+    box.innerHTML = rows.map((r, i) => {
+      const needsTag = codeCounts[r.code] > 1;
+      const tag = needsTag
+        ? `<span class="who-resp-item-tag">${escHtml((typeof PROGRAM_CLASS_LABELS !== "undefined" && PROGRAM_CLASS_LABELS[r.programClass]) || r.type || "")}</span>`
+        : "";
+      return `
+      <div class="who-resp-item" data-idx="${i}" data-code="${escHtml(r.code)}" data-type="${escHtml(r.type || "")}">
+        <span class="who-resp-item-code">${highlight(r.code, q)}${tag}</span>
         <span class="who-resp-item-desc">${highlight(r.desc || "—", q)}</span>
       </div>
-    `).join("");
+    `;
+    }).join("");
     positionSuggestions();
     box.classList.add("open");
   }
@@ -156,8 +173,16 @@
   }
 
   // ── Build the data shown in the result card ────────────────────────────────
-  function buildCardData(code) {
-    const r = mosMerged.find(m => m.code === code);
+  // FIX-WHORESP-STREAM-MIX: `type` (when given) pins this lookup to the
+  // exact (code, stream) row the user actually selected — mirrors mos.js's
+  // own mosFindRow(code, type) convention — so a code with both an RDF row
+  // and a Program(Q) row never silently shows whichever one happens to be
+  // first in mosMerged. Falls back to a bare-code match when type is
+  // omitted/not found, for backward compatibility.
+  function buildCardData(code, type) {
+    const r = (typeof mosFindRow === "function")
+      ? mosFindRow(code, type)
+      : mosMerged.find(m => m.code === code);
     if (!r) return null;
 
     const hub    = (typeof HUB_PLANT !== "undefined") ? HUB_PLANT : "HO01";
@@ -198,6 +223,11 @@
       // disagree — see buildMosMerged() in mos.js. Surfaced so the person
       // and classification shown here aren't mistaken for a confirmed pair.
       personClsConflict: !!r.personClsConflict,
+      // FIX-WHORESP-STREAM-MIX: surfaced so the card always makes explicit
+      // which stream/classification this Person Assigned belongs to —
+      // important now that a code can resolve to either of two rows.
+      type: r.type || "",
+      classificationLabel: (typeof PROGRAM_CLASS_LABELS !== "undefined" && PROGRAM_CLASS_LABELS[r.programClass]) || r.programClass || "",
     };
   }
 
@@ -217,8 +247,8 @@
     sel.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  function showCard(code) {
-    const data = buildCardData(code);
+  function showCard(code, type) {
+    const data = buildCardData(code, type);
     if (!data) return;
     closeSuggestions();
 
@@ -238,6 +268,10 @@
           <div class="who-resp-modal-desc">${escHtml(data.desc || "—")}</div>
         </div>
         <div class="who-resp-modal-grid">
+          <div class="who-resp-stat">
+            <div class="who-resp-stat-label">🏷️ Classification</div>
+            <div class="who-resp-stat-value">${escHtml(data.classificationLabel || "—")}</div>
+          </div>
           <div class="who-resp-stat">
             <div class="who-resp-stat-label">👤 Person Assigned</div>
             <div class="who-resp-stat-value">${escHtml(personLabel)}</div>
@@ -308,7 +342,9 @@
   function selectMatch(idx) {
     const m = currentMatches[idx];
     if (!m) return;
-    showCard(m.code);
+    // FIX-WHORESP-STREAM-MIX: pass this row's own type through, not just its
+    // code — see buildCardData().
+    showCard(m.code, m.type);
     const input = document.getElementById("who-resp-input");
     if (input) input.value = "";
     closeSuggestions();
