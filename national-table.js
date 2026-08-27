@@ -170,7 +170,7 @@ function renderNatlTable() {
 
   const clsBreakdown = data.reduce((m, d) => { const k = d.programClass || "unclassified"; m[k] = (m[k]||0)+1; return m; }, {});
   const clsSub = [PROGRAM_CLASS.RDF_CDSS, PROGRAM_CLASS.RDF_NON_CDSS, PROGRAM_CLASS.PROG_REPORT, PROGRAM_CLASS.PROG_NONREPT]
-    .map(c => `${PROGRAM_CLASS_LABELS[c].split("·")[1].trim()}: ${(clsBreakdown[c]||0).toLocaleString()}`).join(" · ");
+    .map(c => `${PROGRAM_CLASS_LABELS[c]}: ${(clsBreakdown[c]||0).toLocaleString()}`).join(" · ");
 
   natlKpiRow([
     mosKpiCard("Materials", data.length.toLocaleString(), typeVal || "All types", "blue"),
