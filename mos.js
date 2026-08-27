@@ -286,6 +286,25 @@ function loadMosAmcFile(file) {
       // everywhere it's looked up — including in National SOH/MOS.
       mosPlants  = detectedPlants.map(p => String(p).trim().toUpperCase());
 
+      // FIX-HO01-VIRTUAL-HUB: HO01 is never expected to have its own AMC
+      // column in AMC.xlsx (it doesn't consume — see the HO01 SPECIAL CASE
+      // header comment above), so it should NOT be required to appear as a
+      // literal column just to "turn on" the hub features on this page.
+      // computeRowMOS()/computeNationalMOS() already compute HO01's SOH from
+      // the inventory file (via buildMosSohMap(), which is keyed by the
+      // inventory file's own "Plant" column and has zero dependency on
+      // mosPlants) and HO01's AMC as the sum of every branch's AMC — so the
+      // ONLY reason HO01 was ever missing from this page when the AMC file
+      // omitted the column was that mosPlants (the list this page's plant
+      // dropdown / chart / table columns are built from) simply never
+      // contained the string "HO01". Ensuring it's always present, exactly
+      // once, at the front (matching how HO01/central is surfaced first
+      // elsewhere in the app, e.g. Branch Comparison's centralName sort),
+      // makes this page behave exactly like Branch Comparison already does:
+      // HO01 always shows up as a virtual hub, computed purely from the
+      // branch aggregate, regardless of whether AMC.xlsx has that column.
+      if (!mosPlants.includes(HUB_PLANT)) mosPlants.unshift(HUB_PLANT);
+
       mosAmcRaw  = rows.map(r => {
         // FIX-AMC-CODE-CASE: uppercase here too (not just trim) — every other
         // material-code comparison in the app normalizes with
@@ -351,11 +370,17 @@ function finishMosAmcLoad(file, detectedPlants, statusEl, btnEl) {
   mosMerged = buildMosMerged();
 
   const count = mosMerged.length;
-  const hasHub = mosPlants.includes(HUB_PLANT);
+  // FIX-HO01-VIRTUAL-HUB: HO01 is now always folded into mosPlants as a
+  // virtual hub (see loadMosAmcFile above), regardless of whether the AMC
+  // file itself has an "HO01" column — so this is no longer a warning case,
+  // just informational: note it when the uploaded file didn't literally
+  // carry the column, since that's the expected/normal shape of the file
+  // (HO01 doesn't consume, so it has nothing to put in that column).
+  const hadHubColumn = detectedPlants.some(p => String(p).trim().toUpperCase() === HUB_PLANT);
   if (statusEl) statusEl.innerHTML =
     `<div class="status-ok">✓ LOADED</div><div class="status-name">${escHtml(file.name)}</div>` +
     `<div class="status-name" style="color:var(--green)">${count} items · ${detectedPlants.length} plants</div>` +
-    (hasHub ? "" : `<div class="status-name" style="color:var(--amber)">⚠️ "${HUB_PLANT}" column not found — hub MOS rule won't apply</div>`);
+    (hadHubColumn ? "" : `<div class="status-name" style="color:var(--muted)">ℹ️ No "${HUB_PLANT}" column in this file — treated as the hub, AMC computed as the sum of every branch plant</div>`);
   if (btnEl) btnEl.textContent = "📐 Change AMC File";
 
   const noAmcEl  = document.getElementById("mos-no-amc");
