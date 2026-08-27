@@ -223,6 +223,15 @@ let brdSelectedPlant = "";        // "" = All Branches (only offered to roles th
 let brdBuffer         = 0;        // HO01 buffer, configurable, default 0
 let brdStockType      = "";       // "" = All, "R" = RDF, "Q" = Health Program — see file header
 let brdProgramClass   = "";       // "" = All, else one of PROGRAM_CLASS.* (mos.js) — RDF·CDSS/Non-CDSS, Program(Q)·Reportable/Non-Reportable
+// Material Type filter (ZME/ZMS/ZLC/ZMD — the Inventory Valuation Type
+// suffix). This is the SAME classification brdMaterialScope() already
+// derives per material (to pick Purchasing Group/Purch. Org — see
+// PURCHASING_GROUP_MAP above), just surfaced as its own multi-select filter
+// bar rather than folded into Stock Type — mirrors the Material Type filter
+// on the Request Analysis page (buildMaterialTypeMap()/getValuationType() in
+// filters.js) so the two stay conceptually consistent across the app.
+// Multi-select; empty set = no filter applied (show every type).
+let brdMatTypeFilter  = new Set();
 let brdCodes          = [];       // explicit user-pasted canonical/mapped codes (empty = auto-load)
 // brdDraft: Map<"PLANT::CODE", { approved:boolean, manualAlloc:number|null }>
 // Keyed by plant+code so edits/approvals survive a Recalculate (which only
@@ -890,6 +899,13 @@ function brdBuildLines(sohMap) {
 
   const lines = [];
   let hiddenNoStockCount = 0; // materials with truly nothing at HO01 (see rule below)
+  // All distinct Material Types (ZME/ZMS/ZLC/ZMD) present among the
+  // in-scope materials (plant/program-class already applied via
+  // brdMaterialsForScope(), Stock Type deliberately NOT applied here) —
+  // powers the Material Type filter bar's option list. Collected as we go
+  // rather than in a second pass, since brdMaterialScope(row.code) is
+  // already being computed per material below for the Stock Type check.
+  const availableMatTypesSet = new Set();
   materials.forEach(row => {
     // Stock Type filter (rule set in file header): classify once per
     // material and skip it entirely if it doesn't match the selected
@@ -897,7 +913,13 @@ function brdBuildLines(sohMap) {
     // Purch. Organization codes so they shouldn't be mixed on one screen
     // or one export.
     const matScope = brdMaterialScope(row.code);
+    if (matScope.suffix) availableMatTypesSet.add(matScope.suffix);
     if (brdStockType && matScope.prefix !== brdStockType) return;
+    // Material Type filter (ZME/ZMS/ZLC/ZMD — see brdMatTypeFilter above).
+    // A material with no resolvable type (matScope.suffix falsy) is dropped
+    // once a filter is active, same as any other filter here — there's
+    // nothing to match it against.
+    if (brdMatTypeFilter.size > 0 && !brdMatTypeFilter.has(matScope.suffix)) return;
     const purchGroup = matScope.scope ? (PURCHASING_GROUP_MAP[matScope.scope] || "") : "";
     const purchOrg   = matScope.prefix ? (PURCH_ORG_MAP[matScope.prefix] || "") : "";
     const stockTypeLabel = matScope.prefix ? (STOCK_TYPE_LABEL[matScope.prefix] || matScope.prefix) : "";
@@ -980,7 +1002,7 @@ function brdBuildLines(sohMap) {
         priorityTier: b.tier, priorityLabel: b.tierLabel, fillPct: b.fillPct,
         approved: !!draft.approved, manual: hasManual,
         surplusPlants, outboundQty: b.outboundQty,
-        stockPrefix: matScope.prefix, stockTypeLabel, purchGroup, purchOrg,
+        stockPrefix: matScope.prefix, stockTypeLabel, matType: matScope.suffix || "", purchGroup, purchOrg,
         storageLoc: storageInfo.loc, storageLocInferred: storageInfo.inferred,
         nearestExpiry,
         reqSourceCode, reqSourceFactor, reqSourceQty, reqSourceDiffers, reqSourceDesc,
@@ -993,6 +1015,7 @@ function brdBuildLines(sohMap) {
   const sorted = lines.sort((a, b) =>
     String(a.desc || "").localeCompare(String(b.desc || "")));
   sorted.hiddenNoStockCount = hiddenNoStockCount; // for brdKpiRow — see caller
+  sorted.availableMatTypes = [...availableMatTypesSet].sort(); // for the Material Type filter bar — see caller
   return sorted;
 }
 
@@ -1028,6 +1051,52 @@ function brdKpiRow(lines) {
     ["Approved", approvedCount.toLocaleString(), `of ${lines.length.toLocaleString()} shown`, "purple"],
     ["Hidden — No HO01 Stock", hiddenNoStock.toLocaleString(), "materials with nothing at HO01", "muted"],
   ]);
+}
+
+// ── MATERIAL TYPE FILTER BAR ─────────────────────────────────────────────────
+// Multi-select dropdown injected inline right after the Program Classification
+// filter (brd-program-class). Same searchable checkbox-dropdown control used
+// for Material Type everywhere else in the app (buildMultiSelect() in
+// script.js + the .ms-wrap/.ms-btn/.ms-dropdown markup — see
+// renderMatTypeFilterBar() in request-analysis.js for the same pattern)
+// rather than a bespoke control, so it looks and behaves consistently.
+// Rebuilt on every render so its option list stays in sync with whatever
+// Material Types are actually present in the current scope (plant/program
+// class); checked state is preserved via brdMatTypeFilter.
+function brdRenderMatTypeFilterBar(types) {
+  const anchorEl = document.getElementById("brd-program-class");
+  if (!anchorEl || !anchorEl.parentElement) return;
+
+  let outer = document.getElementById("brd-mattype-outer");
+  if (!outer) {
+    outer = document.createElement("div");
+    outer.id = "brd-mattype-outer";
+    outer.style.cssText =
+      "display:inline-flex;flex-direction:column;gap:5px;vertical-align:bottom;min-width:170px;";
+    outer.innerHTML =
+      `<div class="nav-label" style="font-size:var(--fs-2xs)">Material Type</div>` +
+      `<div class="ms-wrap" id="brd-mattype-wrap" style="min-width:0;width:100%">` +
+        `<button class="ms-btn" type="button" style="width:100%">All Material Types <span class="ms-arrow">▾</span></button>` +
+        `<div class="ms-dropdown" id="brd-mattype-dd"></div>` +
+      `</div>`;
+    anchorEl.parentElement.insertBefore(outer, anchorEl.nextSibling);
+  }
+
+  // buildMultiSelect() fully rebuilds the search box + checkbox list each
+  // call, so we re-seed the checked state from brdMatTypeFilter afterward
+  // (this control isn't tied to the pageFilters store buildMultiSelect
+  // normally reads its initial selection from).
+  buildMultiSelect("brd-mattype-wrap", "brd-mattype-dd", types, "All Material Types");
+  const dd = document.getElementById("brd-mattype-dd");
+  if (dd) {
+    dd.querySelectorAll(".ms-item input").forEach(cb => {
+      cb.checked = brdMatTypeFilter.has(cb.value);
+    });
+  }
+  // Re-render from the checked state we just restored (also refreshes the
+  // button label / selected-count badge).
+  const wrap = document.getElementById("brd-mattype-wrap");
+  if (wrap && wrap._refreshOptions) wrap._refreshOptions();
 }
 
 // ── MAIN RENDER ──────────────────────────────────────────────────────────────
@@ -1191,6 +1260,7 @@ function brdRenderHeavy(mySeq) {
   try {
     const sohMap = buildMosSohMap();
     const lines  = brdBuildLines(sohMap);
+    brdRenderMatTypeFilterBar(lines.availableMatTypes);
     brdRenderTables(lines, canEdit);
   } catch (e) {
     console.error("Error computing Branch Demand:", e);
@@ -1544,6 +1614,19 @@ function brdExportTemplate() {
       }
     });
     document.body.addEventListener("change", (e) => {
+      // Material Type filter — checkbox lives inside the shared .ms-dropdown
+      // control built by buildMultiSelect() (brdRenderMatTypeFilterBar
+      // above); sync brdMatTypeFilter from whatever's currently checked and
+      // re-render. Open/close and outside-click-to-close for the dropdown
+      // itself are handled by buildMultiSelect()'s own listeners — nothing
+      // to wire here.
+      if (e.target.closest && e.target.closest("#brd-mattype-dd") && e.target.type === "checkbox") {
+        const wrap = document.getElementById("brd-mattype-wrap");
+        const selected = wrap && wrap._getSelected ? wrap._getSelected() : [];
+        brdMatTypeFilter = new Set(selected);
+        renderBranchDemand();
+        return;
+      }
       const cb = e.target.closest(".brd-approve-cb");
       if (cb) {
         const key = brdDraftKey(cb.dataset.plant, cb.dataset.code);
