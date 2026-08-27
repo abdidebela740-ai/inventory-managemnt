@@ -78,6 +78,30 @@ function isNonMedicalGroup(groupName) {
 }
 
 /**
+ * EXCEPTION LIST — materials whose "Inventory Valuation Type" column carries
+ * the wrong suffix in the source SAP export. Confirmed via
+ * INVENTORY_VALUATION_CHECK_UP.xlsx ("ZLC Correction List"): these 6
+ * material codes are tagged "..._ZLC" in the data, but are actually Medical
+ * Supply (ZMS) materials — a data-entry/mapping issue upstream in SAP, not
+ * something this app can fix at the source. Keyed by bare Material Code
+ * (uppercased, trimmed) → the CORRECT suffix. getValuationType() below
+ * checks this map before falling back to parsing the raw suffix, so every
+ * consumer of Material Type (filter-bar checklists, role/scope checks,
+ * MOS, Branch Demand, Request Analysis, Shelf-Life, dashboard charts, etc.)
+ * automatically treats these codes as ZMS everywhere, from this one place.
+ *
+ * To add another correction later: add another "CODE": "SUFFIX" entry here.
+ */
+const VALUATION_TYPE_EXCEPTIONS = {
+  "301-BAEL-0105":      "ZMS", // Bandage Elastic - 8cm x 5m
+  "301-GABA-0105-02":   "ZMS", // Gauze Bandage - 12.5cmx5m of 12 Pieces
+  "302-CAIV-0501-02":   "ZMS", // Cannula Intravenous Set - 24G of 100
+  "306-ADPL-0706":      "ZMS", // Adhesive Plaster Zinc Oxide -7.5cm x10m
+  "306-TOUL-0701-02":   "ZMS", // Tourniquet latexfr.Fl.750*18mm(50cm)of25
+  "303-SHNO-0601-02":   "ZMS", // Shoecover Non-Skid - of 100
+};
+
+/**
  * Extracts the valuation type suffix from an "Inventory Valuation Type" value.
  *
  * SAP stores these as "<code>_<SUFFIX>" e.g. "50833_ZME", "023_ZLC", "EPSS1_ZMS".
@@ -86,9 +110,15 @@ function isNonMedicalGroup(groupName) {
  * Known suffixes in use: ZME, ZLC, ZMS, ZMD.
  * Returns "(None)" for blank / unrecognised values so the filter dropdown always
  * has a clean, displayable label for every row.
+ *
+ * Checks VALUATION_TYPE_EXCEPTIONS first (by Material Code) — a handful of
+ * codes are mistagged ZLC in the source data and should read as ZMS instead;
+ * see that map's comment for details.
  */
 function getValuationType(row) {
   if (!row) return "(None)";
+  const code = String(row["Material"] || "").trim().toUpperCase();
+  if (code && VALUATION_TYPE_EXCEPTIONS[code]) return VALUATION_TYPE_EXCEPTIONS[code];
   const raw = String(row["Inventory Valuation Type"] || "").trim();
   if (!raw) return "(None)";
   const lastUnderscore = raw.lastIndexOf("_");
