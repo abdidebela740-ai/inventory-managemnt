@@ -153,6 +153,7 @@ function renderNatlTable() {
   const searchEl = document.getElementById("natl-search");
   const typeEl   = document.getElementById("natl-type");
   const clsEl    = document.getElementById("natl-program-class");
+  if (typeof applyProgramClassAccessToSelect === "function") applyProgramClassAccessToSelect(clsEl);
   const searchQ  = searchEl ? searchEl.value.trim() : "";
   const typeVal  = typeEl   ? typeEl.value.trim()   : "";
   const clsVal   = clsEl    ? clsEl.value.trim()    : "";
