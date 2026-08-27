@@ -265,26 +265,31 @@ function canAccessRow(row) {
 }
 
 // ── UNIVERSAL EXCLUSIONS (apply to EVERY role, including Admin) ──
-// This replaces the old hardcoded `s !== "Q" && s !== "W"` check that used
-// to live in script.js: "W" (project stock) stays hard-excluded for
-// everyone, "Q" is no longer blanket-excluded — it's scope-gated instead
-// via canAccessRow() above.
+// CLASSIFICATION REBUILD: this function now implements ONLY the two
+// universal data-membership rules from the classification spec, plus the
+// unrelated non-medical/location housekeeping rules that were already here
+// and are not part of the classification rebuild. All previous Special-
+// Stock-Type guesswork (the old `s !== "Q" && s !== "W"` check, and later
+// the isProjectStockDescription-based heuristic for rows whose code isn't
+// literally "Q") has been deleted — it encoded assumptions that are no
+// longer part of the spec.
+//
+// RULE 1 — SPECIAL STOCK TYPE: keep only two values — "Q" (Program) and
+// blank (RDF). Every other Special Stock Type value is excluded, for every
+// role, everywhere. This is a hard data-membership rule, not a permission —
+// even Admin never sees a non-Q/non-blank row.
+//
+// RULE 2 — INVENTORY VALUATION: any row whose Inventory Valuation
+// (Inventory Valuation Type column) is blank is excluded, everywhere on the
+// site. Enforced here — the single universal choke point used by
+// filterRowsByAccess and every canAccessRow-adjacent flow — instead of
+// being duplicated at individual call sites, so it can never be forgotten
+// on a new page.
 function passesUniversalExclusions(row) {
   if (!row) return false;
   const sst = String(row["Special Stock Type"] || "").trim().toUpperCase();
-  if (sst === "W") return false;
-  // BUGFIX: SAP always labels the "Special Stock Type Description" field as
-  // "Project Stock" for rows whose Special Stock Type code is "Q" — that's
-  // just SAP's generic text for any special-stock indicator, not a sign the
-  // row is genuinely project stock. This check is only meant to catch rows
-  // where the CODE isn't "Q" but the description still reads "Project Stock"
-  // (see filters.js comment on isProjectStockDescription). Without the
-  // `sst !== "Q"` guard below, every real Q row was being excluded here
-  // before the Q-scope logic in canAccessRow() ever got a chance to run —
-  // so Q rows never appeared even for Admin.
-  if (sst !== "Q" &&
-      typeof isProjectStockDescription === "function" &&
-      isProjectStockDescription(row["Special Stock Type Description"])) return false;
+  if (sst !== "" && sst !== "Q") return false;
+  if (String(row["Inventory Valuation Type"] || "").trim() === "") return false;
   if (typeof isNonMedicalCode === "function" &&
       isNonMedicalCode(row["Material"])) return false;
   if (typeof isNonMedicalGroup === "function" &&
