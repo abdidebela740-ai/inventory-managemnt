@@ -2022,15 +2022,22 @@ function renderDashboard() {
   // as everywhere else on the Dashboard.
   //
   // FEAT-BRANCH-AXIS: branch-locked roles only ever have one Plant, so this
-  // chart used to render as one full-width bar for them. For those roles,
-  // group by Stock Type (Q / RDF) instead — still meaningful within a
-  // single branch. HO01/Admin keep the Plant axis regardless of how many
-  // plants survive the current filter. See shouldUseStockTypeAxis() in
-  // permissions.js.
-  const useStockTypeAxis = typeof shouldUseStockTypeAxis === "function" && shouldUseStockTypeAxis();
+  // chart used to render as one full-width bar for them.
+  // FEAT-BRANCH-VALTYPE (matches FEAT-BRANCH-EXPIRY-VALTYPE on the
+  // Near-Expiry chart below): grouping by Stock Type (Q/RDF) still
+  // collapsed to one bar in practice for most branch users (a branch's
+  // stock is almost always all-Q or all-RDF), so branch-locked roles now
+  // split by Material Valuation Type (ZME/ZMS/ZLC/ZMD — see
+  // getValuationType() in filters.js) instead, same as the Near-Expiry
+  // chart already does. HO01/Admin keep the Plant axis regardless of how
+  // many plants survive the current filter. See shouldUseStockTypeAxis()
+  // in permissions.js (reused here only to detect branch-locked roles, not
+  // for a Q/RDF split — that axis is no longer used on this chart).
+  const useValuationTypeAxis = typeof shouldUseStockTypeAxis === "function" && shouldUseStockTypeAxis();
+  const plantValTypeLabel = r => (typeof getValuationType === "function" ? String(getValuationType(r) || "(None)").toUpperCase() : "(None)");
   const plantAggMap = {};
   df.forEach(r => {
-    const k = useStockTypeAxis ? getRowStockTypeLabel(r) : (r["Plant Name"] || "(Blank)");
+    const k = useValuationTypeAxis ? plantValTypeLabel(r) : (r["Plant Name"] || "(Blank)");
     if (!plantAggMap[k]) {
       plantAggMap[k] = {
         PlantName:k, Unrestricted:0, Transit:0, QC:0, TotalValue:0,
@@ -2073,7 +2080,7 @@ function renderDashboard() {
     height:300,
     barmode:"stack",
     margin:{l:60,r:70,t:20,b:100},
-    xaxis:{title:{text: useStockTypeAxis ? "Stock Type" : "Plant", font:{size:10}}, tickangle:-35, tickfont:{size:10}, automargin:true},
+    xaxis:{title:{text: useValuationTypeAxis ? "Material Type" : "Plant", font:{size:10}}, tickangle:-35, tickfont:{size:10}, automargin:true},
     yaxis:{title:{text:"Value (ETB)",font:{size:10}}, automargin:true},
     yaxis2:{overlaying:"y",side:"right",gridcolor:"transparent",tickfont:{color:"#7ee0ff"},tickformat:",d",title:{text:"Unique Materials",font:{size:10,color:"#7ee0ff"}}},
   }), PLOTLY_CONFIG);
@@ -2082,8 +2089,8 @@ function renderDashboard() {
   if (dashPlantValEl) {
     dashPlantValEl.on("plotly_click", function(data) {
       const groupLabel = data.points[0].x;
-      const items = useStockTypeAxis
-        ? df.filter(r => getRowStockTypeLabel(r) === groupLabel)
+      const items = useValuationTypeAxis
+        ? df.filter(r => plantValTypeLabel(r) === groupLabel)
         : df.filter(r => (r["Plant Name"] || "(Blank)") === groupLabel);
       const rows = buildDrillRows(items, "Unrestricted Stock", "Value of Unrestricted Stock");
       showChartDrillModal({
