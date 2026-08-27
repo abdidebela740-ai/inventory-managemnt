@@ -216,7 +216,7 @@
           // happens to include them.
           // Universal invariants (W / non-medical / project-stock / excluded
           // location) apply to everyone, including Admin.
-          if (!passesUniversalExclusions(r)) { excludedRows++; continue; }
+          if (!passesGrUniversalExclusions(r)) { excludedRows++; continue; }
           // Role/scope gating: this GR file may or may not carry "Inventory
           // Valuation Type" per row. When it does, gate Q rows by scope like
           // everywhere else. When it doesn't, canAccessRow() can't compute a
