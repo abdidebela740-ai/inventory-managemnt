@@ -246,11 +246,17 @@ let scopeExcludedMaterialCodes = new Set();
 // session/page load, matching the app's session-only data model).
 //
 // Matching rule: for a given material+plant that has "Stock in Transit" > 0
-// in the main inventory file, that row is TRUE only if the uploaded file
-// contains the SAME material+plant with the EXACT SAME quantity. Anything
-// that doesn't match (or isn't present at all in the uploaded file) is
-// GHOST and excluded from every total across the app, exactly like the
-// old phantom-transit logic — just driven by the upload instead of a
+// in the main inventory file, the uploaded file may contain MULTIPLE rows
+// for that same material+plant (e.g. separate transit documents/shipments).
+// Those rows are SUMMED together first. That summed quantity is then
+// compared against the inventory file's "Stock in Transit" quantity:
+//   - If the sum >= inventory qty          → fully TRUE (nothing ghost).
+//   - If the sum < inventory qty           → the matched portion (the sum)
+//                                             is TRUE, and the remainder
+//                                             (inventory qty - sum) is GHOST.
+//   - If material+plant isn't present at all in the upload → fully GHOST.
+// Ghost amounts are excluded from every total across the app, exactly like
+// the old phantom-transit logic — just driven by the upload instead of a
 // hardcoded list.
 let TRANSIT_UPLOAD_LIST = [];   // [{materialCode, plantCode, qty, supplyingPlant, ...}] — parsed rows from the uploaded file
 let transitFileLoaded   = false; // gates the Transit page until a file is uploaded
@@ -266,8 +272,11 @@ function _rebuildTransitUploadLookup() {
   _transitUploadDetailsLookup = new Map();
   TRANSIT_UPLOAD_LIST.forEach(e => {
     const key = String(e.materialCode).trim().toUpperCase() + "|" + String(e.plantCode).trim().toUpperCase();
-    _transitUploadLookup.set(key, e.qty);
-    _transitUploadDetailsLookup.set(key, e);
+    // SUM quantities across multiple uploaded rows/documents that share the
+    // same material+plant, instead of letting a later row silently
+    // overwrite an earlier one.
+    _transitUploadLookup.set(key, (_transitUploadLookup.get(key) || 0) + Number(e.qty || 0));
+    _transitUploadDetailsLookup.set(key, e); // last row's desc/uom/supplying plant kept for display
   });
 }
 
@@ -282,10 +291,13 @@ function getSupplyingPlant(row) {
 
 // Returns {qty, val} of the GHOST portion of a row's Stock in Transit.
 //   - No transit file uploaded yet → the entire amount is ghost.
-//   - Transit file uploaded, but this material+plant is absent, or its
-//     quantity doesn't exactly match → the entire amount is ghost.
-//   - Transit file uploaded AND quantity matches exactly → nothing is
-//     ghost (fully true).
+//   - Transit file uploaded, but this material+plant is absent from it →
+//     the entire amount is ghost.
+//   - Transit file uploaded AND this material+plant IS present: its
+//     uploaded rows are summed first (see _rebuildTransitUploadLookup).
+//     Whatever portion of the inventory qty that sum covers is TRUE; any
+//     leftover (inventory qty minus the sum) is GHOST. If the sum covers
+//     the whole inventory qty (or more), nothing is ghost.
 function getGhostTransit(row) {
   const total = row["Stock in Transit"] || 0;
   if (total <= 0) return { qty: 0, val: 0 };
@@ -293,9 +305,17 @@ function getGhostTransit(row) {
 
   const mat = String(row["Material"] || "").trim().toUpperCase();
   const plt = String(row["Plant"]    || "").trim().toUpperCase();
-  const uploadedQty = _transitUploadLookup.get(mat + "|" + plt);
-  const isTrue  = (uploadedQty !== undefined) && (Number(uploadedQty) === Number(total));
-  return isTrue ? { qty: 0, val: 0 } : { qty: total, val: row["Value of Stock in Transit"] || 0 };
+  const uploadedQty = _transitUploadLookup.get(mat + "|" + plt) || 0;
+
+  const trueQty  = Math.min(uploadedQty, total); // matched (true) portion, capped at the inventory qty
+  const ghostQty = total - trueQty;               // unmatched (ghost) remainder
+  if (ghostQty <= 0) return { qty: 0, val: 0 };
+
+  // Value isn't part of the uploaded file, so the ghost value is taken
+  // proportionally from the row's total transit value.
+  const totalVal = row["Value of Stock in Transit"] || 0;
+  const ghostVal = total > 0 ? totalVal * (ghostQty / total) : 0;
+  return { qty: ghostQty, val: ghostVal };
 }
 
 // Incoming Shelf Life state (feature removed)
@@ -3002,8 +3022,8 @@ function getTransitInfo(material, plantCode) {
 // and Inventory Flow. They are flagged with a warning badge on the Transit page.
 
 function isPhantomTransit(row) {
-  // A row is phantom when it isn't backed by an exact match in the uploaded
-  // Stock-in-Transit verification file for this material+plant combination.
+  // A row is (partly) phantom when the summed uploaded quantity for this
+  // material+plant doesn't fully cover the inventory file's transit qty.
   const { qty } = getGhostTransit(row);
   return qty > 0 && (row["Stock in Transit"] > 0);
 }
