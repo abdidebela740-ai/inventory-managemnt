@@ -258,6 +258,13 @@ let scopeExcludedMaterialCodes = new Set();
 // Ghost amounts are excluded from every total across the app, exactly like
 // the old phantom-transit logic — just driven by the upload instead of a
 // hardcoded list.
+//
+// STRICT RAW-CODE MATCH: matching compares the inventory file's raw
+// Material code directly against the uploaded transit file's Material code
+// — no mapped/standardized-code fallback. (The "STD" text sometimes seen
+// next to a code in the UI is a display badge from renderMappedMatCode_early,
+// not part of the code itself, so it never affects this comparison either
+// way.)
 let TRANSIT_UPLOAD_LIST = [];   // [{materialCode, plantCode, qty, supplyingPlant, ...}] — parsed rows from the uploaded file
 let transitFileLoaded   = false; // gates the Transit page until a file is uploaded
 let transitFileName     = "";
