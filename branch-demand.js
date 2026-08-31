@@ -759,20 +759,34 @@ function brdLargestRemainderRound(idealValues, caps, capTotal) {
 // can flag it ("stock exists but is stuck in QC") without ever counting it
 // as available.
 // ── OPEN OUTBOUND (Pending Dispatch) — already-in-transit quantities ───────
-// Reads pending-dispatch.js's own parsed + access-filtered rows (see
-// window.getOpenOutboundRows() there) and nets them against a branch's Need
-// below, so Branch Demand stops recommending a request for stock the branch
-// is already about to receive from an open (not-yet-issued) delivery.
+// Reads pending-dispatch.js's own parsed rows and nets them against a
+// branch's Need below, so Branch Demand stops recommending a request for
+// stock the branch is already about to receive from an open (not-yet-
+// issued) delivery.
 // Keyed by "PLANT::CANONICALCODE" — the Open Outbound file's own "Material"
 // column carries the raw/source SAP code, so it's run through the same
 // mappingTable used everywhere else to land on the canonical code
 // row.code/brdComputeMaterialAllocation deals with.
+//
+// BUGFIX-BRD-NATIONAL-ALLOC: deliberately calls getOpenOutboundRowsNational()
+// — NOT getOpenOutboundRows() — so this always nets against every branch's
+// open outbound nationally, the same way for every user (Admin or branch-
+// scoped), matching how sohHo/qcHo (brdBuildHo01Breakdown) and totalBranchAmc
+// already read the unscoped national base. Allocation math must come out
+// identical for every user; only what brdBuildLines() later DISPLAYS
+// (viewPlants) should differ per user. Falls back to the scoped
+// getOpenOutboundRows() only if the page hasn't loaded the national helper
+// yet (e.g. an older cached pending-dispatch.js), so this degrades to the
+// previous (imperfect but functional) behavior rather than breaking outright.
 function brdBuildOpenOutboundMap() {
   const byPlant = new Map();
   const byCode  = new Map(); // canonical code -> total qty on open outbound to ANY branch (used to net HO01's own SOH)
-  if (typeof window.getOpenOutboundRows !== "function") return { byPlant, byCode };
+  const getRows = (typeof window.getOpenOutboundRowsNational === "function")
+    ? window.getOpenOutboundRowsNational
+    : window.getOpenOutboundRows;
+  if (typeof getRows !== "function") return { byPlant, byCode };
   let rows;
-  try { rows = window.getOpenOutboundRows(); } catch (e) { return { byPlant, byCode }; }
+  try { rows = getRows(); } catch (e) { return { byPlant, byCode }; }
   if (!Array.isArray(rows) || !rows.length) return { byPlant, byCode };
   rows.forEach(r => {
     const plant = String(r.shipToParty || "").trim().slice(0, 4).toUpperCase();
