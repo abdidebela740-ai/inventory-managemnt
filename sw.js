@@ -13,7 +13,7 @@
 // file. This is what forces old clients to pick up new files.
 // ════════════════════════════════════════════════════════════════
 
-const CACHE_VERSION   = "v1.3.1";                 // ⬅ bump this on every release
+const CACHE_VERSION   = "v1.4.0";                 // ⬅ bump this on every release
 const STATIC_CACHE    = `epss-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE   = `epss-runtime-${CACHE_VERSION}`;
 const CDN_CACHE        = `epss-cdn-${CACHE_VERSION}`;
@@ -81,8 +81,8 @@ const APP_SHELL = [
 // Third-party CDN assets used by the app (kept separate so they can use a
 // different, longer-lived strategy without polluting the app-shell cache).
 const CDN_URLS = [
-  "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js",
-  "https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.26.0/plotly.min.js",
+  "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js",
+  "https://cdn.plot.ly/plotly-3.6.0.min.js",
   "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2",
 ];
 
