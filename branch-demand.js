@@ -253,9 +253,75 @@ let brdCodes          = [];       // explicit user-pasted canonical/mapped codes
 // brdDraft: Map<"PLANT::CODE", { approved:boolean, manualAlloc:number|null }>
 // Keyed by plant+code so edits/approvals survive a Recalculate (which only
 // rebuilds the underlying computed numbers, never this map).
+//
+// FIX-BRD-DRAFT-NOT-SHARED: this Map used to be purely in-memory — nothing
+// here ever wrote to localStorage or Supabase. That meant an Admin's
+// Allocated/Approved edits only ever existed inside that one browser tab.
+// Anyone else opening Branch Demand (a different user, a different device,
+// or even the same Admin after a refresh) got a brand-new empty Map, so
+// Allocated silently reverted to 0 and MOS After/the % badge reverted to
+// their pre-allocation values — this is exactly the admin-sees-6120 /
+// branch-user-sees-0 mismatch. brdDraft is now mirrored to the
+// `branch_demand_allocations` Supabase table (see brdLoadDraftsFromServer /
+// brdSaveDraftRow below) so every login sees the same allocations.
 let brdDraft = new Map();
+let brdDraftLoaded = false;   // becomes true once the first server fetch lands
+let brdDraftLoading = false;  // guards against firing the fetch twice
 
 function brdDraftKey(plant, code) { return `${plant}::${code}`; }
+
+// Pulls every saved row down from Supabase and merges it into brdDraft, then
+// re-renders (if we're still on this page) so the numbers update in place.
+// Called once per page load from renderBranchDemand() — not awaited there,
+// so the page still renders immediately with whatever's already local and
+// simply repaints a moment later once the server data arrives.
+async function brdLoadDraftsFromServer() {
+  if (brdDraftLoading) return;
+  brdDraftLoading = true;
+  try {
+    const sc = window.supabaseClient;
+    if (!sc) return;
+    const { data, error } = await sc.from("branch_demand_allocations").select("*");
+    if (error) { console.error("[branch-demand] Failed to load saved allocations:", error); return; }
+    (data || []).forEach(row => {
+      const key = brdDraftKey(row.plant, row.code);
+      brdDraft.set(key, {
+        approved: !!row.approved,
+        manualAlloc: row.manual_alloc === null || row.manual_alloc === undefined ? null : Number(row.manual_alloc),
+        manualStorageLoc: row.manual_storage_loc || undefined,
+      });
+    });
+    brdDraftLoaded = true;
+    if (typeof currentPage !== "undefined" && currentPage === "branch-demand") renderBranchDemand();
+  } catch (e) {
+    console.error("[branch-demand] Failed to load saved allocations:", e);
+  } finally {
+    brdDraftLoading = false;
+  }
+}
+
+// Upserts one plant+code row's current draft state to Supabase. Fired after
+// every local brdDraft.set() so an edit made by one user is visible to the
+// next person who opens (or refreshes) this page, instead of living only in
+// the editor's own browser tab.
+async function brdSaveDraftRow(plant, code) {
+  try {
+    const sc = window.supabaseClient;
+    if (!sc) return;
+    const d = brdDraft.get(brdDraftKey(plant, code)) || {};
+    const { error } = await sc.from("branch_demand_allocations").upsert({
+      plant, code,
+      approved: !!d.approved,
+      manual_alloc: (d.manualAlloc === null || d.manualAlloc === undefined) ? null : Number(d.manualAlloc),
+      manual_storage_loc: d.manualStorageLoc || null,
+      updated_by: window.APP_USER ? window.APP_USER.id : null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "plant,code" });
+    if (error) console.error(`[branch-demand] Failed to save allocation (${plant}/${code}):`, error);
+  } catch (e) {
+    console.error(`[branch-demand] Failed to save allocation (${plant}/${code}):`, e);
+  }
+}
 
 // ── ROLE / CAPABILITY HELPERS ───────────────────────────────────────────────
 // UPDATED POLICY: branch_demand_officer now also gets editing + approval +
@@ -1228,6 +1294,13 @@ function brdRenderMatTypeFilterBar(types) {
 
 // ── MAIN RENDER ──────────────────────────────────────────────────────────────
 function renderBranchDemand() {
+  // Kick off the one-time pull of saved allocations from Supabase. Not
+  // awaited: the page renders now with whatever's already in brdDraft
+  // (empty, the first time) and brdLoadDraftsFromServer() re-renders once
+  // the real saved values land — same pattern as the fileInput/amcInput
+  // "recompute when data finishes loading" hooks further down this file.
+  if (!brdDraftLoaded && !brdDraftLoading) brdLoadDraftsFromServer();
+
   const noInvEl  = document.getElementById("brd-no-inventory");
   const noAmcEl  = document.getElementById("brd-no-amc");
   const contentEl = document.getElementById("brd-content");
@@ -1744,6 +1817,7 @@ function brdExportTemplate() {
         const d = brdDraft.get(key) || {};
         d.approved = true;
         brdDraft.set(key, d);
+        brdSaveDraftRow(cb.dataset.plant, cb.dataset.code);
       });
       renderBranchDemand();
     });
@@ -1760,6 +1834,7 @@ function brdExportTemplate() {
         const d = brdDraft.get(key) || {};
         d.approved = false;
         brdDraft.set(key, d);
+        brdSaveDraftRow(cb.dataset.plant, cb.dataset.code);
       });
       renderBranchDemand();
     });
@@ -1808,6 +1883,7 @@ function brdExportTemplate() {
         const d = brdDraft.get(key) || {};
         d.approved = cb.checked;
         brdDraft.set(key, d);
+        brdSaveDraftRow(cb.dataset.plant, cb.dataset.code);
         return;
       }
       const inp = e.target.closest(".brd-alloc-input");
@@ -1824,6 +1900,7 @@ function brdExportTemplate() {
         const v = (factor > 0) ? Math.round(rawV * factor) : rawV;
         d.manualAlloc = v;
         brdDraft.set(key, d);
+        brdSaveDraftRow(inp.dataset.plant, inp.dataset.code);
         renderBranchDemand();
         return;
       }
@@ -1833,6 +1910,7 @@ function brdExportTemplate() {
         const d = brdDraft.get(key) || {};
         d.manualStorageLoc = String(slocInp.value || "").trim().toUpperCase();
         brdDraft.set(key, d);
+        brdSaveDraftRow(slocInp.dataset.plant, slocInp.dataset.code);
         renderBranchDemand();
       }
     });
