@@ -24,7 +24,7 @@
     rows: [],           // raw parsed rows
     branchMaster: {},   // plantCode(4 chars) -> branch name
     filters: { search: "", slocs: [], branches: [], stockTypes: [] },
-    detailFilters: { material: "", delivery: "", createdBy: "" }, // scoped only to the "All Pending Items" table
+    detailFilters: { material: "", delivery: "", createdBy: "", programClass: "" }, // scoped only to the "All Pending Items" table
     localUploadedAt: null,   // when THIS browser last parsed a file (fallback)
     sourceUploadedAt: null,  // authoritative "uploaded to Supabase" time, if known
   };
@@ -1158,18 +1158,44 @@
   //    Suggestions are a custom dropdown (not the native <datalist>
   //    popup) so it always opens BELOW the field, never upward over
   //    the page content. ──
+  // Canonical material code -> Program Classification (RDF-CDSS /
+  // RDF-NON-CDSS / Program-Reportable / Program-Non-Reportable), joined
+  // straight off mos.js's shared buildCodeProgramClassMap() (same lookup
+  // every other page uses). This page has no material-standardization
+  // mapping/canonicalization step of its own — r.material is the raw code
+  // as it appears in the Open Outbound Excel — so the join is a direct
+  // code match. Degrades to blank per-row when the AMC file isn't loaded
+  // (buildCodeProgramClassMap() returns an empty map, never throws).
+  function classificationMap() {
+    return (typeof buildCodeProgramClassMap === "function") ? buildCodeProgramClassMap() : new Map();
+  }
+
+  function withProgramClass(rows) {
+    const clsMap = classificationMap();
+    return rows.map((r) => ({
+      ...r,
+      programClass: clsMap.get(String(r.material || "").trim().toUpperCase()) || "",
+    }));
+  }
+
   function applyDetailFilters(rows) {
-    const { material, delivery, createdBy } = STATE.detailFilters;
-    return rows.filter((r) => {
+    const { material, delivery, createdBy, programClass } = STATE.detailFilters;
+    // Classification is joined here (not left to callers) so every existing
+    // call site — currentFilteredRows(), the bulk XLSX export, and
+    // renderDetailTable()'s own copy — filters correctly regardless of
+    // whether the rows passed in already carry .programClass.
+    const withCls = programClass ? withProgramClass(rows) : rows;
+    return withCls.filter((r) => {
       if (material && r.material !== material) return false;
       if (delivery && r.delivery !== delivery) return false;
       if (createdBy && r.createdBy !== createdBy) return false;
+      if (programClass && r.programClass !== programClass) return false;
       return true;
     });
   }
 
   function detailFilterBarHtml(optionRows) {
-    const { material, delivery, createdBy } = STATE.detailFilters;
+    const { material, delivery, createdBy, programClass } = STATE.detailFilters;
     const inputStyle = "font-size:12px; padding:6px 8px; border-radius:6px; border:1px solid rgba(120,140,160,0.35); background:transparent; min-width:170px; width:100%; box-sizing:border-box;";
 
     const field = (id, label, value) => `
@@ -1185,12 +1211,31 @@
       </div>
     `;
 
+    // Program Classification (CDSS/Reportable) — a select, not a free-text
+    // field like the ones above, since it's a small fixed set of values
+    // (same "*-program-class" pattern used on every other page). Role
+    // visibility is applied after render via applyProgramClassAccessToSelect(),
+    // same as everywhere else.
+    const classField = `
+      <div class="pd-detail-filter-field" style="min-width:190px;">
+        <select id="pd-detail-filter-programclass" class="filter-select" style="${inputStyle}"
+          title="RDF items are CDSS or Non-CDSS; Program (Q) items are Reportable or Non-Reportable.">
+          <option value="">All Classifications</option>
+          <option value="RDF-CDSS"${programClass === "RDF-CDSS" ? " selected" : ""}>RDF · CDSS</option>
+          <option value="RDF-NON-CDSS"${programClass === "RDF-NON-CDSS" ? " selected" : ""}>RDF · Non-CDSS</option>
+          <option value="Program-Reportable"${programClass === "Program-Reportable" ? " selected" : ""}>Program (Q) · Reportable</option>
+          <option value="Program-Non-Reportable"${programClass === "Program-Non-Reportable" ? " selected" : ""}>Program (Q) · Non-Reportable</option>
+        </select>
+      </div>
+    `;
+
     return `
       <div class="pd-detail-filter-bar" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; align-items:flex-start;">
         ${field("material", "Material", material)}
         ${field("delivery", "Delivery", delivery)}
         ${field("createdby", "Created By", createdBy)}
-        ${(material || delivery || createdBy) ? `<button type="button" id="pd-detail-filter-clear" style="${inputStyle} width:auto; cursor:pointer;">✕ Clear</button>` : ""}
+        ${classField}
+        ${(material || delivery || createdBy || programClass) ? `<button type="button" id="pd-detail-filter-clear" style="${inputStyle} width:auto; cursor:pointer;">✕ Clear</button>` : ""}
       </div>
     `;
   }
@@ -1260,9 +1305,18 @@
 
     const clearBtn = wrap.querySelector("#pd-detail-filter-clear");
     if (clearBtn) clearBtn.addEventListener("click", () => {
-      STATE.detailFilters = { material: "", delivery: "", createdBy: "" };
+      STATE.detailFilters = { material: "", delivery: "", createdBy: "", programClass: "" };
       renderAll();
     });
+
+    const clsSelect = wrap.querySelector("#pd-detail-filter-programclass");
+    if (clsSelect) {
+      if (typeof applyProgramClassAccessToSelect === "function") applyProgramClassAccessToSelect(clsSelect);
+      clsSelect.addEventListener("change", () => {
+        STATE.detailFilters.programClass = clsSelect.value;
+        renderAll();
+      });
+    }
   }
 
   function renderDetailTable(rows) {
@@ -1273,13 +1327,14 @@
       return;
     }
 
-    const filterBar = detailFilterBarHtml(rows);
+    const clsRows = withProgramClass(rows);
+    const filterBar = detailFilterBarHtml(clsRows);
     const exportBtns = tableExportButtonsHtml("detail");
-    const filtered = applyDetailFilters(rows);
+    const filtered = applyDetailFilters(clsRows);
 
     if (!filtered.length) {
-      wrap.innerHTML = filterBar + exportBtns + `<div class="pd-empty">No pending line items match the Material / Delivery / Created By filter.</div>`;
-      wireDetailFilterBar(wrap, rows);
+      wrap.innerHTML = filterBar + exportBtns + `<div class="pd-empty">No pending line items match the Material / Delivery / Created By / Classification filter.</div>`;
+      wireDetailFilterBar(wrap, clsRows);
       return;
     }
 
@@ -1291,7 +1346,7 @@
         <table class="freeze-header">
           <thead><tr>
             <th>Delivery</th><th>GI Planned Date</th><th>Days Late</th><th>Material</th>
-            <th>Description</th><th>Purchasing Document</th><th>Branch</th><th>Storage Loc.</th>
+            <th>Description</th><th>Classification</th><th>Purchasing Document</th><th>Branch</th><th>Storage Loc.</th>
             <th>Qty</th><th>Stock Type</th><th>Created By</th>
           </tr></thead>
           <tbody>
@@ -1305,6 +1360,7 @@
                   <td>${daysLateBadge(r.giDate)}</td>
                   <td class="col-mat-code">${escapeHtml(r.material)}</td>
                   <td class="col-mat-desc" style="white-space:normal;max-width:260px">${escapeHtml(r.itemDescription)}</td>
+                  <td>${typeof programClassBadge === "function" ? programClassBadge(r.programClass) : escapeHtml(r.programClass || "—")}</td>
                   <td style="font-family:'IBM Plex Mono',monospace">${escapeHtml(r.purchasingDoc)}</td>
                   <td>${escapeHtml(branchName(code))}</td>
                   <td>${escapeHtml(r.storageLocation)}</td>
@@ -1318,7 +1374,7 @@
         </table>
       </div>
     `;
-    wireDetailFilterBar(wrap, rows);
+    wireDetailFilterBar(wrap, clsRows);
   }
 
   // ── Filter dropdown population ──────────────────────────────
@@ -1382,13 +1438,15 @@
 
   // ── Row-level "All Pending Items" data (same shape as before) ──
   function buildDetailExportData(rows) {
-    return rows.map((r) => ({
+    const clsRows = withProgramClass(rows);
+    return clsRows.map((r) => ({
       "Delivery": r.delivery,
       "Item": r.item,
       "GI Planned Date": r.giDate ? fmtDate(r.giDate) : "",
       "Days Late": (() => { const d = daysLate(r.giDate); return d === null ? "" : (d <= 0 ? "Good" : d); })(),
       "Material": r.material,
       "Item Description": r.itemDescription,
+      "Classification": (typeof PROGRAM_CLASS_LABELS !== "undefined" && PROGRAM_CLASS_LABELS[r.programClass]) || r.programClass || "",
       "Purchasing Document": r.purchasingDoc,
       "Branch": branchName(plantCode(r.shipToParty)),
       "Plant Code": plantCode(r.shipToParty),
