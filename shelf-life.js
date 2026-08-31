@@ -649,6 +649,14 @@
     const emptyCodes = [];
     let allBatches = [];
 
+    // Canonical code -> Program Classification (RDF-CDSS / RDF-NON-CDSS /
+    // Program-Reportable / Program-Non-Reportable), same shared lookup
+    // (mos.js) every other page uses — so a material's classification badge
+    // reads the same here as it does everywhere else in the app. Degrades
+    // to blank when the AMC file isn't loaded (mos.js isn't a hard
+    // dependency of this module — see header comment).
+    const clsMap = (typeof buildCodeProgramClassMap === "function") ? buildCodeProgramClassMap() : new Map();
+
     for (const code of codes) {
       const rowsAll = rawDf.filter(r => String(r["Material"] || "").trim() === code);
       if (!rowsAll.length) continue;
@@ -656,7 +664,8 @@
       validCodes.push(code);
       descByCode.set(code, desc);
 
-      const batches = buildBatchRows(code).map(b => ({ ...b, material: code, materialDesc: desc }));
+      const programClass = clsMap.get(code) || "";
+      const batches = buildBatchRows(code).map(b => ({ ...b, material: code, materialDesc: desc, programClass }));
       if (!batches.length) emptyCodes.push(code);
       allBatches = allBatches.concat(batches);
     }
@@ -688,6 +697,7 @@
 
     const cols = [
       ...(multi ? [{ key: "material", label: "Material", cellClass: "col-mat-code-wrap" }] : []),
+      { key: "programClass", label: "Classification", fmt: v => (typeof programClassBadge === "function" ? programClassBadge(v) : (v || "—")), raw: true },
       { key: "batch",   label: "Batch", cellClass: "col-mat-code-wrap" },
       { key: "plant",   label: "Plant" },
       { key: "storageLoc", label: "Storage Location (Current)" },
@@ -739,6 +749,7 @@
     if (allBatches.length) {
       const exportCols = [
         ...(multi ? [{ key: "material", label: "Material" }] : []),
+        { key: "programClass", label: "Classification (CDSS/Reportable)", fmt: v => (typeof PROGRAM_CLASS_LABELS !== "undefined" && PROGRAM_CLASS_LABELS[v]) || v || "" },
         { key: "batch", label: "Batch" }, { key: "plant", label: "Plant" }, { key: "storageLoc", label: "Storage Location (Current)" },
         { key: "receivedStorageLoc", label: "Storage Location (Received)" },
         { key: "valType", label: "Valuation Type" },
