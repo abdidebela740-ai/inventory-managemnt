@@ -1607,7 +1607,24 @@ function populateAllFilters() {
 // even if rawDf somehow contains them (e.g. after reconciliation merges).
 function applyPageFilter(page) {
   const f    = pageFilters[page] || {};
-  const base = getReconciledBase();
+  // FIX-TRANSIT-RAW-ONLY: Stock-in-Transit verification (ghost vs true) is
+  // matched strictly SAP raw-code-to-raw-code against the uploaded
+  // verification file — see the "STRICT RAW-CODE MATCH" comment above
+  // getGhostTransit(). getGhostTransit()/stampGhostTransit() already only
+  // ever read the untouched rawDf "Material"/"Plant" fields, so the ghost
+  // amount itself was always computed correctly — but the Transit page
+  // still DISPLAYED and AGGREGATED through getReconciledBase(), which swaps
+  // in mappedDf (the standardized/STD-target view) the moment any material
+  // mapping is loaded. That let STD badges, mapping-converted quantities
+  // (getMappedQty/getMappedVal), and target-code grouping bleed into a
+  // feature that must never involve mapping at all. Force plain rawDf for
+  // the "transit" page specifically — every other page keeps using the
+  // mapped base as before. getMappedQty/getMappedVal/renderMatCode all
+  // already fall back to raw values automatically when a row has no
+  // _isMapped flag (true for every rawDf row), so this one line makes the
+  // whole page — ghost stamps, totals, grouping, and displayed codes —
+  // guaranteed raw-only with no other changes needed.
+  const base = (page === "transit") ? rawDf : getReconciledBase();
   const plants    = f.plants    || [];
   const mgs       = f.mgs       || [];
   const valTypes  = f.valTypes  || [];
