@@ -2635,6 +2635,19 @@ function loadTransitFile(file) {
         // Re-stamp rawDf with fresh true/ghost amounts and re-render
         if (rawDf.length) {
           stampGhostTransit();
+          // FIX-STALE-MAPPED-GHOST: mappedDf is a snapshot copy of rawDf made by
+          // applyMaterialMapping() (shallow {...row} per row). It is only rebuilt
+          // when the main file or the mapping file (re)loads — NOT when the
+          // Stock-in-Transit verification file is (re)uploaded. If a mapping was
+          // already active, mappedDf's _phantomTransitQty/_phantomTransitVal
+          // fields were frozen at whatever they were BEFORE this upload (often
+          // 100% ghost, since no transit file may have been loaded yet at that
+          // point). Every page that reads through getReconciledBase()/
+          // getMappingReconciledBase() when a mapping is loaded — which is any
+          // page showing the "STD" badge — was therefore showing stale, usually
+          // fully-ghost amounts even after a correct match. Rebuild mappedDf here
+          // too so it picks up the fresh stamps.
+          if (mappingTable.size > 0) applyMaterialMapping();
           const phantomAllTransit = rawDf.filter(r => r["Stock in Transit"] > 0);
           const ghostCount   = phantomAllTransit.filter(r => r._phantomTransitQty > 0).length;
           const trueCount     = phantomAllTransit.length - ghostCount;
