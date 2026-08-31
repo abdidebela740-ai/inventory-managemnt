@@ -237,7 +237,25 @@ let brdSelectedPlant = "";        // "" = All Branches (only offered to roles th
 // translates to a different unit quantity per material. Default 0 (no
 // reserve held back) unless the user sets one; NOT persisted across page
 // loads — see file header "buffer" note.
+// FIX-BRD-BUFFER-NOT-SHARED: this used to be purely local in-memory state —
+// nothing here ever wrote it to Supabase. Every OTHER input that feeds
+// brdComputeMaterialAllocation() (sohMap, ho01Breakdown, openOutboundMap) is
+// deliberately built from the unscoped/national base specifically so
+// "Allocation math must come out identical for every user" (see file header
+// + the BUGFIX-BRD-NATIONAL-ALLOC comment on brdBuildOpenOutboundMap) — but
+// the buffer slipped through that invariant: bufferMos feeds directly into
+// bufferQty/availableHo inside brdComputeMaterialAllocation, so whichever
+// value happened to be typed into THIS browser tab's buffer box silently
+// changed every branch's computed Allocated number for every material, with
+// no way for anyone else to know a buffer was even set. This is now
+// mirrored to a single shared `branch_demand_settings` row (id=1), the same
+// load-once/save-on-change pattern brdDraft already uses for
+// Allocated/Approved edits — see brdLoadBufferFromServer/brdSaveBufferToServer
+// below and their call sites (renderBranchDemand(), the #brd-buffer change
+// handler).
 let brdBufferMos      = 0;
+let brdBufferLoaded   = false;  // becomes true once the first server fetch lands
+let brdBufferLoading  = false;  // guards against firing the fetch twice
 let brdStockType      = "";       // "" = All, "R" = RDF, "Q" = Health Program — see file header
 let brdProgramClass   = "";       // "" = All, else one of PROGRAM_CLASS.* (mos.js) — RDF·CDSS/Non-CDSS, Program(Q)·Reportable/Non-Reportable
 // Material Type filter (ZME/ZMS/ZLC/ZMD — the Inventory Valuation Type
@@ -320,6 +338,49 @@ async function brdSaveDraftRow(plant, code) {
     if (error) console.error(`[branch-demand] Failed to save allocation (${plant}/${code}):`, error);
   } catch (e) {
     console.error(`[branch-demand] Failed to save allocation (${plant}/${code}):`, e);
+  }
+}
+
+// ── SHARED HO01 BUFFER (see FIX-BRD-BUFFER-NOT-SHARED above) ───────────────
+// Single-row settings table (id is always 1 — there is only ever one
+// network-wide buffer value, same as the one brd-buffer input every role
+// shares). Pulled once per page load, same pattern as brdLoadDraftsFromServer.
+async function brdLoadBufferFromServer() {
+  if (brdBufferLoading) return;
+  brdBufferLoading = true;
+  try {
+    const sc = window.supabaseClient;
+    if (!sc) return;
+    const { data, error } = await sc.from("branch_demand_settings").select("buffer_mos").eq("id", 1).maybeSingle();
+    if (error) { console.error("[branch-demand] Failed to load saved buffer:", error); return; }
+    if (data && data.buffer_mos !== null && data.buffer_mos !== undefined) {
+      brdBufferMos = Math.max(0, Number(data.buffer_mos) || 0);
+    }
+    brdBufferLoaded = true;
+    if (typeof currentPage !== "undefined" && currentPage === "branch-demand") renderBranchDemand();
+  } catch (e) {
+    console.error("[branch-demand] Failed to load saved buffer:", e);
+  } finally {
+    brdBufferLoading = false;
+  }
+}
+
+// Upserts the current buffer value to Supabase. Fired after a user changes
+// the #brd-buffer input, so the new value is visible — and used in the
+// allocation math — for every other user's next render, not just this tab.
+async function brdSaveBufferToServer(v) {
+  try {
+    const sc = window.supabaseClient;
+    if (!sc) return;
+    const { error } = await sc.from("branch_demand_settings").upsert({
+      id: 1,
+      buffer_mos: Math.max(0, Number(v) || 0),
+      updated_by: window.APP_USER ? window.APP_USER.id : null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "id" });
+    if (error) console.error("[branch-demand] Failed to save buffer:", error);
+  } catch (e) {
+    console.error("[branch-demand] Failed to save buffer:", e);
   }
 }
 
