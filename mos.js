@@ -534,7 +534,18 @@ function buildCodeMaterialTypeMap() {
   // whichever person is currently selected.
   const base = (typeof getMappingReconciledBase === "function") ? getMappingReconciledBase() : (typeof rawDf !== "undefined" ? rawDf : []);
   base.forEach(row => {
-    const code = String(row._mappedMaterial || row["Material"] || "").trim();
+    // BUGFIX-SCOPE-CASE-MISMATCH: must match the SAME normalization every
+    // other cross-file code lookup in the app uses (.trim().toUpperCase() —
+    // see buildInventoryStreamMap()/resolveAmcRowCanonical() above and the
+    // BUGFIX-QC-FALSE-POSITIVE note in branch-demand.js). mosMerged's own
+    // r.code (the key filterMosMergedByAccess() looks this map up by) is
+    // ALWAYS uppercase-normalized. Without uppercasing here too, any raw
+    // material code that isn't already all-uppercase in the uploaded file
+    // (e.g. "med123") never matches its own uppercase canonical form
+    // ("MED123"), valType comes back undefined, and filterMosMergedByAccess()
+    // then hard-denies that row for EVERY non-admin user — regardless of
+    // their data_scopes — because Admin alone bypasses that function.
+    const code = String(row._mappedMaterial || row["Material"] || "").trim().toUpperCase();
     if (!code || out.has(code)) return;
     const type = (typeof getValuationType === "function" ? String(getValuationType(row) || "") : "").trim().toUpperCase();
     if (type && type !== "(NONE)") out.set(code, type);
