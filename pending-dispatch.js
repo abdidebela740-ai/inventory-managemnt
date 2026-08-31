@@ -84,13 +84,40 @@
   // issued yet (every row in this file, by definition — "Open"/"Pending
   // Dispatch" means GI hasn't happened; once GI posts, SAP drops the row
   // from this extract). Exposed read-only: callers get a shallow copy so
-  // they can't mutate STATE.rows out from under this page's own rendering.
+  // they can't mutate STATE.rows/STATE.allRows out from under this page's
+  // own rendering.
+  //
   // Deliberately returns the scope-filtered rows (same canAccessDispatchRow
   // filter already applied on load) so a caller never sees rows outside the
   // current user's permitted plants/stock types just by going through this
-  // door instead of the page itself.
+  // door instead of the page itself. This is the right function for
+  // anything that DISPLAYS Open Outbound data to the current user.
   window.getOpenOutboundRows = function () {
     return STATE.rows.slice();
+  };
+
+  // ── BUGFIX-BRD-NATIONAL-ALLOC: UNSCOPED rows for national ALLOCATION MATH ──
+  // brdBuildOpenOutboundMap() in branch-demand.js nets Open Outbound
+  // quantities out of HO01's SOH and out of each branch's own Need — and per
+  // its own header comment, that netting is meant to run "Total across ALL
+  // branches (not just the ones currently in view/filter)" because HO01
+  // stock already committed to ANY branch's delivery is unavailable to
+  // EVERY branch's allocation, regardless of which user is looking at the
+  // screen right now. getOpenOutboundRows() above can't serve that purpose
+  // — it deliberately returns only the CURRENT user's scope-filtered rows —
+  // so a branch-scoped user was silently netting out only their own
+  // visible-plant deliveries, understating outboundTotal/HO01's already-
+  // committed stock and giving that user a DIFFERENT (larger) availableHo,
+  // and therefore a different allocation for every branch on that material,
+  // than Admin computing the exact same material. Allocation math must be
+  // identical for every user (same as HO01 SOH/buffer above, which already
+  // read the unscoped getReconciledBase()); only what's DISPLAYED/exported
+  // should differ per user. STATE.allRows is the pre-scope-filter parse
+  // result — same rows, before canAccessDispatchRow() runs — kept
+  // specifically so allocation math can stay national while the page's own
+  // UI (via getOpenOutboundRows()) stays scoped.
+  window.getOpenOutboundRowsNational = function () {
+    return (STATE.allRows || STATE.rows).slice();
   };
 
   // ── Data-scope access control ───────────────────────────────
@@ -2088,6 +2115,12 @@
           const rows = parsedRows.filter(canAccessDispatchRow);
           if (!rows.length) throw new Error("No rows in this file match your assigned data scopes.");
 
+          // BUGFIX-BRD-NATIONAL-ALLOC: keep the pre-scope-filter rows too —
+          // see getOpenOutboundRowsNational() above. This page's own UI
+          // (STATE.rows) stays scope-filtered as before; only this extra
+          // unscoped copy is added, purely so Branch Demand's allocation
+          // math can read the full national Open Outbound picture.
+          STATE.allRows = parsedRows;
           STATE.rows = rows;
           STATE.branchMaster = buildBranchMaster(rows);
           // Fallback "as of" timestamp — used unless/until the more
