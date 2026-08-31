@@ -7,7 +7,7 @@
 // Helps branches and supply specialists:
 //   1. Look up branch SOH and Head Office (HO01) SOH per material.
 //   2. Compute how much a branch should request so that
-//      SOH_branch + request ≈ TARGET_MOS (5) months of AMC.
+//      SOH_branch + request ≈ TARGET_MOS (4) months of AMC.
 //   3. When HO01 stock is insufficient to cover every requesting branch,
 //      allocate it fairly (proportional to need) instead of zeroing everyone.
 //   4. Let a supervisor approve lines and export a SAP requisition template
@@ -56,6 +56,15 @@
 // FORMULAS (do not change without updating the spec doc / manual test list)
 // ---------------------------------------------------------------------------
 //   need_b        = max(0, TARGET_MOS * AMC_b - SOH_b)           [rule 1]
+//   buffer        = BUFFER_MOS * Σ AMC_b over every branch for this material
+//                   (HO01 itself carries no AMC — it's a distribution hub, not
+//                   a consumer, see HUB_PLANT in mos.js — so its reserve is
+//                   defined in months of NETWORK-WIDE downstream demand, not
+//                   its own consumption. BUFFER_MOS is a single manually-
+//                   entered value (brd-buffer input), applied to every
+//                   material; it converts to a different unit quantity per
+//                   material because each material's total branch AMC differs.
+//                   See brdComputeMaterialAllocation().)
 //   available_HO  = max(0, SOH_HO01 - buffer)                    [rule 3]
 //   total_need    = Σ need_b over every REQUESTING branch for this material
 //   if total_need == 0        → alloc_b = 0
@@ -68,11 +77,11 @@
 //
 //   PRIORITY TIERS (labels the existing MOS thresholds — no new band):
 //     Critical         current MOS <  1                    (CRITICAL_MOS)
-//     High             1  ≤ current MOS <  3                (REQUEST_ELIGIBILITY_MOS)
-//     Medium           3  ≤ current MOS <  5                (TARGET_MOS)
-//     Low/Overstocked  current MOS >= 5 — need hard-clamped to 0, never orders
+//     High             1  ≤ current MOS <  2                (REQUEST_ELIGIBILITY_MOS)
+//     Medium           2  ≤ current MOS <  4                (TARGET_MOS)
+//     Low/Overstocked  current MOS >= 4 — need hard-clamped to 0, never orders
 //   See brdPriorityTier(). The fill target for every requesting branch is
-//   still TARGET_MOS (5); tiers only change the ORDER stock is handed out
+//   still TARGET_MOS (4); tiers only change the ORDER stock is handed out
 //   in, not how much a branch is entitled to.
 //
 //   PRIORITY ALLOCATION (replaces the old flat equal-scale split): when
@@ -88,9 +97,9 @@
 //   REQUEST ELIGIBILITY (Request Form tab only — Analysis still shows every
 //   branch × material line regardless): a branch may actually submit a
 //   request for a line if and only if
-//     (a) its current months of stock < REQUEST_ELIGIBILITY_MOS (3), AND
+//     (a) its current months of stock < REQUEST_ELIGIBILITY_MOS (2), AND
 //     (b) HO01 actually has stock for it (available_HO > 0).
-//   The fill TARGET stays TARGET_MOS (5) either way — eligibility only
+//   The fill TARGET stays TARGET_MOS (4) either way — eligibility only
 //   gates *whether* a line is offered for request, not how much is
 //   recommended once it is. Previously-approved/manually-edited lines stay
 //   visible even if they no longer meet the threshold, so nothing already
@@ -120,14 +129,14 @@
 //   permissions.js (canAccessModule, currentRole, computeIsAdmin, isDirectorLike)
 // =============================================================================
 
-const TARGET_MOS = 5; // constant for v1 — do not expose as user-editable yet
-const REQUEST_ELIGIBILITY_MOS = 3; // a branch may REQUEST a line only below this MOS — see file header
+const TARGET_MOS = 4; // constant for v1 — do not expose as user-editable yet — UPDATED 2 – 4 MOS band (was 3 – 5)
+const REQUEST_ELIGIBILITY_MOS = 2; // a branch may REQUEST a line only below this MOS — see file header — UPDATED (was 3)
 const CRITICAL_MOS = 1; // below this MOS a branch is "Critical" priority — see file header / brdPriorityTier()
 
 // ── PRIORITY TIERS (see file header "PRIORITY TIERS" / "PRIORITY ALLOCATION") ─
 // This is deliberately just a labeled view onto the SAME MOS thresholds the
-// rest of the module already used (REQUEST_ELIGIBILITY_MOS=3 floor,
-// TARGET_MOS=5 fill ceiling) plus one new boundary (CRITICAL_MOS=1) — not a
+// rest of the module already used (REQUEST_ELIGIBILITY_MOS=2 floor,
+// TARGET_MOS=4 fill ceiling) plus one new boundary (CRITICAL_MOS=1) — not a
 // second, independent band. `max` is exclusive-upper (current MOS < max).
 const PRIORITY_TIERS = [
   { key: "critical", label: "Critical",          cls: "red",   max: CRITICAL_MOS },
@@ -220,7 +229,15 @@ const STOCK_TYPE_LABEL = { R: "RDF", Q: "Health Program (Q)" };
 
 // ── STATE ────────────────────────────────────────────────────────────────────
 let brdSelectedPlant = "";        // "" = All Branches (only offered to roles that may see it)
-let brdBuffer         = 0;        // HO01 buffer, configurable, default 0
+// HO01 buffer, in MOS (months of stock), manually entered, applies to every
+// material. HO01 has no AMC of its own (it's a distribution hub — see
+// HUB_PLANT in mos.js), so "MOS" here is measured against NETWORK-WIDE
+// downstream demand (Σ branch AMC for that material), not HO01's own usage
+// — see brdComputeMaterialAllocation(). A single MOS value therefore
+// translates to a different unit quantity per material. Default 0 (no
+// reserve held back) unless the user sets one; NOT persisted across page
+// loads — see file header "buffer" note.
+let brdBufferMos      = 0;
 let brdStockType      = "";       // "" = All, "R" = RDF, "Q" = Health Program — see file header
 let brdProgramClass   = "";       // "" = All, else one of PROGRAM_CLASS.* (mos.js) — RDF·CDSS/Non-CDSS, Program(Q)·Reportable/Non-Reportable
 // Material Type filter (ZME/ZMS/ZLC/ZMD — the Inventory Valuation Type
@@ -708,7 +725,7 @@ function brdBuildOpenOutboundMap() {
   return { byPlant, byCode };
 }
 
-function brdComputeMaterialAllocation(row, sohMap, buffer, ho01Breakdown, openOutboundMap) {
+function brdComputeMaterialAllocation(row, sohMap, bufferMos, ho01Breakdown, openOutboundMap) {
   const branchPlants = mosPlants.filter(p => p !== HUB_PLANT);
   // BUGFIX-QC-FALSE-POSITIVE: must match the normalization brdBuildHo01Breakdown()
   // now uses for its keys (.trim().toUpperCase()) — see that function's comment.
@@ -725,7 +742,24 @@ function brdComputeMaterialAllocation(row, sohMap, buffer, ho01Breakdown, openOu
   // showing right now. netSohHo is what allocation actually uses below.
   const outboundTotal = (openOutboundMap && openOutboundMap.byCode && openOutboundMap.byCode.get(ho01Key)) || 0;
   const netSohHo = Math.max(0, sohHo - outboundTotal);
-  const availableHo = Math.max(0, netSohHo - (Number(buffer) || 0));
+
+  // ── MOS-BASED HO01 BUFFER (see file header "buffer" note) ────────────────
+  // HO01 itself has no AMC (it's a distribution hub, never a consumer — see
+  // HUB_PLANT in mos.js), so a buffer expressed in "months of stock" can't
+  // be measured against HO01's own usage. Instead it's measured against
+  // total NETWORK-WIDE downstream demand for this material — the sum of
+  // every branch's own AMC, over ALL branches nationally (not just the
+  // ones currently in view/filter, same rationale as outboundTotal above:
+  // the reserve protects the whole network regardless of which branch this
+  // screen happens to be showing). bufferMos is one manually-entered value
+  // applied to every material, so it converts to a different unit quantity
+  // per material depending on that material's own total branch AMC.
+  const totalBranchAmc = branchPlants.reduce((s, p) => {
+    const v = row.amcs[p];
+    return s + (v !== null && v !== undefined ? v : 0);
+  }, 0);
+  const bufferQty = Math.max(0, Number(bufferMos) || 0) * totalBranchAmc;
+  const availableHo = Math.max(0, netSohHo - bufferQty);
 
   const perBranch = branchPlants.map(p => {
     const soh    = mosSohFor(sohMap, row, p);
@@ -762,25 +796,46 @@ function brdComputeMaterialAllocation(row, sohMap, buffer, ho01Breakdown, openOu
   // Each tier is rounded to whole units on its own (largest-remainder,
   // scoped to that tier's branches and stock) so rounding leftovers never
   // leak from a higher-priority tier into a lower one.
+  //
+  // EQUITY AUDIT TRAIL (tierBreakdown): every tier that actually had a
+  // requesting branch (need>0) gets one entry recording how much it asked
+  // for, how much HO01 had left when its turn came, how much it received,
+  // and whether it was filled in full / split proportionally / got nothing
+  // because a higher-priority tier already used up what remained. This is
+  // what brdPriorityExplanation() below turns into the human-readable
+  // "why did/didn't my branch get stock" note — so a branch that appears to
+  // have been skipped can be shown exactly which higher-priority tier(s)
+  // consumed the material first, rather than it just looking arbitrary.
+  // Deliberately does NOT `break` once stock hits zero (only the old
+  // performance-only early-exit did that) — a later tier with real need
+  // still needs its own "zero" entry recorded here for transparency, even
+  // though it obviously receives no allocation either way.
   const allocRounded = perBranch.map(() => 0);
+  const tierBreakdown = [];
   let remainingHo = availableHo;
   for (const tierDef of PRIORITY_TIERS) {
     if (tierDef.key === "low") break; // overstocked branches never have need>0 here
-    if (remainingHo <= 0) break;
     const idxs = [];
     const needs = [];
     perBranch.forEach((b, i) => {
       if (b.tier === tierDef.key && b.need > 0) { idxs.push(i); needs.push(b.need); }
     });
-    if (!idxs.length) continue;
+    if (!idxs.length) continue; // nobody in this tier actually needed this material — nothing to explain
     const tierNeedTotal = needs.reduce((a, b) => a + b, 0);
     if (tierNeedTotal <= 0) continue;
+    const availableBeforeTier = remainingHo;
+    if (remainingHo <= 0) {
+      tierBreakdown.push({ key: tierDef.key, label: tierDef.label, branchCount: idxs.length, tierNeedTotal, availableBeforeTier, filledQty: 0, status: "zero" });
+      continue;
+    }
     const tierCapTotal = Math.min(tierNeedTotal, remainingHo);
     const idealForTier = tierNeedTotal <= remainingHo
       ? needs.slice()
       : needs.map(n => n * (remainingHo / tierNeedTotal));
     const roundedForTier = brdLargestRemainderRound(idealForTier, needs, tierCapTotal);
     idxs.forEach((i, k) => { allocRounded[i] = roundedForTier[k]; });
+    const status = tierNeedTotal <= remainingHo ? "full" : "partial";
+    tierBreakdown.push({ key: tierDef.key, label: tierDef.label, branchCount: idxs.length, tierNeedTotal, availableBeforeTier, filledQty: tierCapTotal, status });
     remainingHo -= tierCapTotal;
   }
 
@@ -793,7 +848,8 @@ function brdComputeMaterialAllocation(row, sohMap, buffer, ho01Breakdown, openOu
   const scalePct = totalNeed > 0 ? Math.min(1, availableHo / totalNeed) : 1;
 
   return {
-    sohHo, qcHo, netSohHo, outboundTotal, availableHo, totalNeed, isPartial, scalePct,
+    sohHo, qcHo, netSohHo, outboundTotal, bufferQty, totalBranchAmc, availableHo, totalNeed, isPartial, scalePct,
+    tierBreakdown,
     perBranch: perBranch.map((b, i) => ({
       ...b,
       allocComputed: allocRounded[i],
@@ -803,6 +859,59 @@ function brdComputeMaterialAllocation(row, sohMap, buffer, ho01Breakdown, openOu
       fillPct: b.need > 0 ? Math.min(1, allocRounded[i] / b.need) : 1,
     })),
   };
+}
+
+// ── EQUITY / PRIORITY EXPLANATION (see file header + tierBreakdown above) ──
+// Turns one material's tierBreakdown into a specific, human-readable answer
+// to "why did this branch get what it got" — the detail a branch or
+// reviewer needs to trust that a shortfall was genuinely an equity-tier
+// decision (a more urgent branch elsewhere used the stock first) and not
+// something silently miscalculated. Always names the tier, the tier's own
+// combined need, how much HO01 had available at that tier's turn, and — for
+// a zero or partial result — exactly which higher-priority tier(s) consumed
+// stock first and by how much, so "missed priority" is fully traceable
+// rather than asserted.
+function brdPriorityExplanation(line) {
+  const tierBreakdown = line.tierBreakdown || [];
+  if (!line.hasAmc) return "No AMC on file for this branch — priority tier and allocation can't be computed automatically; enter a quantity manually if needed.";
+  if (line.priorityTier === "low" || line.need <= 0) {
+    return `This branch is at or above the ${TARGET_MOS}-MOS fill target already (or has no computable need), so it's Low/Overstocked priority and was never in line for HO01 stock on this material.`;
+  }
+  const myIdx = PRIORITY_TIERS.findIndex(t => t.key === line.priorityTier);
+  const entry = tierBreakdown.find(t => t.key === line.priorityTier);
+  const higherEntries = tierBreakdown.filter(t => PRIORITY_TIERS.findIndex(x => x.key === t.key) < myIdx);
+  const higherUsed = higherEntries.reduce((s, t) => s + t.filledQty, 0);
+  const higherDesc = higherEntries.length
+    ? higherEntries.map(t => `${t.label} (${t.branchCount} branch${t.branchCount === 1 ? "" : "es"} needing ${fmtQty(t.tierNeedTotal)}, took ${fmtQty(t.filledQty)})`).join("; ")
+    : "none";
+
+  if (!entry) {
+    // Shouldn't normally happen (this branch has need>0 in this tier, so an
+    // entry should exist) — fall back to a generic note rather than error.
+    return `Priority tier: ${line.priorityLabel}. HO01 available for this material: ${fmtQty(line.availableHo)}.`;
+  }
+
+  if (entry.status === "full") {
+    return `Priority tier: ${line.priorityLabel} — ${entry.branchCount} branch${entry.branchCount === 1 ? "" : "es"} in this tier needed a combined ${fmtQty(entry.tierNeedTotal)} units, and HO01 still had ${fmtQty(entry.availableBeforeTier)} available at that point (after ${higherEntries.length ? "filling " + higherDesc + " first, and " : ""}buffer/outbound deductions) — enough to fill every branch in this tier in full, including this one.`;
+  }
+  if (entry.status === "partial") {
+    const pct = Math.round((line.fillPct || 0) * 100);
+    const usedFirstClause = higherEntries.length
+      ? ` (after ${higherDesc} used ${fmtQty(higherUsed)} first)`
+      : ` — this tier alone (the highest-priority one with a need this round) already exceeded HO01's ${fmtQty(entry.availableBeforeTier)} available`;
+    return `Priority tier: ${line.priorityLabel} — HO01 ran out INSIDE this tier: ${entry.branchCount} branches here needed a combined ${fmtQty(entry.tierNeedTotal)} units, but only ${fmtQty(entry.availableBeforeTier)} remained${usedFirstClause}. The remainder was split proportionally by each branch's own need (largest-remainder rounding) — this branch received ${pct}% of its own need (${fmtQty(line.alloc)} of ${fmtQty(line.need)}).`;
+  }
+  // status === "zero"
+  if (!higherEntries.length) {
+    // Nothing was consumed by a higher-priority tier — HO01 simply had zero
+    // units available for this material by the time ANY tier's turn came,
+    // most likely because buffer and/or already-committed outbound used up
+    // everything. Distinct from the "bumped by a higher tier" case below —
+    // this isn't a priority-order effect at all, so say so plainly rather
+    // than implying another branch took the stock.
+    return `Priority tier: ${line.priorityLabel} — this branch received nothing because HO01 had zero units available for this material at all (raw SOH ${fmtQty(line.sohHo)}, after netting ${fmtQty(line.outboundTotal || 0)} already-committed outbound and ${fmtQty(line.bufferQty || 0)} held as buffer). This is a stock-availability shortfall, not a priority-order effect — no other branch's request "took" this branch's share.`;
+  }
+  return `Priority tier: ${line.priorityLabel} — this branch received nothing for this material because ${higherDesc} already used all ${fmtQty(higherUsed)} of the ${fmtQty(line.availableHo)} HO01 had available (after buffer/outbound deductions) before this tier's turn came up. This tier's own combined need was ${fmtQty(entry.tierNeedTotal)} across ${entry.branchCount} branch${entry.branchCount === 1 ? "" : "es"} — none of it could be filled this round.`;
 }
 
 // A code's own Q/RDF classification (per brdMaterialScope, i.e. its actual
@@ -924,7 +1033,7 @@ function brdBuildLines(sohMap) {
     const purchOrg   = matScope.prefix ? (PURCH_ORG_MAP[matScope.prefix] || "") : "";
     const stockTypeLabel = matScope.prefix ? (STOCK_TYPE_LABEL[matScope.prefix] || matScope.prefix) : "";
 
-    const calc = brdComputeMaterialAllocation(row, sohMap, brdBuffer, ho01Breakdown, openOutboundMap);
+    const calc = brdComputeMaterialAllocation(row, sohMap, brdBufferMos, ho01Breakdown, openOutboundMap);
 
     // ── "Consider only stock available at HO01" ──────────────────────────
     // Only materials with NOTHING at HO01 (no unrestricted, no QC) are
@@ -972,6 +1081,15 @@ function brdBuildLines(sohMap) {
         : [];
 
       const storageInfo = brdStorageLocationForBranch(row.code, b.plant, matScope.scope);
+      // Manual Storage Location override (see file header "EXPORT HARD-BLOCK
+      // ON MISSING STORAGE LOCATION"): a supervisor can type a location in on
+      // the Request Form tab whenever the auto-resolved one is blank (no
+      // signal to infer from) or simply wrong — same draft-map convention as
+      // manualAlloc above, so it survives Recalculate. Wins over both the
+      // branch's own stock record AND inference when present.
+      const manualStorageLoc = (draft.manualStorageLoc || "").trim().toUpperCase();
+      const hasManualStorageLoc = !!manualStorageLoc;
+      const effectiveStorageLoc = hasManualStorageLoc ? manualStorageLoc : storageInfo.loc;
       const nearestExpiry = brdNearestExpiryForBranch(row.code, b.plant, matScope.scope);
 
       // ── REQUESTABLE (SOURCE) CODE + QUANTITY ────────────────────────────
@@ -997,13 +1115,17 @@ function brdBuildLines(sohMap) {
         soh: b.soh, amc: b.amc, hasAmc: b.hasAmc, mosNow: b.mosNow,
         sohHo: calc.sohHo, qcHo: calc.qcHo, qcOnly, availableHo: calc.availableHo,
         netSohHo: calc.netSohHo, outboundTotal: calc.outboundTotal,
+        bufferQty: calc.bufferQty, bufferMos: brdBufferMos, totalBranchAmc: calc.totalBranchAmc,
         need: b.need, alloc, mosAfter, status,
         totalNeed: calc.totalNeed, isPartial: calc.isPartial, scalePct: calc.scalePct,
+        tierBreakdown: calc.tierBreakdown,
         priorityTier: b.tier, priorityLabel: b.tierLabel, fillPct: b.fillPct,
         approved: !!draft.approved, manual: hasManual,
         surplusPlants, outboundQty: b.outboundQty,
         stockPrefix: matScope.prefix, stockTypeLabel, matType: matScope.suffix || "", purchGroup, purchOrg,
-        storageLoc: storageInfo.loc, storageLocInferred: storageInfo.inferred,
+        storageLoc: effectiveStorageLoc,
+        storageLocInferred: hasManualStorageLoc ? false : storageInfo.inferred,
+        storageLocManual: hasManualStorageLoc,
         nearestExpiry,
         reqSourceCode, reqSourceFactor, reqSourceQty, reqSourceDiffers, reqSourceDesc,
         reqSourceTypeMatched: reqSrc.stockTypeMatched,
@@ -1039,6 +1161,10 @@ function brdKpiRow(lines) {
   const approvedCount = lines.filter(l => l.approved).length;
   const qcOnlyCount = new Set(lines.filter(l => l.qcOnly).map(l => l.code)).size;
   const hiddenNoStock = lines.hiddenNoStockCount || 0;
+  // Proactive warning for the export hard-block (see brdExportTemplate) —
+  // surfaced here so a supervisor sees the problem while still working the
+  // list, not only after clicking Export and getting bounced.
+  const approvedMissingStorage = lines.filter(l => l.approved && !l.storageLoc).length;
 
   setKpis("brd-kpis", [
     ["Lines Shown", lines.length.toLocaleString(), "material × branch pairs", "blue"],
@@ -1050,6 +1176,7 @@ function brdKpiRow(lines) {
     ["No AMC", noAmcCount.toLocaleString(), "manual entry needed", "muted"],
     ["Approved", approvedCount.toLocaleString(), `of ${lines.length.toLocaleString()} shown`, "purple"],
     ["Hidden — No HO01 Stock", hiddenNoStock.toLocaleString(), "materials with nothing at HO01", "muted"],
+    ["Approved — Missing Storage Loc.", approvedMissingStorage.toLocaleString(), approvedMissingStorage ? "will block export — fix on Request Form tab" : "export not blocked", approvedMissingStorage ? "red" : "muted"],
   ]);
 }
 
@@ -1185,7 +1312,7 @@ function renderBranchDemand() {
   }
 
   const bufferEl = document.getElementById("brd-buffer");
-  if (bufferEl) bufferEl.value = brdBuffer;
+  if (bufferEl) bufferEl.value = brdBufferMos;
 
   const clsEl = document.getElementById("brd-program-class");
   if (clsEl) {
@@ -1320,9 +1447,16 @@ function brdRenderTables(lines, canEdit) {
         const bits = [];
         if (r.qcOnly) bits.push(`<span class="brd-status-pill brd-status-amber" title="HO01 stock (${fmtQty(r.qcHo)}) is still in Quality Inspection — not yet releasable">🧪 ${fmtQty(r.qcHo)} Quality Inspection</span>`);
         if (r.outboundQty > 0) bits.push(`<span class="brd-status-pill brd-status-blue" title="${fmtQty(r.outboundQty)} of this material is already on an open (not-yet-issued) pending dispatch from HO01 to this branch — netted out of Need below">📦 ${fmtQty(r.outboundQty)} pending dispatch (HO01)</span>`);
-        if (r.isPartial) bits.push(`<span class="brd-status-pill brd-status-amber" title="HO01 short overall for this material (covers ${Math.round(r.scalePct * 100)}% of combined need) — priority allocation filled THIS branch's own need ${Math.round(r.fillPct * 100)}% (${escHtml(r.priorityLabel)} priority)">⚖️ ${Math.round(r.fillPct * 100)}%</span>`);
+        if (r.isPartial) {
+          const pct = Math.round((r.fillPct || 0) * 100);
+          const detail = brdPriorityExplanation(r);
+          bits.push(r.fillPct > 0
+            ? `<span class="brd-status-pill brd-status-amber" title="${escHtml(detail)}">⚖️ ${pct}% — ${escHtml(r.priorityLabel)} tier</span>`
+            : `<span class="brd-status-pill brd-status-red" title="${escHtml(detail)}">⛔ 0% — bumped by higher priority (${escHtml(r.priorityLabel)} tier)</span>`);
+        }
         if (r.surplusPlants && r.surplusPlants.length) bits.push(`<span class="brd-status-pill brd-status-blue" title="Surplus (>8mo) at: ${r.surplusPlants.map(escHtml).join(", ")}">↔️ ${r.surplusPlants.length}</span>`);
         if (!r.hasAmc) bits.push(`<span class="brd-status-pill brd-status-muted" title="No AMC on file — enter quantity manually">✏️ Manual</span>`);
+        if (r.bufferQty > 0) bits.push(`<span class="brd-status-pill brd-status-blue" title="HO01 buffer: ${escHtml(String(r.bufferMos))} MOS × ${fmtQty(r.totalBranchAmc)} total network AMC for this material = ${fmtQty(r.bufferQty)} units held back before allocating">🛡️ ${fmtQty(r.bufferQty)} buffer held</span>`);
         return bits.length ? `<span class="brd-notes-badges">${bits.join("")}</span>` : "—";
       } },
   );
@@ -1395,10 +1529,23 @@ function brdRenderTables(lines, canEdit) {
     // Nearest expiry of the branch's OWN existing stock of this item —
     // Request Form only (not Analysis, see file header / cols above).
     { key: "nearestExpiry", label: "Nearest Expiry", raw: true, fmt: v => brdFmtExpiry(v) },
+    // EDITABLE (see file header "EXPORT HARD-BLOCK ON MISSING STORAGE
+    // LOCATION"): auto-resolved (from the branch's own stock record, or
+    // inferred from HO01's cold/non-cold zone) by default, but a supervisor
+    // can type over it here — same delegated-listener pattern as the
+    // Quantity to Request input above, stored as draft.manualStorageLoc.
+    // Export refuses to run while any APPROVED line is still blank here, so
+    // this is the fix path when auto-resolution comes up empty or wrong.
     { key: "storageLoc", label: "Storage Location", raw: true,
-      fmt: (v, r) => v
-        ? escHtml(v)
-        : `<span class="brd-note-scale">— none found</span>` },
+      fmt: (v, r) => {
+        const cls = !v ? "brd-storageloc-missing" : (r.storageLocManual ? "brd-storageloc-manual" : (r.storageLocInferred ? "brd-storageloc-inferred" : ""));
+        const title = !v
+          ? "No storage location could be resolved — type one in before this line can be approved and exported."
+          : (r.storageLocManual ? "Manually entered — overrides auto-resolution." : (r.storageLocInferred ? "Inferred from HO01's cold/non-cold zone — no existing branch stock record to confirm this. Double-check before approving." : "From the branch's own existing stock record."));
+        return canEdit
+          ? `<input type="text" maxlength="10" class="brd-storageloc-input ${cls}" title="${title}" data-plant="${escHtml(r.plant)}" data-code="${escHtml(r.code)}" value="${escHtml(v || "")}" placeholder="— none found —" />`
+          : (v ? `<span class="${cls}" title="${title}">${escHtml(v)}</span>` : `<span class="brd-note-scale" title="${title}">— none found</span>`);
+      } },
     { key: "purchGroup", label: "Purch. Group", fmt: v => v ? escHtml(v) : "—", raw: true },
     { key: "purchOrg", label: "Purch. Org", fmt: v => v ? escHtml(v) : "—", raw: true },
     { key: "status", label: "Status", fmt: v => brdStatusBadge(v), raw: true },
@@ -1437,6 +1584,28 @@ function brdExportTemplate() {
 
   const approved = lines.filter(l => l.approved);
 
+  // ── HARD BLOCK: missing Storage Location (see file header) ─────────────
+  // A Storage Location is mandatory on the SAP requisition — a blank one
+  // either fails to paste or lands on the wrong stock location. Unlike the
+  // Purch. Group/Org "unclassified" check below (soft warning, exports
+  // anyway), this one refuses to write the file at all: it's cheaper to fix
+  // 3 rows now on the Request Form tab than to have SAP bounce the whole
+  // sheet, or worse, have it go through against the wrong location. Fix
+  // path: type a Storage Location into the Request Form tab's Storage
+  // Location column for the listed line(s) (or "Approve Visible" deselect
+  // them), then Export again.
+  const missingStorage = approved.filter(l => !l.storageLoc);
+  if (missingStorage.length) {
+    if (typeof showError === "function") {
+      const preview = missingStorage.slice(0, 8)
+        .map(l => `${l.plant} · ${l.reqSourceCode || l.code}`)
+        .join(", ");
+      const more = missingStorage.length > 8 ? ` (+${missingStorage.length - 8} more)` : "";
+      showError(`Export blocked — ${missingStorage.length} approved line(s) have no Storage Location: ${preview}${more}. Go to the Request Form tab and type a Storage Location for each (or uncheck them), then export again.`);
+    }
+    return; // nothing is written — see comment above
+  }
+
   const workingRows = approved.map(l => {
     return {
       code: l.code, desc: l.desc, plant: l.plant,
@@ -1457,8 +1626,13 @@ function brdExportTemplate() {
       factor: l.reqSourceFactor, codeChanged: l.reqSourceDiffers ? "Yes" : "No",
       stockType: l.stockTypeLabel || "Unclassified",
       purchGroup: l.purchGroup || "", purchOrg: l.purchOrg || "",
-      storageLoc: l.storageLoc || "", storageLocSource: l.storageLoc ? (l.storageLocInferred ? "Estimated from plant data" : "From branch stock record") : "Not found",
+      storageLoc: l.storageLoc || "",
+      storageLocSource: l.storageLocManual ? "Manually entered" : (l.storageLocInferred ? "Estimated from plant data" : "From branch stock record"),
       status: l.status, approved: l.approved ? "Yes" : "No",
+      // Full equity/priority audit trail — same text as the ⚖️/⛔ tooltip on
+      // screen, written out in full so a reviewer doesn't need the live app
+      // open to see WHY a branch got (or didn't get) stock on this line.
+      priorityExplanation: brdPriorityExplanation(l),
     };
   });
   const workingCols = [
@@ -1472,6 +1646,7 @@ function brdExportTemplate() {
     { key: "stockType", label: "Stock Type" }, { key: "purchGroup", label: "Purchasing Group" }, { key: "purchOrg", label: "Purch. Organization" },
     { key: "storageLoc", label: "Storage Location" }, { key: "storageLocSource", label: "Storage Location Source" },
     { key: "status", label: "Status" }, { key: "approved", label: "Approved" },
+    { key: "priorityExplanation", label: "Priority / Equity Explanation" },
   ];
 
   // Column order/labels below must stay byte-identical to the reference
@@ -1527,7 +1702,7 @@ function brdExportTemplate() {
 
     const bufferEl = document.getElementById("brd-buffer");
     if (bufferEl) bufferEl.addEventListener("change", () => {
-      brdBuffer = Math.max(0, Number(bufferEl.value) || 0);
+      brdBufferMos = Math.max(0, parseFloat(bufferEl.value) || 0);
       renderBranchDemand();
     });
 
@@ -1648,6 +1823,15 @@ function brdExportTemplate() {
         const factor = Number(inp.dataset.factor);
         const v = (factor > 0) ? Math.round(rawV * factor) : rawV;
         d.manualAlloc = v;
+        brdDraft.set(key, d);
+        renderBranchDemand();
+        return;
+      }
+      const slocInp = e.target.closest(".brd-storageloc-input");
+      if (slocInp) {
+        const key = brdDraftKey(slocInp.dataset.plant, slocInp.dataset.code);
+        const d = brdDraft.get(key) || {};
+        d.manualStorageLoc = String(slocInp.value || "").trim().toUpperCase();
         brdDraft.set(key, d);
         renderBranchDemand();
       }
