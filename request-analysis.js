@@ -493,6 +493,16 @@
     return out;
   }
 
+  // Canonical code -> Program Classification (RDF-CDSS / RDF-NON-CDSS /
+  // Program-Reportable / Program-Non-Reportable), via mos.js's shared
+  // buildCodeProgramClassMap() (see mos.js for the full contract) — same
+  // classification shown/filterable on every other page (Dashboard, Expiry
+  // Watchlist, MOS by Plant, Branch Demand, etc). Returns an empty map (no
+  // throw) when the AMC file hasn't been loaded yet.
+  function classificationMap() {
+    return (typeof buildCodeProgramClassMap === "function") ? buildCodeProgramClassMap() : new Map();
+  }
+
   // ── CORE ANALYSIS ──────────────────────────────────────────────────────────
   function buildRequestAnalysis() {
     const hub    = (typeof HUB_PLANT === "function" || typeof HUB_PLANT !== "undefined") ? HUB_PLANT : "HO01";
@@ -501,6 +511,7 @@
     const rawCodeMap = buildHo01RawCodeMap(hub); // canonical -> [{code, qty}], live SAP codes only
     const qcMap = buildCanonicalQcMap(hub); // canonical -> stock currently in Quality Inspection at hub
     const personMap = buildPersonMap();
+    const clsMap = classificationMap(); // canonical -> Program Classification
     const matTypeMap = buildMaterialTypeMap(); // canonical -> "ZME"/"ZMS"/…
     const matGroupMap = buildMaterialGroupMap(); // canonical -> "Material Group" value
     const ho01LocMap = buildHo01StorageLocationMap(hub); // canonical -> Set of HO01 Storage Location codes
@@ -529,6 +540,7 @@
       // now for comparison against what the request file claims.
       const liveReqPlant = (canonical && reqPlant && sohMap.has(canonical)) ? (sohMap.get(canonical)[reqPlant] || 0) : 0;
       const person     = canonical ? (personMap.get(canonical) || "") : "";
+      const programClass = canonical ? (clsMap.get(canonical) || "") : "";
       const materialType = canonical ? (matTypeMap.get(canonical) || "") : "";
       const materialGroup = canonical ? (matGroupMap.get(canonical) || "") : "";
 
@@ -581,7 +593,7 @@
 
       return {
         ...r,
-        canonical, desc, status, person, materialType, materialGroup,
+        canonical, desc, status, person, programClass, materialType, materialGroup,
         liveHo01, mappedDesc, qcHo01, liveReqPlant, sohMismatch,
         locationMismatch, storageCheckStatus: storageCheck.status,
         storageCheckHo01Locations: storageCheck.ho01Locations || "",
@@ -637,7 +649,7 @@
       if (code.includes("\u241F")) return;
       const qty = plantMap[hub] || 0;
       if (qty > 0 && !requestedCanonical.has(code)) {
-        ho01NotRequestedAll.push({ code, desc: descMap.get(code) || "", qty, person: personMap.get(code) || "", materialType: matTypeMap.get(code) || "", materialGroup: matGroupMap.get(code) || "" });
+        ho01NotRequestedAll.push({ code, desc: descMap.get(code) || "", qty, person: personMap.get(code) || "", programClass: clsMap.get(code) || "", materialType: matTypeMap.get(code) || "", materialGroup: matGroupMap.get(code) || "" });
       }
     });
 
@@ -997,6 +1009,7 @@
     if (typeof applyProgramClassAccessToSelect === "function") applyProgramClassAccessToSelect(clsEl);
     const searchQ  = searchEl ? searchEl.value.trim().toLowerCase() : "";
     const statusF  = statusEl ? statusEl.value : "";
+    const clsF     = clsEl ? clsEl.value : "";
 
     const {
       rows, ho01NotRequested, ho01NotRequestedAll, mosDataLoaded,
@@ -1030,14 +1043,22 @@
     const personActive = typeof personFilter !== "undefined" && personFilter.size > 0;
     const personMatches = r => !personActive || (r.person && personFilter.has(r.person));
 
-    let filteredRows = rows.filter(r => matches(r) && personMatches(r) && matTypeMatches(r) && matGroupMatches(r));
+    // Program Classification (CDSS/Reportable) filter — same "reqan-program-class"
+    // dropdown already role-gated above via applyProgramClassAccessToSelect();
+    // this is the piece that actually applies the chosen value, so the
+    // control isn't display-only. Applies to every tab, same as Material
+    // Type / Material Group, since classification is a property of the
+    // material, not of the request line.
+    const clsMatches = r => !clsF || r.programClass === clsF;
+
+    let filteredRows = rows.filter(r => matches(r) && personMatches(r) && matTypeMatches(r) && matGroupMatches(r) && clsMatches(r));
     if (statusF) filteredRows = filteredRows.filter(r => r.status === statusF);
 
-    const suggestionRows = rows.filter(r => r.hasSuggestion && matches(r) && personMatches(r) && matTypeMatches(r) && matGroupMatches(r));
-    const stockoutRows   = rows.filter(r => r.status === "stockout" && matches(r) && personMatches(r) && matTypeMatches(r) && matGroupMatches(r));
+    const suggestionRows = rows.filter(r => r.hasSuggestion && matches(r) && personMatches(r) && matTypeMatches(r) && matGroupMatches(r) && clsMatches(r));
+    const stockoutRows   = rows.filter(r => r.status === "stockout" && matches(r) && personMatches(r) && matTypeMatches(r) && matGroupMatches(r) && clsMatches(r));
     const notRequested   = ho01NotRequested.filter(r =>
       (!searchQ || r.code.toLowerCase().includes(searchQ) || (r.desc || "").toLowerCase().includes(searchQ))
-      && personMatches(r) && matTypeMatches(r) && matGroupMatches(r)
+      && personMatches(r) && matTypeMatches(r) && matGroupMatches(r) && clsMatches(r)
     );
 
     // ── KPIs (PERSON-SCOPED DASHBOARD KPIS) ────────────────────────────────
@@ -1094,6 +1115,7 @@
           : `<span class="col-mat-code">${escHtml(v)}</span>`,
         raw: true, cellClass: "col-mat-code-wrap" },
       { key: "desc", label: "Description", cellClass: "col-mat-desc-wrap" },
+      { key: "programClass", label: "Classification", fmt: v => (typeof programClassBadge === "function" ? programClassBadge(v) : (v || "—")), raw: true },
       { key: "reqQty", label: "Requested Qty", fmt: v => fmtQty(v), cellClass: "col-qty" },
       { key: "reqSoh", label: "SOH (per Request File)", fmt: v => fmtQty(v), cellClass: "col-qty" },
       { key: "liveHo01", label: "SOH (HO01)",
@@ -1128,6 +1150,7 @@
     );
     wireTableExport("reqan-export-all", filteredRows.map(r => ({
       prNum: r.prNum, poste: r.poste, createdBy: r.createdBy, material: r.material, canonical: r.canonical, desc: r.desc,
+      programClass: (typeof PROGRAM_CLASS_LABELS !== "undefined" && PROGRAM_CLASS_LABELS[r.programClass]) || r.programClass || "",
       reqQty: r.reqQty, reqSoh: r.reqSoh, liveHo01: r.liveHo01, liveReqPlant: r.liveReqPlant,
       location: r.location, locationMismatch: r.locationMismatch ? "Yes" : "No",
       storageCheckStatus: r.storageCheckStatus, storageCheckHo01Locations: r.storageCheckHo01Locations,
@@ -1139,7 +1162,8 @@
       { key: "prNum", label: "Purchase Req Num" }, { key: "poste", label: "Poste" },
       { key: "createdBy", label: "Created By" },
       { key: "material", label: "Requested Code" }, { key: "canonical", label: "Resolved SAP Code" },
-      { key: "desc", label: "Description" }, { key: "reqQty", label: "Requested Quantity" },
+      { key: "desc", label: "Description" }, { key: "programClass", label: "Classification (CDSS/Reportable)" },
+      { key: "reqQty", label: "Requested Quantity" },
       { key: "reqSoh", label: "Stock on Hand (Request File)" }, { key: "liveHo01", label: "Stock on Hand (HO01)" },
       { key: "liveReqPlant", label: `Stock on Hand (${reqPlant || "Requesting Plant"})` },
       { key: "location", label: "Requested Location" },
@@ -1171,6 +1195,7 @@
         }).join(' <span style="opacity:0.6">or</span> '),
         raw: true, cellClass: "col-mat-code-wrap" },
       { key: "suggestedDesc", label: "Description" },
+      { key: "programClass", label: "Classification", fmt: v => (typeof programClassBadge === "function" ? programClassBadge(v) : (v || "—")), raw: true },
       { key: "suggestedTotal", label: "Combined HO01 Stock (Suggested Codes)", fmt: v => fmtQty(v), cellClass: "col-qty" },
       { key: "reqQty", label: "Requested Qty", fmt: v => fmtQty(v), cellClass: "col-qty" },
     ];
@@ -1179,11 +1204,14 @@
     );
     wireTableExport("reqan-export-suggest", suggestionRows.map(r => ({
       prNum: r.prNum, material: r.material, shortText: r.shortText,
-      suggestedCode: r.suggestedCode, suggestedDesc: r.suggestedDesc, suggestedTotal: r.suggestedTotal, reqQty: r.reqQty,
+      suggestedCode: r.suggestedCode, suggestedDesc: r.suggestedDesc,
+      programClass: (typeof PROGRAM_CLASS_LABELS !== "undefined" && PROGRAM_CLASS_LABELS[r.programClass]) || r.programClass || "",
+      suggestedTotal: r.suggestedTotal, reqQty: r.reqQty,
     })), [
       { key: "prNum", label: "Purchase Req Num" }, { key: "material", label: "Code As Requested" },
       { key: "shortText", label: "Description (as requested)" }, { key: "suggestedCode", label: "Request Under This SAP Code Instead" },
-      { key: "suggestedDesc", label: "Description" }, { key: "suggestedTotal", label: "Combined HO01 Stock (Suggested Codes)" },
+      { key: "suggestedDesc", label: "Description" }, { key: "programClass", label: "Classification (CDSS/Reportable)" },
+      { key: "suggestedTotal", label: "Combined HO01 Stock (Suggested Codes)" },
       { key: "reqQty", label: "Requested Qty" },
     ], "request_analysis_suggested_codes");
 
@@ -1193,6 +1221,7 @@
       { key: "poste", label: "Poste" },
       { key: "canonical", label: "Material Code", cellClass: "col-mat-code-wrap" },
       { key: "desc", label: "Description" },
+      { key: "programClass", label: "Classification", fmt: v => (typeof programClassBadge === "function" ? programClassBadge(v) : (v || "—")), raw: true },
       { key: "reqQty", label: "Requested Qty", fmt: v => fmtQty(v), cellClass: "col-qty" },
       { key: "deliveryDate", label: "Delivery Date", fmt: v => fmtReqDate(v) },
     ];
@@ -1200,10 +1229,13 @@
       stockoutRows, cols3, () => "row-red", "", { id: "reqan-export-stockout", title: "" }
     );
     wireTableExport("reqan-export-stockout", stockoutRows.map(r => ({
-      prNum: r.prNum, poste: r.poste, canonical: r.canonical, desc: r.desc, reqQty: r.reqQty, deliveryDate: fmtReqDate(r.deliveryDate),
+      prNum: r.prNum, poste: r.poste, canonical: r.canonical, desc: r.desc,
+      programClass: (typeof PROGRAM_CLASS_LABELS !== "undefined" && PROGRAM_CLASS_LABELS[r.programClass]) || r.programClass || "",
+      reqQty: r.reqQty, deliveryDate: fmtReqDate(r.deliveryDate),
     })), [
       { key: "prNum", label: "Purchase Req Num" }, { key: "poste", label: "Poste" },
       { key: "canonical", label: "Material Code" }, { key: "desc", label: "Description" },
+      { key: "programClass", label: "Classification (CDSS/Reportable)" },
       { key: "reqQty", label: "Requested Qty" }, { key: "deliveryDate", label: "Delivery Date" },
     ], "request_analysis_ho01_stockout");
 
@@ -1215,6 +1247,7 @@
       const cols4 = [
         { key: "code", label: "Material Code", cellClass: "col-mat-code-wrap" },
         { key: "desc", label: "Description" },
+        { key: "programClass", label: "Classification", fmt: v => (typeof programClassBadge === "function" ? programClassBadge(v) : (v || "—")), raw: true },
         { key: "qty", label: "HO01 Stock on Hand", fmt: v => fmtQty(v), cellClass: "col-qty" },
         { key: "criticalBranches", label: "Critical At (Branch MOS < 1mo)",
           fmt: v => v.map(c => `<span style="display:inline-block;margin:1px 3px 1px 0;padding:0.1rem 0.4rem;border-radius:999px;font-size:0.7rem;font-weight:700;background:rgba(220,38,38,0.14);color:var(--red)">${escHtml(c.plant)} · ${c.mos === Infinity ? "∞" : Number(c.mos).toFixed(1)}mo</span>`).join(""),
@@ -1224,10 +1257,14 @@
         notRequested, cols4, () => "row-red", "", { id: "reqan-export-notreq", title: "" }
       );
       wireTableExport("reqan-export-notreq", notRequested.map(r => ({
-        code: r.code, desc: r.desc, qty: r.qty,
+        code: r.code, desc: r.desc,
+        programClass: (typeof PROGRAM_CLASS_LABELS !== "undefined" && PROGRAM_CLASS_LABELS[r.programClass]) || r.programClass || "",
+        qty: r.qty,
         criticalBranches: r.criticalBranches.map(c => `${c.plant} (${c.mos === Infinity ? "Infinite" : Number(c.mos).toFixed(2)}mo)`).join("; "),
       })), [
-        { key: "code", label: "Material Code" }, { key: "desc", label: "Description" }, { key: "qty", label: "HO01 Stock on Hand" },
+        { key: "code", label: "Material Code" }, { key: "desc", label: "Description" },
+        { key: "programClass", label: "Classification (CDSS/Reportable)" },
+        { key: "qty", label: "HO01 Stock on Hand" },
         { key: "criticalBranches", label: "Critical At (Branch MOS < 1mo)" },
       ], "request_analysis_ho01_not_requested");
     }
@@ -1282,6 +1319,7 @@
       if (e.target.id === "reqan-clear") {
         const s = document.getElementById("reqan-search"); if (s) s.value = "";
         const st = document.getElementById("reqan-status-filter"); if (st) st.value = "";
+        const cl = document.getElementById("reqan-program-class"); if (cl) cl.value = "";
         reqMatTypeFilter.clear();
         const mtWrap = document.getElementById("reqan-mattype-wrap");
         if (mtWrap && mtWrap._clearSelected) mtWrap._clearSelected();
