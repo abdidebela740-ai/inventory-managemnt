@@ -21,6 +21,30 @@ const FILE_SLOTS = {
   pendingDispatch: { inputId: "pendingDispatchFileInput", path: "pending-dispatch/latest.xlsx",  statusId: "pendingDispatchFileStatus" },
 };
 
+// ── BUGFIX-BRD-STALE-SESSION ────────────────────────────────────────────
+// Slots that feed brdComputeMaterialAllocation()'s "must come out identical
+// for every user" allocation math (see branch-demand.js file header +
+// BUGFIX-BRD-NATIONAL-ALLOC). That guarantee only actually holds if every
+// open session is computing off the SAME underlying file for each of these
+// slots — but until now, a newly-uploaded amc/inventory/mapping/
+// pendingDispatch file only produced a dismissible "🔔 New data available —
+// Refresh now / Later" banner (showNewDataBanner below). Two sessions that
+// happened to be opened on either side of an upload — e.g. an admin who has
+// had the tab open since before a corrected AMC file was pushed, and a
+// branch user who loaded the page fresh afterwards — would silently keep
+// computing allocation against two DIFFERENT branch/AMC datasets (different
+// branch counts, different total need, different priority-tier splits) with
+// no error, no warning, and nothing to distinguish it from a genuine
+// allocation-math bug. Real timestamps included: the export/report
+// generation itself is not what goes stale, so two reports pulled "within
+// milliseconds of each other" can still disagree if one tab's underlying
+// data was already stale before either report was generated.
+//
+// These slots now auto-resync (silently re-pull + re-render) the instant
+// Supabase reports a change, instead of waiting for a click. See
+// attachRealtimeSync() and ensureSlotsFresh() below.
+const ALLOC_CRITICAL_SLOTS = ["amc", "inventory", "mapping", "pendingDispatch"];
+
 // ── Wait for the slot's own status element to leave its "⏳ loading" state ──
 // Every loader (loadFile, loadMappingFile, loadMosAmcFile, loadIncomingGrFile)
 // writes an hourglass into its status element the instant it starts parsing
@@ -654,6 +678,23 @@ function attachRealtimeSync() {
         const uploadedBy = payload.new && payload.new.uploaded_by;
         // Don't show the banner to the admin who just uploaded it themselves
         if (window.APP_USER && uploadedBy === window.APP_USER.id) return;
+
+        // BUGFIX-BRD-STALE-SESSION: allocation-critical slots resync
+        // immediately rather than waiting for the user to notice/click the
+        // banner — see ALLOC_CRITICAL_SLOTS above. Correctness, not just
+        // freshness, depends on this for any page computing national
+        // allocation math (currently just Branch Demand, but written
+        // generically since any such page shares the same invariant).
+        if (slot && ALLOC_CRITICAL_SLOTS.includes(slot)) {
+          pullFileFromSupabase(slot).then(() => {
+            if (typeof renderPage === "function" && typeof currentPage !== "undefined") {
+              renderPage(currentPage);
+            }
+            showToast(`🔄 ${slotLabel(slot)} data updated to the latest version`, "info");
+          });
+          return;
+        }
+
         showNewDataBanner(slot || "inventory");
       }
     )
