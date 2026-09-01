@@ -1386,7 +1386,7 @@
         <table class="freeze-header">
           <thead><tr>
             <th>Delivery</th><th>GI Planned Date</th>${showDaysLate ? "<th>Days Late</th>" : ""}<th>Material</th>
-            <th>Description</th><th>Classification</th><th>Purchasing Document</th><th>Branch</th><th>Storage Loc.</th>
+            <th>Description</th><th>Purchasing Document</th><th>Branch</th><th>Storage Loc.</th>
             <th>Qty</th><th>Stock Type</th><th>Created By</th>
           </tr></thead>
           <tbody>
@@ -1400,7 +1400,6 @@
                   ${showDaysLate ? `<td>${daysLateBadge(r.giDate)}</td>` : ""}
                   <td class="col-mat-code">${escapeHtml(r.material)}</td>
                   <td class="col-mat-desc" style="white-space:normal;max-width:260px">${escapeHtml(r.itemDescription)}</td>
-                  <td>${typeof programClassBadge === "function" ? programClassBadge(r.programClass) : escapeHtml(r.programClass || "—")}</td>
                   <td style="font-family:'IBM Plex Mono',monospace">${escapeHtml(r.purchasingDoc)}</td>
                   <td>${escapeHtml(branchName(code))}</td>
                   <td>${escapeHtml(r.storageLocation)}</td>
@@ -1478,16 +1477,14 @@
 
   // ── Row-level "All Pending Items" data (same shape as before) ──
   function buildDetailExportData(rows) {
-    const clsRows = withProgramClass(rows);
     const showDaysLate = canSeeDaysLate();
-    return clsRows.map((r) => ({
+    return rows.map((r) => ({
       "Delivery": r.delivery,
       "Item": r.item,
       "GI Planned Date": r.giDate ? fmtDate(r.giDate) : "",
       ...(showDaysLate ? { "Days Late": (() => { const d = daysLate(r.giDate); return d === null ? "" : (d <= 0 ? "Good" : d); })() } : {}),
       "Material": r.material,
       "Item Description": r.itemDescription,
-      "Classification": (typeof PROGRAM_CLASS_LABELS !== "undefined" && PROGRAM_CLASS_LABELS[r.programClass]) || r.programClass || "",
       "Purchasing Document": r.purchasingDoc,
       "Branch": branchName(plantCode(r.shipToParty)),
       "Plant Code": plantCode(r.shipToParty),
@@ -1947,13 +1944,19 @@
       const hide = restrict && !BRANCH_VISIBLE_TABS.includes(key);
       btn.style.display = hide ? "none" : "";
     });
-    // If the currently active tab just got hidden (or on first run, before
-    // any tab has been explicitly clicked), fall back to "detail" — always
-    // visible to every role — rather than leaving a hidden tab's panel
-    // shown with no way to reach it via the (now-hidden) button.
-    if (restrict && !BRANCH_VISIBLE_TABS.includes(activeTab)) {
-      showTab("detail");
-    }
+    // Always force-sync to "detail" for a restricted user, rather than only
+    // checking the JS `activeTab` variable — the static HTML actually ships
+    // with "top10" as the visible panel/active button (index.html's
+    // pd-tab-top10 is display:block by default, matching its "active"
+    // button class), while `activeTab` merely *initializes* to the string
+    // "detail" without ever calling showTab() to make the DOM agree. So on
+    // first load `activeTab === "detail"` was already true and this never
+    // fired, leaving the real (top10) panel showing regardless — a branch
+    // user opening the page saw cross-branch Top 10s data before ever
+    // clicking a tab. Always calling showTab("detail") here (once auth
+    // resolves, restricting the role) fixes the DOM to match, regardless of
+    // what the JS variable already claims.
+    if (restrict) showTab("detail");
   }
 
   function setTabCounts(filtered) {
