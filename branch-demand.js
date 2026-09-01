@@ -1881,7 +1881,13 @@ function brdRenderHeavy(mySeq) {
     // plant the signed-in user is locked to.
     const sohMap = brdBuildNationalSohMap();
     const lines  = brdBuildLines(sohMap);
-    brdRenderMatTypeFilterBar(lines.availableMatTypes);
+    // REMOVED-BRD-MATTYPE-FILTER-BAR: the "Material Type" filter widget was
+    // removed from the toolbar per request (so the remaining filter-bar
+    // controls line up evenly) — brdRenderMatTypeFilterBar() is no longer
+    // called, so the widget is never injected. brdMatTypeFilter stays an
+    // empty Set (its default), which is a no-op in the filtering check
+    // above (`brdMatTypeFilter.size > 0 && ...`), so every material type is
+    // shown, same as picking "All Material Types" used to do.
     brdRenderTables(lines, canEdit);
   } catch (e) {
     console.error("Error computing Branch Demand:", e);
@@ -2365,12 +2371,11 @@ function brdExportTemplate() {
       }
     });
     document.body.addEventListener("change", (e) => {
-      // Material Type filter — checkbox lives inside the shared .ms-dropdown
-      // control built by buildMultiSelect() (brdRenderMatTypeFilterBar
-      // above); sync brdMatTypeFilter from whatever's currently checked and
-      // re-render. Open/close and outside-click-to-close for the dropdown
-      // itself are handled by buildMultiSelect()'s own listeners — nothing
-      // to wire here.
+      // REMOVED-BRD-MATTYPE-FILTER-BAR: this delegated listener targeted
+      // #brd-mattype-dd, the Material Type filter dropdown removed above —
+      // it's now dead (the selector never matches since the element is
+      // never injected) but left in place since it's harmless and other
+      // "change" handling below this block still needs the listener.
       if (e.target.closest && e.target.closest("#brd-mattype-dd") && e.target.type === "checkbox") {
         const wrap = document.getElementById("brd-mattype-wrap");
         const selected = wrap && wrap._getSelected ? wrap._getSelected() : [];
