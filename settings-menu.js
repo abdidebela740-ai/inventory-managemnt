@@ -1,10 +1,10 @@
 // ════════════════════════════════════════════════════════════════
 // settings-menu.js — top-right Settings menu (theme/font) + Profile menu
 //
-// • Settings menu (#settings-menu-wrap, top-right, next to Profile) — 6
-//   named themes (Belize, Belize Deep, High Contrast Black, High Contrast
-//   White, Horizon, Quartz Dark) as a single dropdown, a quick Dark/Light
-//   switch for the common case, and whole-app font family / font size.
+// • Settings menu (#settings-menu-wrap, top-right, next to Profile) — 2
+//   named themes (Horizon, Quartz Dark) as a single dropdown, a quick
+//   Dark/Light switch for the common case, and whole-app font family / font
+//   size.
 // • Profile menu (#profile-menu-wrap, top-right) — who's signed in (name,
 //   with an email fallback), their role badge, Change password, Sign out.
 //
@@ -22,8 +22,12 @@
   const FONT_FAMILY_KEY   = "epss-font-family";
   const FONT_SIZE_KEY     = "epss-font-size";
 
-  // "belize-deep" = default dark theme (no data-theme attribute).
-  const LIGHT_FAMILY_THEMES = new Set(["belize", "hc-white", "horizon"]);
+  // REMOVED-APPEARANCE-THEMES: Belize, Belize Deep, High Contrast Black, and
+  // High Contrast White were dropped from the Theme dropdown per request —
+  // only Horizon (light) and Quartz Dark (dark) remain. "horizon" is now the
+  // default (matches the pre-paint <head> script and the dropdown's own
+  // "(default)" label) instead of the old "belize-deep".
+  const LIGHT_FAMILY_THEMES = new Set(["horizon"]);
 
   const FONT_FAMILIES = {
     jakarta: "'Plus Jakarta Sans', 'Inter', sans-serif",
@@ -40,16 +44,15 @@
 
   // ── Theme ──────────────────────────────────────────────────────────────
   function currentTheme() {
-    return safeGet(THEME_STORAGE_KEY) || "belize-deep";
+    return safeGet(THEME_STORAGE_KEY) || "horizon";
   }
 
   function applyTheme(value, persist) {
     const ROOT = document.documentElement;
-    if (value === "belize-deep") {
-      ROOT.removeAttribute("data-theme");
-    } else {
-      ROOT.setAttribute("data-theme", value);
-    }
+    // Both remaining themes (horizon, quartz-dark) are real data-theme
+    // values now — unlike the old "belize-deep" default, neither is the
+    // no-attribute case, so this always sets the attribute.
+    ROOT.setAttribute("data-theme", value);
     if (persist) safeSet(THEME_STORAGE_KEY, value);
     syncThemeUI(value);
   }
@@ -208,14 +211,17 @@
   }
 
   // ── Settings panel positioning ───────────────────────────────────────
-  // The Settings button now lives inline in the sidebar (between User
-  // Management and Data Source) instead of a fixed top-right icon, but the
-  // panel itself still needs to float free of the sidebar's own
-  // overflow-y:auto (a plain CSS anchor would get clipped/scrolled with the
-  // sidebar). Computed fresh on every open: prefers flying out to the right
-  // of the button; falls back to opening below it if there isn't enough
-  // horizontal room (narrow window / mobile drawer), then clamps to stay
-  // fully on-screen either way.
+  // The Settings button lives inline in the sidebar (between User
+  // Management and Data Source). The panel itself still needs to float free
+  // of the sidebar's own overflow-y:auto (a plain CSS anchor would get
+  // clipped/scrolled with the sidebar), so it stays `position: fixed` and
+  // is repositioned in JS on every open.
+  //
+  // REPOSITIONED-BRD-SETTINGS-PANEL: this used to prefer flying out to the
+  // right of the button, landing on top of the main content area. Per
+  // request it now always opens directly below the Settings button, aligned
+  // to the sidebar itself, only clamping vertically if it would run off the
+  // bottom of the screen.
   function positionSettingsPanel() {
     const btn   = document.getElementById("settings-menu-btn");
     const panel = document.getElementById("settings-menu-panel");
@@ -225,18 +231,11 @@
     const panelW = panel.offsetWidth  || 260;
     const panelH = panel.offsetHeight || 400;
 
-    let left, top;
-    if (rect.right + margin + panelW <= window.innerWidth - margin) {
-      // Room to the right of the button — fly out sideways.
-      left = rect.right + margin;
-      top  = Math.min(rect.top, window.innerHeight - panelH - margin);
-    } else {
-      // Not enough width (narrow window / mobile drawer) — open below.
-      left = Math.max(margin, Math.min(rect.left, window.innerWidth - panelW - margin));
-      top  = rect.bottom + margin;
-      if (top + panelH > window.innerHeight - margin) top = Math.max(margin, rect.top - panelH - margin);
-    }
-    panel.style.left = `${Math.max(margin, left)}px`;
+    const left = Math.max(margin, Math.min(rect.left, window.innerWidth - panelW - margin));
+    let top = rect.bottom + margin;
+    if (top + panelH > window.innerHeight - margin) top = Math.max(margin, rect.top - panelH - margin);
+
+    panel.style.left = `${left}px`;
     panel.style.top  = `${Math.max(margin, top)}px`;
   }
 
@@ -337,11 +336,11 @@
       themeSelect.addEventListener("change", () => applyTheme(themeSelect.value, true));
     }
 
-    // Quick Dark/Light switch — jumps straight to the Belize / Belize Deep pair
+    // Quick Dark/Light switch — jumps straight to the Horizon / Quartz Dark pair
     const quickToggle = document.getElementById("settings-dark-light-switch");
     if (quickToggle) {
       quickToggle.addEventListener("change", () => {
-        applyTheme(quickToggle.checked ? "belize" : "belize-deep", true);
+        applyTheme(quickToggle.checked ? "horizon" : "quartz-dark", true);
       });
     }
 
