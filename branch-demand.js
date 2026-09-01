@@ -580,7 +580,42 @@ function brdMaterialScope(mappedCode) {
   const candidateRows = base.filter(r => allSourceCodes.includes(String(r["Material"] || "").trim().toUpperCase()));
   const hubRows = candidateRows.filter(r => String(r["Plant"] || "").trim().toUpperCase() === HUB_PLANT);
   const rows = hubRows.length ? hubRows : candidateRows;
-  if (!rows.length) return { scope: null, prefix: null, suffix: null };
+  if (!rows.length) {
+    // MAPPING-FILE-OWN-STOCK-TYPE FALLBACK: no live inventory row anywhere
+    // (HO01 or any branch) could classify this material — this happens for
+    // an AMC-only code, or one that only appears as a SOURCE row in the
+    // mapping file (never a TARGET, per BUGFIX-MAPPING-SHAPE above) and
+    // currently carries zero stock itself. If the mapping file DOES declare
+    // a Stock Type for this exact code (as a source), trust that for the
+    // prefix (Q vs RDF → Purch. Org). If the code has mapping rows for BOTH
+    // stock types (genuinely ambiguous with no live row to disambiguate),
+    // this whole fallback is skipped and the material stays fully
+    // unclassified, same as before.
+    //
+    // For the SUFFIX (valuation type ZME/ZMS/ZLC/ZMD → Purch. Group), the
+    // mapping file itself never carries that — but the mapping entry DOES
+    // tell us the real orderable TARGET code this source converts to, and
+    // THAT code may well have its own live inventory row (with its own
+    // valuation type) even though the source code we were originally asked
+    // about has none. Check for that before giving up on Purch. Group too.
+    const stypeMap = mappingTable && mappingTable.get(String(mappedCode || "").trim().toUpperCase());
+    if (stypeMap && stypeMap.size === 1) {
+      const stype  = stypeMap.has("Q") ? "Q" : "RDF";
+      const prefix = stype === "Q" ? "Q" : "R";
+      const entry  = stypeMap.get(stype);
+      const targetCode = String((entry && entry.targetCode) || "").trim().toUpperCase();
+      let suffix = null;
+      if (targetCode) {
+        const targetRow = base.find(r => String(r["Material"] || "").trim().toUpperCase() === targetCode);
+        if (targetRow) {
+          const valType = (typeof getValuationType === "function") ? getValuationType(targetRow) : String(targetRow["Inventory Valuation Type"] || "").trim().toUpperCase();
+          if (["ZME", "ZMS", "ZLC", "ZMD"].includes(valType)) suffix = valType;
+        }
+      }
+      return { scope: suffix ? `${prefix}_${suffix}` : null, prefix, suffix };
+    }
+    return { scope: null, prefix: null, suffix: null };
+  }
   let best = rows[0], bestQty = -1;
   rows.forEach(r => {
     const qty = (Number(r["Unrestricted Stock"]) || 0) + (Number(r["Stock in Transit"]) || 0) + (Number(r["Stock in Quality Inspection"]) || 0);
@@ -1114,7 +1149,7 @@ function brdPriorityExplanation(line) {
     return `Priority tier: ${line.priorityLabel} — ${entry.branchCount} branch${entry.branchCount === 1 ? "" : "es"} in this tier needed a combined ${fmtQty(entry.tierNeedTotal)} units, and HO01 still had ${fmtQty(entry.availableBeforeTier)} available at that point (after ${higherEntries.length ? "filling " + higherDesc + " first, and " : ""}buffer/outbound deductions) — enough to fill every branch in this tier in full, including this one.`;
   }
   if (entry.status === "partial") {
-    const pct = Math.round((line.fillPct || 0) * 100);
+    const pct = ((line.fillPct || 0) * 100).toFixed(2);
     const usedFirstClause = higherEntries.length
       ? ` (after ${higherDesc} used ${fmtQty(higherUsed)} first)`
       : ` — this tier alone (the highest-priority one with a need this round) already exceeded HO01's ${fmtQty(entry.availableBeforeTier)} available`;
@@ -1309,7 +1344,13 @@ function brdBuildLines(sohMap) {
       const manualStorageLoc = (draft.manualStorageLoc || "").trim().toUpperCase();
       const hasManualStorageLoc = !!manualStorageLoc;
       const effectiveStorageLoc = hasManualStorageLoc ? manualStorageLoc : storageInfo.loc;
-      const nearestExpiry = brdNearestExpiryForBranch(row.code, b.plant, matScope.scope);
+      // Branch's OWN on-shelf nearest expiry (what they currently hold) and
+      // HO01's nearest-expiry batch (what they'd actually receive if this
+      // material ships from the hub right now) are two different things —
+      // both now surfaced separately (see cols/reqCols below) rather than
+      // conflating them under one "Nearest Expiry" column.
+      const nearestExpiryBranch = brdNearestExpiryForBranch(row.code, b.plant, matScope.scope);
+      const nearestExpiryHo01   = brdNearestExpiryForBranch(row.code, HUB_PLANT, matScope.scope);
 
       // ── REQUESTABLE (SOURCE) CODE + QUANTITY ────────────────────────────
       // What the branch should actually put on the request, not the mapped
@@ -1345,7 +1386,7 @@ function brdBuildLines(sohMap) {
         storageLoc: effectiveStorageLoc,
         storageLocInferred: hasManualStorageLoc ? false : storageInfo.inferred,
         storageLocManual: hasManualStorageLoc,
-        nearestExpiry,
+        nearestExpiryBranch, nearestExpiryHo01,
         reqSourceCode, reqSourceFactor, reqSourceQty, reqSourceDiffers, reqSourceDesc,
         reqSourceTypeMatched: reqSrc.stockTypeMatched,
       });
@@ -1701,6 +1742,7 @@ function brdRenderTables(lines, canEdit) {
     { key: "plant", label: "Branch" },
     { key: "soh", label: "Branch SOH", fmt: v => fmtQty(v) },
     { key: "amc", label: "Branch AMC", fmt: (v, r) => r.hasAmc ? fmtQty(v) : mosNABadge(), raw: true },
+    { key: "nearestExpiryBranch", label: "Branch Nearest Expiry", raw: true, fmt: v => brdFmtExpiry(v) },
     { key: "mosNow", label: "MOS Now", fmt: v => `<span style="${mosCellStyle(v)}">${fmtMosVal(v)}</span>`, raw: true },
     { key: "priorityTier", label: "Priority", raw: true, fmt: (v, r) => brdPriorityBadge(v) },
     { key: "sohHo", label: "SOH HO01", raw: true, fmt: (v, r) => r.qcOnly
@@ -1729,7 +1771,7 @@ function brdRenderTables(lines, canEdit) {
         if (r.qcOnly) bits.push(`<span class="brd-status-pill brd-status-amber" title="HO01 stock (${fmtQty(r.qcHo)}) is still in Quality Inspection — not yet releasable">🧪 ${fmtQty(r.qcHo)} Quality Inspection</span>`);
         if (r.outboundQty > 0) bits.push(`<span class="brd-status-pill brd-status-blue" title="${fmtQty(r.outboundQty)} of this material is already on an open (not-yet-issued) pending dispatch from HO01 to this branch — netted out of Need below">📦 ${fmtQty(r.outboundQty)} pending dispatch (HO01)</span>`);
         if (r.isPartial) {
-          const pct = Math.round((r.fillPct || 0) * 100);
+          const pct = ((r.fillPct || 0) * 100).toFixed(2);
           const detail = brdPriorityExplanation(r);
           bits.push(r.fillPct > 0
             ? `<span class="brd-status-pill brd-status-amber" title="${escHtml(detail)}">⚖️ ${pct}% — ${escHtml(r.priorityLabel)} tier</span>`
@@ -1809,7 +1851,7 @@ function brdRenderTables(lines, canEdit) {
         : `<b>${fmtQty(v)}</b>` },
     // Nearest expiry of the branch's OWN existing stock of this item —
     // Request Form only (not Analysis, see file header / cols above).
-    { key: "nearestExpiry", label: "Nearest Expiry", raw: true, fmt: v => brdFmtExpiry(v) },
+    { key: "nearestExpiryHo01", label: "Nearest Expiry (HO01)", raw: true, fmt: v => brdFmtExpiry(v) },
     // EDITABLE (see file header "EXPORT HARD-BLOCK ON MISSING STORAGE
     // LOCATION"): auto-resolved (from the branch's own stock record, or
     // inferred from HO01's cold/non-cold zone) by default, but a supervisor
