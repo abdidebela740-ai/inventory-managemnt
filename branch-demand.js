@@ -1608,6 +1608,12 @@ function brdKpiRow(lines) {
 // Rebuilt on every render so its option list stays in sync with whatever
 // Material Types are actually present in the current scope (plant/program
 // class); checked state is preserved via brdMatTypeFilter.
+//
+// REMOVED-BRD-MATTYPE-LABEL: the "Material Type" label that sat above the
+// dropdown (stacked in its own column) was removed per request — the
+// dropdown itself stays, now sitting inline at the same baseline as the
+// other filter-bar controls (Branch, Stock Type, Classifications) instead
+// of in a taller two-row block.
 function brdRenderMatTypeFilterBar(types) {
   const anchorEl = document.getElementById("brd-program-class");
   if (!anchorEl || !anchorEl.parentElement) return;
@@ -1617,9 +1623,8 @@ function brdRenderMatTypeFilterBar(types) {
     outer = document.createElement("div");
     outer.id = "brd-mattype-outer";
     outer.style.cssText =
-      "display:inline-flex;flex-direction:column;gap:5px;vertical-align:bottom;min-width:170px;";
+      "display:inline-flex;vertical-align:middle;min-width:170px;";
     outer.innerHTML =
-      `<div class="nav-label" style="font-size:var(--fs-2xs)">Material Type</div>` +
       `<div class="ms-wrap" id="brd-mattype-wrap" style="min-width:0;width:100%">` +
         `<button class="ms-btn" type="button" style="width:100%">All Material Types <span class="ms-arrow">▾</span></button>` +
         `<div class="ms-dropdown" id="brd-mattype-dd"></div>` +
@@ -1881,13 +1886,7 @@ function brdRenderHeavy(mySeq) {
     // plant the signed-in user is locked to.
     const sohMap = brdBuildNationalSohMap();
     const lines  = brdBuildLines(sohMap);
-    // REMOVED-BRD-MATTYPE-FILTER-BAR: the "Material Type" filter widget was
-    // removed from the toolbar per request (so the remaining filter-bar
-    // controls line up evenly) — brdRenderMatTypeFilterBar() is no longer
-    // called, so the widget is never injected. brdMatTypeFilter stays an
-    // empty Set (its default), which is a no-op in the filtering check
-    // above (`brdMatTypeFilter.size > 0 && ...`), so every material type is
-    // shown, same as picking "All Material Types" used to do.
+    brdRenderMatTypeFilterBar(lines.availableMatTypes);
     brdRenderTables(lines, canEdit);
   } catch (e) {
     console.error("Error computing Branch Demand:", e);
@@ -2371,11 +2370,12 @@ function brdExportTemplate() {
       }
     });
     document.body.addEventListener("change", (e) => {
-      // REMOVED-BRD-MATTYPE-FILTER-BAR: this delegated listener targeted
-      // #brd-mattype-dd, the Material Type filter dropdown removed above —
-      // it's now dead (the selector never matches since the element is
-      // never injected) but left in place since it's harmless and other
-      // "change" handling below this block still needs the listener.
+      // Material Type filter — checkbox lives inside the shared .ms-dropdown
+      // control built by buildMultiSelect() (brdRenderMatTypeFilterBar
+      // above); sync brdMatTypeFilter from whatever's currently checked and
+      // re-render. Open/close and outside-click-to-close for the dropdown
+      // itself are handled by buildMultiSelect()'s own listeners — nothing
+      // to wire here.
       if (e.target.closest && e.target.closest("#brd-mattype-dd") && e.target.type === "checkbox") {
         const wrap = document.getElementById("brd-mattype-wrap");
         const selected = wrap && wrap._getSelected ? wrap._getSelected() : [];
