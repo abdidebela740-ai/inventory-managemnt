@@ -43,7 +43,11 @@ function buildUnmappedMaterialRows(searchQ, stockTypeVal, valTypeVal, plantVal) 
 
   const matMap = new Map();
   base.forEach(row => {
-    if (row._isMapped) return; // has a mapping entry — not this page's concern
+    // _isMapped covers both a literal mapping-file entry AND a code that's
+    // already canonical (it's used as someone else's Target elsewhere in
+    // the mapping file — TARGET-AS-CANONICAL, see applyMaterialMapping() in
+    // script.js). Either way it's not this page's concern.
+    if (row._isMapped) return;
     if (typeof passesUniversalExclusions === "function" && !passesUniversalExclusions(row)) return;
 
     const code = String(row["Material"] || "").trim();
