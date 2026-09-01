@@ -68,7 +68,14 @@ function injectAuthOverlay() {
             <p>Track stock across every plant, catch expiry risk before it becomes loss— all from one dashboard.</p>
             <div class="auth-hero-actions">
               <button type="button" class="auth-btn-primary" id="auth-hero-signin-btn">→ Sign In</button>
-           </div>
+            </div>
+            <div class="auth-hero-pills">
+              <span class="auth-pill">⏰ Expiry Tracking</span>
+              <span class="auth-pill">🏢 Branch Comparison</span>
+              <span class="auth-pill">🗂️ National MOS</span>
+            </div>
+          </div>
+
           <div class="auth-login-card" id="auth-login-card">
             <div class="auth-login-header">
               <span class="auth-login-icon">🔒</span>
@@ -121,7 +128,7 @@ function injectAuthOverlay() {
           <div>
             <span class="auth-hero-eyebrow">About</span>
             <h2>Built for EPSS Inventory Management</h2>
-            <p>EPSS Stock-Multiple pulls inventory data into a single network-wide view — so decisions about redistribution, expiry risk are based on what's actually on the shelf.</p>
+            <p>EPSS Stock-Multiple pulls inventory data into a single network-wide view — so decisions about redistribution, expiry risk are based on what's actually on the shel.</p>
           </div>
           <button type="button" class="auth-btn-primary" id="auth-about-signin-btn">→ Sign In to Get Started</button>
         </div>
