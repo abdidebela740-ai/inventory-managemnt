@@ -577,7 +577,22 @@ function brdMaterialScope(mappedCode) {
   // this used to go through brdPrimarySource(), which always came back
   // empty and silently left most mapped materials "Unclassified").
   const allSrc = brdAllCandidateSources(mappedCode);
-  const allSourceCodes = allSrc.length ? allSrc.map(c => c.srcCode) : [mappedCode];
+  // FIX-BRD-TARGET-OWN-STOCK: mappedCode may itself carry live inventory
+  // rows even when it's ALSO the target of a reverse mapping rule (e.g. an
+  // AMC-only demand code like 104-AMIK-0304 with zero stock of its own maps
+  // to a real orderable code like 104-AMIK-0305 that has plenty of live
+  // stock at HO01/branches). The old version REPLACED allSourceCodes with
+  // only the candidate source codes whenever any were found, silently
+  // dropping mappedCode's own rows from consideration — so a code with
+  // live, classifiable stock still fell through to the no-live-row
+  // fallback (and failed there too, since mappedCode is never a SOURCE key
+  // in mappingTable when it's a target). Always include mappedCode
+  // alongside any mapping candidates so its own rows are checked first,
+  // without losing the exemption for genuinely stock-less demand codes
+  // (allSrc empty → still just [mappedCode], same as before).
+  const allSourceCodes = allSrc.length
+    ? Array.from(new Set([mappedCode, ...allSrc.map(c => c.srcCode)]))
+    : [mappedCode];
   const base = (mappingTable && mappingTable.size > 0 ? mappedDf : rawDf) || [];
   const candidateRows = base.filter(r => allSourceCodes.includes(String(r["Material"] || "").trim().toUpperCase()));
   const hubRows = candidateRows.filter(r => String(r["Plant"] || "").trim().toUpperCase() === HUB_PLANT);
