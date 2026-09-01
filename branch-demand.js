@@ -463,6 +463,26 @@ function brdAllCandidateSources(mappedCode) {
   return candidates;
 }
 
+// Total available quantity for a single code at HO01 — the same
+// three-field sum (Unrestricted + Stock in Transit + Stock in Quality
+// Inspection) already used by this function's own tie-break below and by
+// brdMaterialScope's "most stock wins" row selection. Used to test whether
+// a code is actually AVAILABLE to put on a requisition, independent of
+// which side of a mapping row it happens to sit on — see
+// AVAILABLE-CODE-FIRST in brdPrimarySource() below.
+function brdHo01QtyForCode(code) {
+  if (!code) return 0;
+  const wanted = String(code).trim().toUpperCase();
+  const base = (mappingTable && mappingTable.size > 0 ? mappedDf : rawDf) || [];
+  let qty = 0;
+  base.forEach(r => {
+    if (String(r["Plant"] || "").trim().toUpperCase() !== HUB_PLANT) return;
+    if (String(r["Material"] || "").trim().toUpperCase() !== wanted) return;
+    qty += (Number(r["Unrestricted Stock"]) || 0) + (Number(r["Stock in Transit"]) || 0) + (Number(r["Stock in Quality Inspection"]) || 0);
+  });
+  return qty;
+}
+
 // preferredStockType: this line's own Q/RDF classification ("Q" or "R", the
 // same convention as matScope.prefix from brdMaterialScope) — when given,
 // candidates whose mapping-row stock type matches it are preferred over
@@ -473,6 +493,31 @@ function brdAllCandidateSources(mappedCode) {
 // preferred type is given, or none of the candidates match it.
 function brdPrimarySource(mappedCode, preferredStockType) {
   const candidates = brdAllCandidateSources(mappedCode);
+
+  // AVAILABLE-CODE-FIRST: the mapping file's source→target direction is
+  // NOT a reliable signal for which side is actually orderable — it's
+  // usually the source (see BUGFIX-MAPPING-SHAPE above, and the general
+  // "AMC-tracked demand code → real orderable pack" pattern this file was
+  // written under), but it can run the other way: e.g.
+  // 104-AMIK-0304 → 104-AMIK-0305, where SOURCE 0304 is an AMC-only
+  // tracking code with zero live stock anywhere, and TARGET 0305 is the
+  // real, physically-stocked, orderable pack (63 units at HO01, more at
+  // branches). Trusting "source = real code" there would put an
+  // unorderable code on the requisition even though Purch. Group/Org
+  // classify cleanly. So: if mappedCode ITSELF has live stock at HO01,
+  // it's directly orderable under its own code — use it as-is (factor 1)
+  // regardless of what any mapping row says, rather than redirecting to a
+  // candidate that may hold none. Only when mappedCode has no live stock
+  // of its own do we fall through to the mapping-table-driven logic below,
+  // same as before.
+  if (brdHo01QtyForCode(mappedCode) > 0) {
+    return {
+      sourceCode: mappedCode, factor: 1,
+      allSourceCodes: [mappedCode, ...candidates.map(c => c.srcCode)],
+      stockTypeMatched: true,
+    };
+  }
+
   if (!candidates.length) return { sourceCode: mappedCode, factor: 1, allSourceCodes: [mappedCode], stockTypeMatched: false };
 
   // UNAMBIGUOUS-SINGLE-CANDIDATE: when the mapping file only has ONE row
@@ -1397,10 +1442,21 @@ function brdBuildLines(sohMap) {
       const reqSourceFactor = reqSrc.factor;
       const reqSourceDiffers = reqSourceCode.toUpperCase() !== String(row.code).toUpperCase() || reqSourceFactor !== 1;
       const reqSourceQty = reqSourceFactor > 0 ? Math.round(alloc / reqSourceFactor) : alloc;
-      // Only bother looking up a separate description when the code itself
-      // actually changed — when it didn't, row.desc already IS this code's
-      // description, no need for an extra lookup.
-      const reqSourceDesc = reqSourceDiffers ? brdSourceDescription(reqSourceCode, row.desc) : row.desc;
+      // FIX-BRD-DESC-NOT-RAW: row.desc comes from mosMerged, which sources
+      // its description from buildInventoryDescMap()/buildAmcClassIndex()
+      // in mos.js — BOTH of which prefer the mapping file's canonical
+      // "_mappedDesc"/targetDesc over the row's own raw SAP "Material
+      // Description" (see mos.js buildInventoryDescMap: `row._mappedDesc
+      // || row["Material Description"]`). So row.desc can be a MAPPED
+      // description even when reqSourceCode didn't need to change from
+      // row.code — the old "code didn't change → row.desc already IS this
+      // code's description" assumption doesn't hold. Always look up the
+      // raw SAP description for whatever code is actually being shown/
+      // requested, same as the code column does; brdSourceDescription()
+      // still falls back to row.desc if no raw row has its own description
+      // (e.g. code truly absent from the current upload), so nothing goes
+      // blank.
+      const reqSourceDesc = brdSourceDescription(reqSourceCode, row.desc);
 
       lines.push({
         plant: b.plant, code: row.code, desc: row.desc, origCodes: row.origCodes,
