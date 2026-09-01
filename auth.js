@@ -65,7 +65,7 @@ function injectAuthOverlay() {
         <div class="auth-hero-grid">
           <div class="auth-hero-text">
             <h1>Pharmaceutical Inventory Management and Operation</h1>
-            <p>Track stock across every plant, catch expiry risk before it becomes loss, and always know who's responsible for what — all from one dashboard.</p>
+            <p>Track stock across every plant, catch expiry risk before it becomes loss— all from one dashboard.</p>
             <div class="auth-hero-actions">
               <button type="button" class="auth-btn-primary" id="auth-hero-signin-btn">→ Sign In</button>
             </div>
@@ -127,8 +127,8 @@ function injectAuthOverlay() {
         <div class="auth-section-inner auth-about-inner">
           <div>
             <span class="auth-hero-eyebrow">About</span>
-            <h2>Built for EPSS inventory teams</h2>
-            <p>EPSS Stock-Multiple pulls inventory, transit, and AMC data into a single network-wide view — so decisions about redistribution, expiry risk, and ownership are based on what's actually on the shelf, not what's in someone's spreadsheet.</p>
+            <h2>Built for EPSS Inventory Management</h2>
+            <p>EPSS Stock-Multiple pulls inventory data into a single network-wide view — so decisions about redistribution, expiry risk are based on what's actually on the shel.</p>
           </div>
           <button type="button" class="auth-btn-primary" id="auth-about-signin-btn">→ Sign In to Get Started</button>
         </div>
