@@ -919,11 +919,12 @@
   function showMatrixDrilldown(branch, sloc, cellRows) {
     closeMatrixDrilldown();
 
+    const showDaysLate = canSeeDaysLate();
     const rowsHtml = cellRows.map((r) => `
       <tr>
         <td>${escapeHtml(r.delivery)}</td>
         <td>${fmtDate(r.giDate)}</td>
-        <td>${daysLateBadge(r.giDate)}</td>
+        ${showDaysLate ? `<td>${daysLateBadge(r.giDate)}</td>` : ""}
         <td>${escapeHtml(r.material)}</td>
         <td>${escapeHtml(r.itemDescription)}</td>
         <td>${escapeHtml(r.purchasingDoc)}</td>
@@ -949,7 +950,7 @@
             <table>
               <thead>
                 <tr>
-                  <th>Delivery</th><th>GI Planned Date</th><th>Days Late</th><th>Material</th>
+                  <th>Delivery</th><th>GI Planned Date</th>${showDaysLate ? "<th>Days Late</th>" : ""}<th>Material</th>
                   <th>Description</th><th>Purchasing Document</th><th>Qty</th><th>Stock Type</th><th>Created By</th>
                 </tr>
               </thead>
@@ -970,6 +971,17 @@
 
 
   // ── Days late vs. planned Goods Issue date ────────────────────
+  // "Days Late" is a cross-branch prioritization signal (which deliveries
+  // are furthest overdue relative to plan) — meaningful for Head Office
+  // triaging dispatch nationally, but not something a single branch needs
+  // to see about its own already-narrow list of deliveries, per the same
+  // role-based scoping as the tab bar (applyTabVisibilityForRole() above).
+  // Used to gate the column out of both branch-visible tables (the
+  // "All Pending Items" detail table and the Matrix drilldown modal) and
+  // their exports — HO01/Admin users are unaffected and keep seeing it.
+  function canSeeDaysLate() {
+    return typeof window.isHeadOfficeUser !== "function" || window.isHeadOfficeUser();
+  }
   // today - giDate: negative => not yet due (on track / "Good"),
   // positive => days overdue past the planned GI date.
   function daysLate(giDate) {
@@ -1367,12 +1379,13 @@
 
     const sorted = [...filtered].sort((a, b) => (a.giDate && b.giDate ? a.giDate - b.giDate : 0));
     const shown = sorted; // no render cap — full filtered set is shown
+    const showDaysLate = canSeeDaysLate();
 
     wrap.innerHTML = filterBar + exportBtns + `
       <div class="tbl-wrap tbl-wrap-freeze">
         <table class="freeze-header">
           <thead><tr>
-            <th>Delivery</th><th>GI Planned Date</th><th>Days Late</th><th>Material</th>
+            <th>Delivery</th><th>GI Planned Date</th>${showDaysLate ? "<th>Days Late</th>" : ""}<th>Material</th>
             <th>Description</th><th>Classification</th><th>Purchasing Document</th><th>Branch</th><th>Storage Loc.</th>
             <th>Qty</th><th>Stock Type</th><th>Created By</th>
           </tr></thead>
@@ -1384,7 +1397,7 @@
                 <tr>
                   <td style="font-family:'IBM Plex Mono',monospace">${escapeHtml(r.delivery)}</td>
                   <td>${fmtDate(r.giDate)}</td>
-                  <td>${daysLateBadge(r.giDate)}</td>
+                  ${showDaysLate ? `<td>${daysLateBadge(r.giDate)}</td>` : ""}
                   <td class="col-mat-code">${escapeHtml(r.material)}</td>
                   <td class="col-mat-desc" style="white-space:normal;max-width:260px">${escapeHtml(r.itemDescription)}</td>
                   <td>${typeof programClassBadge === "function" ? programClassBadge(r.programClass) : escapeHtml(r.programClass || "—")}</td>
@@ -1466,11 +1479,12 @@
   // ── Row-level "All Pending Items" data (same shape as before) ──
   function buildDetailExportData(rows) {
     const clsRows = withProgramClass(rows);
+    const showDaysLate = canSeeDaysLate();
     return clsRows.map((r) => ({
       "Delivery": r.delivery,
       "Item": r.item,
       "GI Planned Date": r.giDate ? fmtDate(r.giDate) : "",
-      "Days Late": (() => { const d = daysLate(r.giDate); return d === null ? "" : (d <= 0 ? "Good" : d); })(),
+      ...(showDaysLate ? { "Days Late": (() => { const d = daysLate(r.giDate); return d === null ? "" : (d <= 0 ? "Good" : d); })() } : {}),
       "Material": r.material,
       "Item Description": r.itemDescription,
       "Classification": (typeof PROGRAM_CLASS_LABELS !== "undefined" && PROGRAM_CLASS_LABELS[r.programClass]) || r.programClass || "",
@@ -1907,6 +1921,41 @@
   const TABS = ["detail", "sloc", "branch", "top10", "matrix", "aging-branch", "aging-sloc"];
   let activeTab = "detail";
 
+  // ── ROLE-BASED TAB VISIBILITY ────────────────────────────────
+  // A branch-locked user (isHeadOfficeUser() === false — see permissions.js)
+  // only ever has data for their own plant, so the cross-branch views here
+  // (Top 10s, By Storage Location, By Branch/Plant, and the two Aging
+  // tabs — all of which compare across branches) don't tell them anything
+  // their own single branch can't already see more directly. They keep
+  // exactly the two tabs that make sense scoped to one branch:
+  //   - "detail" (All Pending Items)      — their own open outbound, row by row
+  //   - "matrix" (Branch × Storage Location) — their branch's storage
+  //     locations, which is really a "by storage location" view for their
+  //     one branch rather than a cross-branch comparison
+  // Both are already restricted to this user's own plant's rows via
+  // canAccessDispatchRow()/canAccessPlant() above (STATE.rows is built from
+  // pre-filtered rows), so no extra data-level filtering is needed here —
+  // this only controls which tab *buttons* are shown.
+  // HO01 / Admin users (isHeadOfficeUser() === true) are unaffected and
+  // keep every tab, matching every other page's plant-scoping convention.
+  const BRANCH_VISIBLE_TABS = ["detail", "matrix"];
+
+  function applyTabVisibilityForRole() {
+    const restrict = typeof window.isHeadOfficeUser === "function" && !window.isHeadOfficeUser();
+    document.querySelectorAll(".pd-tab-btn").forEach((btn) => {
+      const key = btn.dataset.tab;
+      const hide = restrict && !BRANCH_VISIBLE_TABS.includes(key);
+      btn.style.display = hide ? "none" : "";
+    });
+    // If the currently active tab just got hidden (or on first run, before
+    // any tab has been explicitly clicked), fall back to "detail" — always
+    // visible to every role — rather than leaving a hidden tab's panel
+    // shown with no way to reach it via the (now-hidden) button.
+    if (restrict && !BRANCH_VISIBLE_TABS.includes(activeTab)) {
+      showTab("detail");
+    }
+  }
+
   function setTabCounts(filtered) {
     const deliveries = {};
     filtered.forEach((r) => { deliveries[r.delivery] = (deliveries[r.delivery] || 0) + 1; });
@@ -2192,5 +2241,18 @@
     wireSourceMetaListener();
     wireTableExportButtons();
     showNoData();
+    // window.APP_USER is usually only populated after auth.js finishes its
+    // (async) login check, which normally lands after DOMContentLoaded —
+    // but on a warm reload it can already be set by this point, so try
+    // once here too rather than waiting on the event that may already have
+    // fired.
+    applyTabVisibilityForRole();
   });
+
+  // auth.js dispatches this once window.APP_USER/isHeadOfficeUser() are
+  // ready (see storage-sync.js / user-management.js / idle-logout.js for
+  // the same pattern) — re-apply here so a branch-locked user's tab bar is
+  // still correctly restricted even when auth resolves after the
+  // DOMContentLoaded pass above.
+  document.addEventListener("epss-auth-ready", applyTabVisibilityForRole);
 })();
