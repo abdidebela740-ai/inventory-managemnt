@@ -123,7 +123,9 @@
 //               PLANT_NONCOLD_STORAGE_LOCATIONS, HO01_COLD_LOCATIONS,
 //               storageLocationSpecialStockType)
 //   script.js  (rawDf, mappedDf, mappingTable, escHtml, fmtQty, buildTable,
-//               kpiCard, setKpis, canAccessRow via permissions.js, getReconciledBase)
+//               kpiCard, setKpis, canAccessRow via permissions.js, getReconciledBase,
+//               parseExpiryDate, and rows' precomputed row._expiry field —
+//               same canonical expiry source Expiry Risk / Stockout Risk use)
 //   mos.js     (HUB_PLANT, mosPlants, mosMerged, mosSohFor, buildMosSohMap,
 //               fmtMosVal, mosCellStyle, mosNABadge)
 //   permissions.js (canAccessModule, currentRole, computeIsAdmin, isDirectorLike)
@@ -788,20 +790,35 @@ function brdStorageLocationForBranch(mappedCode, plant, scopeCode) {
 // OWN existing stock of that material expires, so it doesn't over-request
 // on top of stock that's about to lapse. This looks across every source
 // row for the material at that branch (with real quantity on hand) and
-// returns the soonest expiry date found. Tries several common SAP
-// column-name variants since the exact header can differ by export
-// template — extend EXPIRY_DATE_FIELDS if your data uses a different one
-// and this keeps showing "—".
+// returns the soonest expiry date found.
+//
+// FIX-BRD-EXPIRY-MISSED: this used to guess raw column-name variants
+// ("SLED/BBD", "Expiry Date", etc.) and re-parse them with plain
+// `new Date(raw)`. That silently missed rows two different ways: (1) if the
+// actual header didn't match any guessed variant, it fell straight to null
+// -> "—" even though the row plainly had stock; (2) `new Date("yyyy-mm-dd")`
+// parses as UTC midnight, which can land a day earlier once shifted to local
+// time (see script.js's own note on this same bug, "FIX BUG-8"). Every other
+// module that shows an expiry (Expiry Risk, Stockout Risk) instead reads the
+// single canonical `row._expiry` field script.js computes ONCE at file-load
+// via its timezone-safe parseExpiryDate("Shelf Life Expiration Date") — so
+// that's the same field this now reads first, keeping Branch Demand
+// consistent with the rest of the app instead of re-deriving its own answer.
+// The old guessed-column scan is kept only as a fallback for the rare case
+// this module is loaded without script.js's precomputed field (or an older
+// export where _expiry wasn't set), so this never regresses to showing
+// LESS than before.
 const EXPIRY_DATE_FIELDS = [
   "SLED/BBD", "SLED", "Shelf Life Exp. Date", "Shelf Life Expiration Date",
   "Expiration Date", "Expiry Date", "Best Before Date", "BBD", "Exp. Date",
 ];
 function brdRowExpiryDate(row) {
+  if (row._expiry instanceof Date && !isNaN(row._expiry)) return row._expiry;
   for (const f of EXPIRY_DATE_FIELDS) {
     const raw = row[f];
     if (raw === undefined || raw === null || raw === "") continue;
-    const d = raw instanceof Date ? raw : new Date(raw);
-    if (!isNaN(d.getTime())) return d;
+    const d = (typeof parseExpiryDate === "function") ? parseExpiryDate(raw) : (raw instanceof Date ? raw : new Date(raw));
+    if (d && !isNaN(d.getTime())) return d;
   }
   return null;
 }
@@ -1772,7 +1789,8 @@ function brdRenderTables(lines, canEdit) {
         if (r.outboundQty > 0) bits.push(`<span class="brd-status-pill brd-status-blue" title="${fmtQty(r.outboundQty)} of this material is already on an open (not-yet-issued) pending dispatch from HO01 to this branch — netted out of Need below">📦 ${fmtQty(r.outboundQty)} pending dispatch (HO01)</span>`);
         if (r.isPartial) {
           const pct = ((r.fillPct || 0) * 100).toFixed(2);
-          const detail = brdPriorityExplanation(r);
+          const netPct = ((r.scalePct || 0) * 100).toFixed(2);
+          const detail = brdPriorityExplanation(r) + ` (Network-wide, HO01 covers ${netPct}% of everyone's combined need for this material — this branch's own ${pct}% can differ because of priority-tier order.)`;
           bits.push(r.fillPct > 0
             ? `<span class="brd-status-pill brd-status-amber" title="${escHtml(detail)}">⚖️ ${pct}% — ${escHtml(r.priorityLabel)} tier</span>`
             : `<span class="brd-status-pill brd-status-red" title="${escHtml(detail)}">⛔ 0% — bumped by higher priority (${escHtml(r.priorityLabel)} tier)</span>`);
@@ -1780,7 +1798,9 @@ function brdRenderTables(lines, canEdit) {
         if (r.surplusPlants && r.surplusPlants.length) bits.push(`<span class="brd-status-pill brd-status-blue" title="Surplus (>8mo) at: ${r.surplusPlants.map(escHtml).join(", ")}">↔️ ${r.surplusPlants.length}</span>`);
         if (!r.hasAmc) bits.push(`<span class="brd-status-pill brd-status-muted" title="No AMC on file — enter quantity manually">✏️ Manual</span>`);
         if (r.bufferQty > 0) bits.push(`<span class="brd-status-pill brd-status-blue" title="HO01 buffer: ${escHtml(String(r.bufferMos))} MOS × ${fmtQty(r.totalBranchAmc)} total network AMC for this material = ${fmtQty(r.bufferQty)} units held back before allocating">🛡️ ${fmtQty(r.bufferQty)} buffer held</span>`);
-        return bits.length ? `<span class="brd-notes-badges">${bits.join("")}</span>` : "—";
+        return bits.length
+          ? `<span class="brd-notes-badges">${bits.join("")}</span>`
+          : `<span class="brd-status-pill brd-status-muted" title="Fully allocated to this branch's need from HO01 stock — no shortage tier, QC hold, pending dispatch, override, or buffer holdback on this line, and AMC is on file.">✅ Fully allocated</span>`;
       } },
   );
 
@@ -1804,7 +1824,27 @@ function brdRenderTables(lines, canEdit) {
   // stock to give. Lines a supervisor already approved or hand-edited stay
   // visible even if they've since fallen outside that window, so nothing
   // in progress silently vanishes off the tab.
-  const requestLines = lines.filter(l => (brdIsRequestEligible(l) && l.alloc > 0) || l.approved || l.manual);
+  //
+  // FIX-BRD-NO-BLANK-REQUEST-ROWS: a line whose Purch. Group / Purch. Org
+  // couldn't be resolved (brdMaterialScope came back unclassified — no
+  // Special Stock Type / Inventory Valuation Type could be read off any
+  // live row for this material) can't actually be pasted into SAP anyway
+  // (see the export's own "unclassified" block below), so it isn't offered
+  // here fresh — this is where "Purch. Org blank" used to show up as an
+  // empty cell for the user to notice only at export time. Same carve-out
+  // as eligibility above: a line a supervisor already approved or
+  // hand-edited stays visible even if unclassified, since backing it out
+  // silently would be worse than showing it with a fix-me cell.
+  const requestLines = lines.filter(l =>
+    (brdIsRequestEligible(l) && l.alloc > 0 && !!l.purchGroup && !!l.purchOrg) || l.approved || l.manual
+  );
+  // Counted separately (not filtered silently) so a supervisor knows WHY a
+  // line they expected isn't here — same transparency principle as the
+  // Priority/Equity explanation elsewhere in this module. See the banner
+  // rendered just above the table below.
+  const unclassifiedHeldBack = lines.filter(l =>
+    brdIsRequestEligible(l) && l.alloc > 0 && (!l.purchGroup || !l.purchOrg) && !l.approved && !l.manual
+  ).length;
   const reqCountEl = document.getElementById("brd-tab-count-request");
   if (reqCountEl) reqCountEl.textContent = requestLines.length.toLocaleString();
 
@@ -1876,9 +1916,18 @@ function brdRenderTables(lines, canEdit) {
 
   const reqTableEl = document.getElementById("brd-request-table");
   if (reqTableEl) {
-    reqTableEl.innerHTML = requestLines.length
+    // Surfaced whenever any line is held back purely for missing Purch.
+    // Group/Org classification, whether or not other lines are shown, so
+    // this never reads as "the tab just has fewer rows than I expected" —
+    // it names the count and where to go look (Analysis tab, same
+    // material — its Notes/Stock Type columns show the underlying rows a
+    // classification would need).
+    const heldBackBanner = unclassifiedHeldBack
+      ? `<div class="alert-info" style="margin:0 0 0.5rem 0">${unclassifiedHeldBack} otherwise-eligible line${unclassifiedHeldBack === 1 ? "" : "s"} held back from this tab because Purch. Group / Purch. Org couldn't be classified (no Special Stock Type / Inventory Valuation Type found on any live row for the material) — check the Analysis tab for those materials, or approve/hand-edit a line to force it into view here.</div>`
+      : "";
+    reqTableEl.innerHTML = heldBackBanner + (requestLines.length
       ? buildTable(requestLines, reqCols, (row) => row.status === "none" ? "row-critical" : (row.qcOnly ? "row-qc" : ""))
-      : `<div class="alert-info" style="margin:0.5rem 0">Nothing to request yet on the current filters — switch to Analysis to see stock/AMC detail, or adjust the Branch / Stock Type filters above.</div>`;
+      : `<div class="alert-info" style="margin:0.5rem 0">Nothing to request yet on the current filters — switch to Analysis to see stock/AMC detail, or adjust the Branch / Stock Type filters above.</div>`);
   }
 }
 
