@@ -68,7 +68,7 @@ function injectAuthOverlay() {
             <p>Track stock across every plant, catch expiry risk before it becomes loss— all from one dashboard.</p>
             <div class="auth-hero-actions">
               <button type="button" class="auth-btn-primary" id="auth-hero-signin-btn">→ Sign In</button>
-
+           </div>
           <div class="auth-login-card" id="auth-login-card">
             <div class="auth-login-header">
               <span class="auth-login-icon">🔒</span>
