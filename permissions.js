@@ -234,6 +234,15 @@ function canAccessModule(moduleKey) {
   // non-togglable key — so renderPage()'s SEC-ACCESS-GATE silently denied
   // them and redirected elsewhere.
   if (moduleKey === "user-management") return canManageRoles();
+  // Unmapped Materials is an Admin-only data-quality tool (finds raw SAP
+  // codes with no entry — or no entry for their stock type — in the
+  // uploaded Material Standardization mapping file, i.e. codes an admin
+  // may want to add mapping rules for). Hard-gated to Admin here, the same
+  // way "user-management" is hard-gated above, rather than left to the
+  // generic sidebar_permissions check below — there is deliberately no
+  // checkbox for it in Advanced User Management, so no Director/Admin can
+  // grant it to a Director/Team Leader/branch user by mistake.
+  if (moduleKey === "unmapped-materials") return computeIsAdmin();
   if (HEAD_OFFICE_ONLY_MODULE_KEYS.includes(moduleKey) && !isHeadOfficeUser()) return false;
   const perms = window.APP_USER.sidebar_permissions || {};
   return perms[moduleKey] === true;
@@ -523,6 +532,11 @@ const NAVIGABLE_MODULE_KEYS = [
   "blocked", "restricted",
   "expiry-risk", "stockout-risk", "natl-table", "concentration",
   "request-analysis", "mos-plant", "branch-demand",
+  // Admin-only — canAccessModule("unmapped-materials") is hard-gated to
+  // computeIsAdmin() above, so this only ever surfaces as a fallback
+  // redirect target for an Admin (e.g. Admin lands here if every other
+  // NAVIGABLE_MODULE_KEYS candidate ahead of it were somehow inaccessible).
+  "unmapped-materials",
 ];
 
 /**
