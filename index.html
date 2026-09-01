@@ -38,7 +38,7 @@
           // No saved preference yet (first login / never changed) — default to Horizon.
           theme = 'horizon';
         }
-        if (theme === 'light' || theme === 'hc-black' || theme === 'hc-white' || theme === 'horizon' || theme === 'quartz-dark') {
+        if (theme === 'horizon' || theme === 'quartz-dark') {
           document.documentElement.setAttribute('data-theme', theme);
         }
         var fontFamilies = {
@@ -910,10 +910,6 @@
       <div>
         <label class="settings-field-label" for="settings-theme-select">Theme</label>
         <select id="settings-theme-select" class="settings-select">
-          <option value="belize-deep">Belize Deep</option>
-          <option value="belize">Belize</option>
-          <option value="hc-black">High Contrast Black</option>
-          <option value="hc-white">High Contrast White</option>
           <option value="horizon">Horizon (default)</option>
           <option value="quartz-dark">Quartz Dark</option>
         </select>
@@ -1949,7 +1945,7 @@
     <div class="page-header-row">
       <div>
         <div class="page-title">🧭 Branch Demand</div>
-        <div class="page-subtitle">Recommends branch requisitions against Head Office (HO01) stock — targets 5 months of stock per branch, and splits HO01 fairly when it can't cover everyone.</div>
+        <div class="page-subtitle">Recommends branch requisitions against Head Office (HO01) stock — targets 4 months of stock per branch, and splits HO01 fairly when it can't cover everyone.</div>
       </div>
     </div>
 
@@ -1973,12 +1969,11 @@
           <option value="Program-Reportable">Program (Q) · Reportable</option>
           <option value="Program-Non-Reportable">Program (Q) · Non-Reportable</option>
         </select>
-        <span class="brd-target-label">🎯 Target: 5 MOS</span>
+        <span class="brd-target-label">🎯 Target: 4 MOS</span>
         <label class="brd-buffer-label">HO01 Buffer
           <input type="number" id="brd-buffer" min="0" step="1" value="0" class="filter-input" style="width:90px;min-width:0" />
         </label>
         <button class="apply-btn small" id="brd-recalc">🔄 Recalculate</button>
-        <button class="apply-btn secondary small" id="brd-approve-selected" style="display:none">✅ Approve Visible (Select All)</button>
         <button class="apply-btn secondary small" id="brd-deselect-all" style="display:none">◻ Deselect All</button>
         <button class="apply-btn secondary small" id="brd-export" style="display:none">⬇ Export Template</button>
       </div>
