@@ -421,6 +421,17 @@ function brdCanEdit() {
       || (typeof canAccessModule === "function" && canAccessModule("branch-demand"));
 }
 function brdCanSeeAllBranches() { return brdCanEdit(); }
+// HO01 Buffer is a single NETWORK-WIDE value (branch_demand_settings, id=1)
+// that shifts every branch's Allocated number on every material at once —
+// unlike a per-row Allocated/Approved edit, which only ever affects that one
+// line. Deliberately narrower than brdCanEdit(): a team_leader or
+// branch_demand_officer can approve/export/hand-edit lines for their own
+// scope, but changing the shared buffer is an Admin-only setting. Everyone
+// else sees the current value read-only. See the #brd-buffer disabled/title
+// wiring in renderBranchDemand() and the change handler in wireBrdModule().
+function brdCanEditBuffer() {
+  return (typeof computeIsAdmin === "function" && computeIsAdmin());
+}
 // window.APP_USER.plant (see permissions.js "PLANT SCOPING" for the
 // app-wide source of truth) drives this. Returns the plant code this user
 // is locked to for Branch Demand, or null when they may see every branch —
@@ -1582,6 +1593,12 @@ function renderBranchDemand() {
   // the real saved values land — same pattern as the fileInput/amcInput
   // "recompute when data finishes loading" hooks further down this file.
   if (!brdDraftLoaded && !brdDraftLoading) brdLoadDraftsFromServer();
+  // BUGFIX-BRD-BUFFER-NEVER-LOADED: brdLoadBufferFromServer() existed (see
+  // its own comment above) but nothing ever actually called it, so every
+  // fresh page load silently fell back to the in-memory default (0) instead
+  // of the Admin-set shared value — same "load once, re-render when it
+  // lands" pattern as the drafts pull directly above.
+  if (!brdBufferLoaded && !brdBufferLoading) brdLoadBufferFromServer();
 
   const noInvEl  = document.getElementById("brd-no-inventory");
   const noAmcEl  = document.getElementById("brd-no-amc");
@@ -1717,7 +1734,18 @@ function renderBranchDemand() {
   }
 
   const bufferEl = document.getElementById("brd-buffer");
-  if (bufferEl) bufferEl.value = brdBufferMos;
+  if (bufferEl) {
+    bufferEl.value = brdBufferMos;
+    // HO01 Buffer is a shared, network-wide setting — only an Admin may
+    // change it (see brdCanEditBuffer()). Everyone else gets a read-only
+    // view of whatever value the Admin last set, same as any other
+    // Admin-only control elsewhere in the app.
+    const editableBuffer = brdCanEditBuffer();
+    bufferEl.disabled = !editableBuffer;
+    bufferEl.title = editableBuffer
+      ? "Network-wide buffer (months of downstream demand) reserved out of HO01 stock before allocating to branches."
+      : "Set by an Admin — applies to every branch and every user. Contact an Admin to change it.";
+  }
 
   const clsEl = document.getElementById("brd-program-class");
   if (clsEl) {
@@ -1996,7 +2024,24 @@ function brdRenderTables(lines, canEdit) {
     const heldBackBanner = unclassifiedHeldBack
       ? `<div class="alert-info" style="margin:0 0 0.5rem 0">${unclassifiedHeldBack} otherwise-eligible line${unclassifiedHeldBack === 1 ? "" : "s"} held back from this tab because Purch. Group / Purch. Org couldn't be classified (no Special Stock Type / Inventory Valuation Type found on any live row for the material) — check the Analysis tab for those materials, or approve/hand-edit a line to force it into view here.</div>`
       : "";
-    reqTableEl.innerHTML = heldBackBanner + (requestLines.length
+    // Request Form's own Select All / Deselect All — the shared toolbar
+    // "Approve Visible (Select All)" / "Deselect All" buttons already sweep
+    // both #brd-table and #brd-request-table (see wireBrdModule), but they
+    // sit above the tab strip and can scroll out of view on a long request
+    // list, and a user working the Request Form tab shouldn't have to
+    // remember that a toolbar built for Analysis also covers this tab.
+    // Scoped to ONLY the checkboxes inside #brd-request-table (not
+    // #brd-table) so it never touches lines a user isn't currently looking
+    // at. Only rendered for canEdit roles, same gate as the checkbox column
+    // itself. Handled via the existing body-level click delegation below
+    // (rows are rebuilt every render, so listeners can't be bound directly).
+    const selectBar = (canEdit && requestLines.length)
+      ? `<div class="brd-request-select-bar" style="margin:0 0 0.5rem 0; display:flex; gap:0.75rem;">
+           <button type="button" class="brd-request-select-all">☑ Select All Visible</button>
+           <button type="button" class="brd-request-deselect-all">☐ Deselect All Visible</button>
+         </div>`
+      : "";
+    reqTableEl.innerHTML = heldBackBanner + selectBar + (requestLines.length
       ? buildTable(requestLines, reqCols, (row) => row.status === "none" ? "row-critical" : (row.qcOnly ? "row-qc" : ""))
       : `<div class="alert-info" style="margin:0.5rem 0">Nothing to request yet on the current filters — switch to Analysis to see stock/AMC detail, or adjust the Branch / Stock Type filters above.</div>`);
   }
@@ -2149,7 +2194,16 @@ function brdExportTemplate() {
 
     const bufferEl = document.getElementById("brd-buffer");
     if (bufferEl) bufferEl.addEventListener("change", () => {
+      // Defense in depth: the input is already `disabled` for non-Admins
+      // (see renderBranchDemand()), but a disabled input still fires no
+      // change event in every browser reliably, and this also guards
+      // against a stale/leftover enabled input from a prior render. Only an
+      // Admin's edit is applied locally AND pushed to the shared setting —
+      // see brdCanEditBuffer(). Anyone else's edit is discarded and the
+      // field snaps back to the real shared value on the re-render.
+      if (!brdCanEditBuffer()) { renderBranchDemand(); return; }
       brdBufferMos = Math.max(0, parseFloat(bufferEl.value) || 0);
+      brdSaveBufferToServer(brdBufferMos); // BUGFIX-BRD-BUFFER-NEVER-SAVED: was never called — edit stayed local-only and never reached other users/sessions.
       renderBranchDemand();
     });
 
@@ -2235,6 +2289,32 @@ function brdExportTemplate() {
         document.querySelectorAll(".brd-tab-panel").forEach(p => {
           p.style.display = p.id === "brd-tab-" + tab ? "block" : "none";
         });
+        return;
+      }
+      // Request Form tab's own Select All / Deselect All (see the button
+      // markup in brdRenderHeavy() above) — scoped to #brd-request-table
+      // only, same brdDraft/save path as the shared toolbar buttons.
+      if (e.target.closest(".brd-request-select-all")) {
+        document.querySelectorAll("#brd-request-table .brd-approve-cb").forEach(cb => {
+          const key = brdDraftKey(cb.dataset.plant, cb.dataset.code);
+          const d = brdDraft.get(key) || {};
+          d.approved = true;
+          brdDraft.set(key, d);
+          brdSaveDraftRow(cb.dataset.plant, cb.dataset.code);
+        });
+        renderBranchDemand();
+        return;
+      }
+      if (e.target.closest(".brd-request-deselect-all")) {
+        document.querySelectorAll("#brd-request-table .brd-approve-cb").forEach(cb => {
+          const key = brdDraftKey(cb.dataset.plant, cb.dataset.code);
+          const d = brdDraft.get(key) || {};
+          d.approved = false;
+          brdDraft.set(key, d);
+          brdSaveDraftRow(cb.dataset.plant, cb.dataset.code);
+        });
+        renderBranchDemand();
+        return;
       }
     });
     document.body.addEventListener("change", (e) => {
