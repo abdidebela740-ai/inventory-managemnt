@@ -1577,7 +1577,7 @@ function brdStatusBadge(status) {
   return `<span class="brd-status-pill brd-status-${m.cls}">${m.label}</span>`;
 }
 
-function brdKpiRow(lines) {
+function brdKpiRow(lines, requestableCount) {
   const partialCount = lines.filter(l => l.status === "partial" || l.status === "none").length;
   const qcOnlyCount = new Set(lines.filter(l => l.qcOnly).map(l => l.code)).size;
   // REMOVED-BRD-KPIS: "No AMC", "Approved", "Hidden — No HO01 Stock", and
@@ -1595,6 +1595,12 @@ function brdKpiRow(lines) {
     ["Target MOS Band", `0–${TARGET_MOS}`, `< ${REQUEST_ELIGIBILITY_MOS} = Needed, ${REQUEST_ELIGIBILITY_MOS}–${TARGET_MOS} = to reach target`, "purple"],
     ["Short / Zero Lines", partialCount.toLocaleString(), "HO01 couldn't fully cover", "red"],
     ["HO01 Stock in Quality Inspection", qcOnlyCount.toLocaleString(), "materials, not yet releasable", "amber"],
+    // REPLACED-BRD-REQUEST-TAB-COUNT: this used to be a bare number badge
+    // next to the "Request Form" tab label with no explanation of what it
+    // counted. Now a proper KPI card with a name that says what it is —
+    // how many lines are currently on the Request Form tab, ready to
+    // check/export.
+    ["Requestable Lines", (requestableCount || 0).toLocaleString(), "currently on the Request Form tab", "green"],
   ]);
 }
 
@@ -1907,7 +1913,17 @@ function brdRenderHeavy(mySeq) {
 //    brdRenderHeavy() purely so that function's try/catch (above) covers
 //    both the allocation math AND the table-building/DOM-write in one go.
 function brdRenderTables(lines, canEdit) {
-  brdKpiRow(lines);
+  // REPLACED-BRD-REQUEST-TAB-COUNT: the "89" count badge that used to sit
+  // next to the Request Form tab label was removed per request — that
+  // number (how many lines are actually requestable right now) moved into
+  // its own KPI card instead ("Requestable Lines", see brdKpiRow below),
+  // with a clearer name than a bare number next to a tab ever gave it.
+  // Computed here (moved up from where it used to live, just above the
+  // Request Form table further down) so brdKpiRow can show it too.
+  const requestLines = lines.filter(l =>
+    (brdIsRequestEligible(l) && l.alloc > 0 && !!l.purchGroup && !!l.purchOrg) || l.approved || l.manual
+  );
+  brdKpiRow(lines, requestLines.length);
 
   const cols = [];
   if (canEdit) {
@@ -2000,18 +2016,12 @@ function brdRenderTables(lines, canEdit) {
   // as eligibility above: a line a supervisor already approved or
   // hand-edited stays visible even if unclassified, since backing it out
   // silently would be worse than showing it with a fix-me cell.
-  const requestLines = lines.filter(l =>
-    (brdIsRequestEligible(l) && l.alloc > 0 && !!l.purchGroup && !!l.purchOrg) || l.approved || l.manual
-  );
-  // Counted separately (not filtered silently) so a supervisor knows WHY a
-  // line they expected isn't here — same transparency principle as the
-  // Priority/Equity explanation elsewhere in this module. See the banner
-  // rendered just above the table below.
+  // requestLines / unclassifiedHeldBack now computed near the top of this
+  // function (see comment there) so brdKpiRow can show the requestable
+  // count too — nothing to recompute here.
   const unclassifiedHeldBack = lines.filter(l =>
     brdIsRequestEligible(l) && l.alloc > 0 && (!l.purchGroup || !l.purchOrg) && !l.approved && !l.manual
   ).length;
-  const reqCountEl = document.getElementById("brd-tab-count-request");
-  if (reqCountEl) reqCountEl.textContent = requestLines.length.toLocaleString();
 
   const reqCols = [];
   if (canEdit) {
