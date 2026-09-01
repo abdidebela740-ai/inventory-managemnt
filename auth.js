@@ -43,33 +43,6 @@ supabaseClient.auth.onAuthStateChange((event, session) => {
 });
 
 // ── 2) BUILD THE LANDING + LOGIN OVERLAY (injected, no HTML edits needed) ──
-// Kept in the same order as the sidebar groups (Dashboard → Inventory Ops →
-// Quality & Risk → Analytics → Self-Service) so the login page's feature
-// grid always maps 1:1 to what's actually in the app. If a nav-btn is added
-// to the sidebar in index.html, add its matching entry here too.
-const AUTH_FEATURES = [
-  // Dashboard
-  { icon: "📊", title: "Dashboard Overview",        desc: "Aggregated inventory metrics across every plant and material group, updated the moment new data lands." },
-  // Inventory Ops
-  { icon: "📦", title: "Open Outbound",              desc: "Track pending dispatches so nothing gets lost between confirmation and the truck leaving." },
-  { icon: "🚚", title: "Stock in Transit",           desc: "See exactly what's moving between plants and how long it's been on the road." },
-  { icon: "🏢", title: "Branch Comparison",          desc: "Compare stock positions across branches side by side to spot imbalances fast." },
-  // Quality & Risk
-  { icon: "⏰", title: "Expiry Watchlist",           desc: "Catch batches heading toward expiry early enough to actually do something about it." },
-  { icon: "🔬", title: "Quality Inspection",         desc: "Track material held in QC so nothing sits in limbo without anyone noticing." },
-  { icon: "🚫", title: "Blocked Stock",              desc: "Keep tabs on stock that's blocked from use or sale until it's cleared." },
-  { icon: "🔒", title: "Restricted Stock",           desc: "Monitor restricted-status inventory separately so it never gets shipped by mistake." },
-  { icon: "🧯", title: "Overstock & Expiry Risk",    desc: "Model redistribution plans that move at-risk stock before it becomes a write-off." },
-  { icon: "📉", title: "Stockout Risk",              desc: "Spot materials heading toward a stockout early enough to reorder or redistribute." },
-  // Analytics
-  { icon: "🗂️", title: "National Stock & MOS",       desc: "One row per material, network-wide — stock on hand and Months of Stock at a glance." },
-  { icon: "🎯", title: "Stock Concentration",        desc: "Identify where inventory is overly concentrated and where it's dangerously thin." },
-  // Self-Service
-  { icon: "🧾", title: "Request Analysis",           desc: "Review incoming stock requests and the reasoning behind each one." },
-  { icon: "🧭", title: "Branch Demand",              desc: "See what each branch actually needs, based on real demand rather than guesswork." },
-  { icon: "🧮", title: "Allocation Tool",             desc: "Run allocation scenarios to decide how available stock should be split across branches." },
-];
-
 function injectAuthOverlay() {
   const el = document.createElement("div");
   el.id = "auth-overlay";
@@ -81,7 +54,6 @@ function injectAuthOverlay() {
           <span>EPSS Stock-Multiple</span>
         </div>
         <div class="auth-nav-links">
-          <a href="#auth-features">Features</a>
           <a href="#auth-about">About</a>
         </div>
         <button type="button" class="auth-nav-cta" id="auth-nav-login-btn">Log In</button>
@@ -96,7 +68,6 @@ function injectAuthOverlay() {
             <p>Track stock across every plant, catch expiry risk before it becomes loss, and always know who's responsible for what — all from one dashboard.</p>
             <div class="auth-hero-actions">
               <button type="button" class="auth-btn-primary" id="auth-hero-signin-btn">→ Sign In</button>
-              <a href="#auth-features" class="auth-btn-secondary">ⓘ Learn More</a>
             </div>
             <div class="auth-hero-pills">
               <span class="auth-pill">⏰ Expiry Tracking</span>
@@ -113,10 +84,10 @@ function injectAuthOverlay() {
 
             <form id="auth-form">
               <label class="auth-field-label" for="auth-email">Email Address</label>
-              <input type="email" id="auth-email" placeholder="you@epss.gov.et" autocomplete="username" required />
+              <input type="email" id="auth-email" placeholder="you@epss.gov.et" autocomplete="off" required />
 
               <label class="auth-field-label" for="auth-password">Password</label>
-              <input type="password" id="auth-password" placeholder="••••••••" autocomplete="current-password" required />
+              <input type="password" id="auth-password" placeholder="••••••••" autocomplete="off" required />
 
               <label class="auth-remember-row">
                 <input type="checkbox" id="auth-remember" checked />
@@ -152,25 +123,7 @@ function injectAuthOverlay() {
         </div>
       </section>
 
-      <section id="auth-features">
-        <div class="auth-section-inner">
-          <div class="auth-section-head">
-            <span class="auth-hero-eyebrow">What's inside</span>
-            <h2>Everything your team needs to stay ahead of stock-outs and expiry</h2>
-          </div>
-          <div class="auth-feature-grid">
-            ${AUTH_FEATURES.map(f => `
-              <div class="auth-feature-card">
-                <div class="auth-feature-icon">${f.icon}</div>
-                <div class="auth-feature-title">${f.title}</div>
-                <div class="auth-feature-desc">${f.desc}</div>
-              </div>
-            `).join("")}
-          </div>
-        </div>
-      </section>
 
-      <section id="auth-about">
         <div class="auth-section-inner auth-about-inner">
           <div>
             <span class="auth-hero-eyebrow">About</span>
@@ -308,24 +261,9 @@ function injectAuthOverlay() {
     #auth-loading { display: none; color: var(--muted, #7a9ab8); font-size: 0.82rem; margin-top: 1rem; text-align: center; }
     #auth-loading.show { display: block; }
 
-    /* ── Features section ── */
-    #auth-features, #auth-about { padding: 3.2rem 1.5rem; }
-    #auth-features { background: var(--surface, #0e1420); border-top: 1px solid var(--border, #1f2e44); }
-    .auth-section-inner { max-width: 1180px; margin: 0 auto; }
-    .auth-section-head { max-width: 60ch; margin-bottom: 2rem; }
-    .auth-section-head h2 { font-size: 1.5rem; margin: 0.4rem 0 0; font-family: 'Plus Jakarta Sans', sans-serif; }
-    .auth-feature-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
-    .auth-feature-card {
-      background: var(--surface2, #141c2b); border: 1px solid var(--border, #1f2e44);
-      border-radius: var(--radius-md, 10px); padding: 1.1rem;
-      transition: border-color 0.15s, transform 0.15s;
-    }
-    .auth-feature-card:hover { border-color: var(--blue, #3d94e0); transform: translateY(-2px); }
-    .auth-feature-icon { font-size: 1.4rem; margin-bottom: 0.5rem; }
-    .auth-feature-title { font-weight: 700; font-size: 0.88rem; margin-bottom: 0.35rem; }
-    .auth-feature-desc { font-size: 0.76rem; color: var(--muted, #7a9ab8); line-height: 1.45; }
-
     /* ── About ── */
+    #auth-about { padding: 3.2rem 1.5rem; background: var(--surface, #0e1420); border-top: 1px solid var(--border, #1f2e44); }
+    .auth-section-inner { max-width: 1180px; margin: 0 auto; }
     .auth-about-inner {
       display: flex; align-items: center; justify-content: space-between; gap: 2rem; flex-wrap: wrap;
     }
@@ -340,11 +278,9 @@ function injectAuthOverlay() {
     @media (max-width: 900px) {
       .auth-hero-grid { grid-template-columns: 1fr; }
       .auth-hero-text h1 { font-size: 2rem; }
-      .auth-feature-grid { grid-template-columns: repeat(2, 1fr); }
     }
     @media (max-width: 640px) {
       .auth-nav-links { display: none; }
-      .auth-feature-grid { grid-template-columns: 1fr; }
       .auth-about-inner { flex-direction: column; align-items: flex-start; }
     }
   `;
@@ -369,8 +305,11 @@ function injectAuthOverlay() {
     });
   });
 
-  // Forgot password
-  document.getElementById("auth-forgot-btn").addEventListener("click", async () => {
+  // Forgot password — instead of emailing a Supabase reset link, send the
+  // user to WhatsApp with a pre-filled message containing their email, so
+  // an admin can verify them and issue a new password manually.
+  const SUPPORT_WHATSAPP_NUMBER = "251951112131"; // +251 95 111 2131, no leading 0/+ for wa.me links
+  document.getElementById("auth-forgot-btn").addEventListener("click", () => {
     const errEl = document.getElementById("auth-error");
     const email = document.getElementById("auth-email").value.trim();
     if (!email) {
@@ -378,18 +317,11 @@ function injectAuthOverlay() {
       errEl.textContent = "Enter your email above first, then click \"Forgot Your Password?\"";
       return;
     }
+    const message = `Hi, I forgot my password for EPSS Stock-Multiple. My login email is: ${email}`;
+    const waUrl = `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
     errEl.style.color = "var(--muted, #7a9ab8)";
-    errEl.textContent = "Sending reset link…";
-    const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
-      redirectTo: window.location.origin + window.location.pathname,
-    });
-    if (error) {
-      errEl.style.color = "var(--red, #e04545)";
-      errEl.textContent = error.message;
-      return;
-    }
-    errEl.style.color = "var(--green, #30a85f)";
-    errEl.textContent = "Reset link sent — check your inbox.";
+    errEl.textContent = "Opening WhatsApp…";
+    window.open(waUrl, "_blank", "noopener");
   });
 
   // Submit new password (shown after the user clicks the emailed reset link)
