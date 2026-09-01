@@ -473,6 +473,22 @@ function brdPrimarySource(mappedCode, preferredStockType) {
   const candidates = brdAllCandidateSources(mappedCode);
   if (!candidates.length) return { sourceCode: mappedCode, factor: 1, allSourceCodes: [mappedCode], stockTypeMatched: false };
 
+  // UNAMBIGUOUS-SINGLE-CANDIDATE: when the mapping file only has ONE row
+  // feeding this mappedCode at all, there is no alternate source code to
+  // have picked instead — "stockTypeMatched" exists to flag cases where we
+  // guessed between several candidates by falling back to most-stock-wins
+  // instead of confirming via type. With only one candidate, there was
+  // never a guess to make, so it's always treated as matched regardless of
+  // whether the branch's own inventory row could be classified. Without
+  // this, a material with a perfectly clean 1:1 mapping still shows
+  // "⚠ check type" purely because HO01 had no stock record to read a
+  // Special Stock Type off of (or it disagreed with the mapping file's tag)
+  // — a false positive, since there's nothing to double-check against.
+  if (candidates.length === 1) {
+    const only = candidates[0];
+    return { sourceCode: only.srcCode, factor: only.factor, allSourceCodes: [only.srcCode], stockTypeMatched: true };
+  }
+
   const wantStype = preferredStockType === "Q" ? "Q" : (preferredStockType === "R" ? "RDF" : null);
   let pool = candidates;
   let stockTypeMatched = false;
@@ -1709,6 +1725,7 @@ function brdRenderTables(lines, canEdit) {
     { key: "_notes", label: "Notes", raw: true, cellClass: "brd-notes-cell",
       fmt: (v, r) => {
         const bits = [];
+        if (r.manual) bits.push(`<span class="brd-status-pill brd-status-purple" title="This Allocated quantity was hand-typed by a supervisor, overriding the system-computed value — it will NOT change on Recalculate.">✍️ Manually overridden</span>`);
         if (r.qcOnly) bits.push(`<span class="brd-status-pill brd-status-amber" title="HO01 stock (${fmtQty(r.qcHo)}) is still in Quality Inspection — not yet releasable">🧪 ${fmtQty(r.qcHo)} Quality Inspection</span>`);
         if (r.outboundQty > 0) bits.push(`<span class="brd-status-pill brd-status-blue" title="${fmtQty(r.outboundQty)} of this material is already on an open (not-yet-issued) pending dispatch from HO01 to this branch — netted out of Need below">📦 ${fmtQty(r.outboundQty)} pending dispatch (HO01)</span>`);
         if (r.isPartial) {
