@@ -196,8 +196,21 @@ function canManageUsersFully() {
 // the plant-scoping functions above — notably "branch-demand" (Branch
 // Demand) is deliberately NOT in this list, since branch users placing
 // their own demand requests is the whole point of that page.
+// NOTE: "pending-dispatch" (Open Outbound) used to be listed here, which
+// hard-denied the whole page to every branch-locked user (canAccessModule()
+// below) and disabled/force-unchecked its checkbox in Advanced User
+// Management (see user-management.js applyPlantGatingToPermCheckboxes()) —
+// so a branch could never even be granted it. That's no longer right: a
+// branch should be able to see their own open outbound. It's been removed
+// from this list so Admin/Director can grant it per-branch-user like any
+// other module; the page itself (pending-dispatch.js) then narrows what a
+// branch-locked user sees within it — row data via canAccessDispatchRow()/
+// canAccessPlant() (already scoped to their own plant), and tab bar via
+// applyTabVisibilityForRole() (only "All Pending Items" and "Branch ×
+// Storage Location" — the two views that make sense for a single branch;
+// the cross-branch comparison tabs stay Head-Office-only).
 const HEAD_OFFICE_ONLY_MODULE_KEYS = [
-  "pending-dispatch", "branch", "expiry-risk", "stockout-risk",
+  "branch", "expiry-risk", "stockout-risk",
   "quick-lookup", "who-responsible", "shelf-life-lookup", "new-received-stock",
   "natl-table", "concentration", "request-analysis", "allocation-tool",
   "person-assigned",
