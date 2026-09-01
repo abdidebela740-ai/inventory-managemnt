@@ -2015,7 +2015,16 @@ function brdRenderTables(lines, canEdit) {
 
   const reqCols = [];
   if (canEdit) {
-    reqCols.push({ key: "_sel", label: "", raw: true,
+    // REPLACED-BRD-REQUEST-SELECT-ALL: the "Select All Visible" / "Deselect
+    // All Visible" text-button bar above the table was replaced with a
+    // small checkbox in the header of this same column — same footprint as
+    // every row's own checkbox, toggling all of them at once (delegated
+    // "change" handler below matches header <input>s tagged
+    // .brd-request-select-all-cb). Reflects current state: checked only
+    // when every visible row is already approved.
+    const allVisibleChecked = requestLines.length > 0 && requestLines.every(l => l.approved);
+    reqCols.push({ key: "_sel", label: "", raw: true, headerRaw: true,
+      headerHtml: `<input type="checkbox" class="brd-approve-cb brd-request-select-all-cb" title="Select/Deselect all visible" ${allVisibleChecked ? "checked" : ""} />`,
       fmt: (v, r) => `<input type="checkbox" class="brd-approve-cb" data-plant="${escHtml(r.plant)}" data-code="${escHtml(r.code)}" ${r.approved ? "checked" : ""} />` });
   }
   reqCols.push(
@@ -2098,24 +2107,7 @@ function brdRenderTables(lines, canEdit) {
     const heldBackBanner = unclassifiedHeldBack
       ? `<div class="alert-info" style="margin:0 0 0.5rem 0">${unclassifiedHeldBack} otherwise-eligible line${unclassifiedHeldBack === 1 ? "" : "s"} held back from this tab because Purch. Group / Purch. Org couldn't be classified (no Special Stock Type / Inventory Valuation Type found on any live row for the material) — check the Analysis tab for those materials, or approve/hand-edit a line to force it into view here.</div>`
       : "";
-    // Request Form's own Select All / Deselect All — the shared toolbar
-    // "Approve Visible (Select All)" / "Deselect All" buttons already sweep
-    // both #brd-table and #brd-request-table (see wireBrdModule), but they
-    // sit above the tab strip and can scroll out of view on a long request
-    // list, and a user working the Request Form tab shouldn't have to
-    // remember that a toolbar built for Analysis also covers this tab.
-    // Scoped to ONLY the checkboxes inside #brd-request-table (not
-    // #brd-table) so it never touches lines a user isn't currently looking
-    // at. Only rendered for canEdit roles, same gate as the checkbox column
-    // itself. Handled via the existing body-level click delegation below
-    // (rows are rebuilt every render, so listeners can't be bound directly).
-    const selectBar = (canEdit && requestLines.length)
-      ? `<div class="brd-request-select-bar" style="margin:0 0 0.5rem 0; display:flex; gap:0.75rem;">
-           <button type="button" class="brd-request-select-all">☑ Select All Visible</button>
-           <button type="button" class="brd-request-deselect-all">☐ Deselect All Visible</button>
-         </div>`
-      : "";
-    reqTableEl.innerHTML = heldBackBanner + selectBar + (requestLines.length
+    reqTableEl.innerHTML = heldBackBanner + (requestLines.length
       ? buildTable(requestLines, reqCols, (row) => row.status === "none" ? "row-critical" : (row.qcOnly ? "row-qc" : ""))
       : `<div class="alert-info" style="margin:0.5rem 0">Nothing to request yet on the current filters — switch to Analysis to see stock/AMC detail, or adjust the Branch / Stock Type filters above.</div>`);
   }
@@ -2311,13 +2303,13 @@ function brdExportTemplate() {
     // REMOVED-BRD-APPROVE-VISIBLE: the shared toolbar "Approve Visible
     // (Select All)" button (#brd-approve-selected) was removed per request.
     // Bulk-approve is still available scoped per-tab via each tab's own
-    // "Select All Visible" control (see selectBar in brdRenderTables /
-    // request-form rendering) and per-row via the individual checkboxes.
+    // per-row checkboxes, plus the Request Form tab's header select-all
+    // checkbox (see the "_sel" column / .brd-request-select-all-cb below).
 
     // REMOVED-BRD-DESELECT-ALL: the shared toolbar "Deselect All" button
     // (#brd-deselect-all) was removed per request. Bulk-deselect is still
-    // available scoped per-tab via each tab's own "Deselect All Visible"
-    // control and per-row via the individual checkboxes.
+    // available per-row, plus via the Request Form tab's header select-all
+    // checkbox (unchecking it deselects every visible row).
 
     const exportBtn = document.getElementById("brd-export");
     if (exportBtn) exportBtn.addEventListener("click", brdExportTemplate);
@@ -2343,33 +2335,25 @@ function brdExportTemplate() {
         });
         return;
       }
-      // Request Form tab's own Select All / Deselect All (see the button
-      // markup in brdRenderHeavy() above) — scoped to #brd-request-table
-      // only, same brdDraft/save path as the shared toolbar buttons.
-      if (e.target.closest(".brd-request-select-all")) {
-        document.querySelectorAll("#brd-request-table .brd-approve-cb").forEach(cb => {
-          const key = brdDraftKey(cb.dataset.plant, cb.dataset.code);
-          const d = brdDraft.get(key) || {};
-          d.approved = true;
-          brdDraft.set(key, d);
-          brdSaveDraftRow(cb.dataset.plant, cb.dataset.code);
-        });
-        renderBranchDemand();
-        return;
-      }
-      if (e.target.closest(".brd-request-deselect-all")) {
-        document.querySelectorAll("#brd-request-table .brd-approve-cb").forEach(cb => {
-          const key = brdDraftKey(cb.dataset.plant, cb.dataset.code);
-          const d = brdDraft.get(key) || {};
-          d.approved = false;
-          brdDraft.set(key, d);
-          brdSaveDraftRow(cb.dataset.plant, cb.dataset.code);
-        });
-        renderBranchDemand();
-        return;
-      }
     });
     document.body.addEventListener("change", (e) => {
+      // Request Form tab's header "select all" checkbox (replaces the old
+      // "Select All Visible" / "Deselect All Visible" text buttons) —
+      // scoped to #brd-request-table only, same brdDraft/save path as
+      // before. Its own checked state (true = select all, false = deselect
+      // all) drives every visible row's checkbox.
+      if (e.target.classList && e.target.classList.contains("brd-request-select-all-cb")) {
+        const wantChecked = e.target.checked;
+        document.querySelectorAll("#brd-request-table .brd-approve-cb").forEach(cb => {
+          const key = brdDraftKey(cb.dataset.plant, cb.dataset.code);
+          const d = brdDraft.get(key) || {};
+          d.approved = wantChecked;
+          brdDraft.set(key, d);
+          brdSaveDraftRow(cb.dataset.plant, cb.dataset.code);
+        });
+        renderBranchDemand();
+        return;
+      }
       // Material Type filter — checkbox lives inside the shared .ms-dropdown
       // control built by buildMultiSelect() (brdRenderMatTypeFilterBar
       // above); sync brdMatTypeFilter from whatever's currently checked and
