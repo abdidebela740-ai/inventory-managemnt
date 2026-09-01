@@ -2722,9 +2722,23 @@ function loadTransitFile(file) {
  *     _mappedMaterial  — target material code (or original if no mapping)
  *     _mappedDesc      — target description   (or original)
  *     _mappingFactor   — conversion factor     (1.0 if no mapping)
- *     _isMapped        — boolean: true = this row has a mapping entry
+ *     _isMapped        — boolean: true = this row has a mapping entry, OR its
+ *                         own code is already someone else's canonical Target
+ *                         (see TARGET-AS-CANONICAL below)
+ *     _selfMapped      — boolean: true = _isMapped is true only because of
+ *                         TARGET-AS-CANONICAL (no literal mapping-file row for
+ *                         this code); absent/false for an explicit entry
  *     _origMaterial    — always the original Material code (for traceability)
  *     _origDesc        — always the original Material Description
+ *
+ *   TARGET-AS-CANONICAL: a Source→Target mapping is inherently 1:1, so once a
+ *   code X is used as someone's Target, X is by definition already in its
+ *   standardized/canonical form. The mapping file therefore does NOT need a
+ *   redundant identity row for X (Source=X, Target=X) — a rawDf row whose own
+ *   code has no literal mapping entry, but IS someone else's Target, is
+ *   treated as already mapped (factor 1.0, target = its own code) rather than
+ *   flagged unmapped. This keeps the Unmapped Materials report free of
+ *   materials that are already canonical.
  *
  *   Converted quantity / value fields on the row object are also stamped:
  *     _cvUnrestricted, _cvTransit, _cvQC, _cvBlocked
@@ -2757,6 +2771,15 @@ function rowStockTypeForMapping(row) {
 function applyMaterialMapping() {
   if (!rawDf.length) return;
 
+  // TARGET-AS-CANONICAL: pre-collect every code used as a Target anywhere in
+  // the mapping file. See applyMaterialMapping() doc comment above.
+  const targetCodeSet = new Set();
+  mappingTable.forEach(stypeMap => {
+    stypeMap.forEach(entry => {
+      if (entry.targetCode) targetCodeSet.add(String(entry.targetCode).trim().toUpperCase());
+    });
+  });
+
   let mappedCount = 0;
   let totalValue  = 0;
   let mappedValue = 0;
@@ -2781,6 +2804,35 @@ function applyMaterialMapping() {
     totalValue += row["Total Value"] || 0;
 
     if (!entry) {
+      // TARGET-AS-CANONICAL: no literal mapping-file row for this code, but
+      // it's already someone else's Target elsewhere in the file — treat as
+      // mapped (self-mapped to itself, factor 1) rather than unmapped.
+      const isSelfMapped = targetCodeSet.has(srcCode);
+      if (isSelfMapped) {
+        mappedCount++;
+        mappedValue += row["Total Value"] || 0;
+        return {
+          ...row,
+          _mappedMaterial: row["Material"],
+          _mappedDesc:     row["Material Description"],
+          _mappingFactor:  1.0,
+          _isMapped:       true,
+          _selfMapped:     true,
+          _origMaterial:   row["Material"],
+          _origDesc:       row["Material Description"],
+          // Converted = original (factor 1, nothing to convert)
+          _cvUnrestricted:    row["Unrestricted Stock"],
+          _cvTransit:         row["Stock in Transit"],
+          _cvQC:              row["Stock in Quality Inspection"],
+          _cvBlocked:         row["Blocked Stock"],
+          _cvValUnrestricted: row["Value of Unrestricted Stock"],
+          _cvValTransit:      row["Value of Stock in Transit"],
+          _cvValQC:           row["Value of Stock in Quality Inspection"],
+          _cvTotalQty:        row["Total Qty"],
+          _cvTotalValue:      row["Total Value"],
+        };
+      }
+
       // No mapping → keep original, factor = 1
       return {
         ...row,
