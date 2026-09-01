@@ -97,10 +97,19 @@
 //   REQUEST ELIGIBILITY (Request Form tab only — Analysis still shows every
 //   branch × material line regardless): a branch may actually submit a
 //   request for a line if and only if
-//     (a) its current months of stock < REQUEST_ELIGIBILITY_MOS (2), AND
+//     (a) its current months of stock < TARGET_MOS (4), AND
 //     (b) HO01 actually has stock for it (available_HO > 0).
-//   The fill TARGET stays TARGET_MOS (4) either way — eligibility only
-//   gates *whether* a line is offered for request, not how much is
+//   UPDATED — was MOS < REQUEST_ELIGIBILITY_MOS (2) only (Critical/High
+//   tiers). The Request Form tab now offers the Medium tier too (2 ≤ MOS <
+//   4, i.e. a top-up toward the fill target, not a shortage), alongside
+//   Critical/High. Every requestable line is labeled with WHY it's there —
+//   "Needed" for MOS < REQUEST_ELIGIBILITY_MOS (a genuine shortage) vs "To
+//   reach target" for the Medium-tier top-up — see brdRequestUrgencyBadge().
+//   Low/Overstocked (MOS >= TARGET_MOS) still never appears: need is
+//   hard-clamped to 0 for that tier (see rule 4 above), so alloc is already
+//   0 and it's excluded automatically, not by an eligibility check.
+//   The fill TARGET stays TARGET_MOS (4) regardless of tier — eligibility
+//   only gates *whether* a line is offered for request, not how much is
 //   recommended once it is. Previously-approved/manually-edited lines stay
 //   visible even if they no longer meet the threshold, so nothing already
 //   in progress silently disappears. See brdIsRequestEligible().
@@ -921,10 +930,41 @@ function brdFmtExpiry(d) {
 }
 
 // ── REQUEST ELIGIBILITY (see file header) ───────────────────────────────────
+// UPDATED (was: MOS < REQUEST_ELIGIBILITY_MOS(2) only, i.e. Critical/High
+// tiers only): the Request Form tab now offers EVERY branch with an unmet
+// need up to the fill target, i.e. Critical + High + Medium tiers
+// (MOS < TARGET_MOS(4)) — not just Critical/High. Low/Overstocked
+// (MOS >= TARGET_MOS) is still excluded, but that's automatic: need is
+// hard-clamped to 0 for that tier (see brdComputeMaterialAllocation), so
+// alloc is already 0 and requestLines' own `l.alloc > 0` check filters it
+// out without this function needing to know about it. See
+// brdRequestUrgencyLabel() for how Critical/High vs Medium is now
+// distinguished ON this tab instead of by exclusion.
 function brdIsRequestEligible(line) {
   return !!line.hasAmc && line.mosNow !== null && line.mosNow !== undefined
-      && line.mosNow < REQUEST_ELIGIBILITY_MOS
+      && line.mosNow < TARGET_MOS
       && (line.availableHo || 0) > 0;
+}
+
+// Label shown on the Request Form tab distinguishing WHY a line is being
+// requested — the (a) branch is genuinely short of stock (< REQUEST_
+// ELIGIBILITY_MOS, i.e. Critical/High tier) case reads "Needed"; the (b)
+// branch already has 2–4 months on hand and this quantity is only topping
+// it up to the TARGET_MOS fill target (Medium tier) case deliberately does
+// NOT say "Needed" — it says "To reach target" — so a supervisor doesn't
+// mistake a top-up line for an urgent shortage line at a glance.
+function brdRequestUrgencyLabel(line) {
+  return (line.mosNow !== null && line.mosNow !== undefined && line.mosNow < REQUEST_ELIGIBILITY_MOS)
+    ? "Needed"
+    : "To reach target";
+}
+function brdRequestUrgencyBadge(line) {
+  const urgent = line.mosNow !== null && line.mosNow !== undefined && line.mosNow < REQUEST_ELIGIBILITY_MOS;
+  const label = brdRequestUrgencyLabel(line);
+  const title = urgent
+    ? `This branch is below ${REQUEST_ELIGIBILITY_MOS} months of stock — this quantity is needed now.`
+    : `This branch already has ${REQUEST_ELIGIBILITY_MOS}–${TARGET_MOS} months of stock — this quantity only tops it up to the ${TARGET_MOS}-month target, it is not an urgent shortage.`;
+  return `<span class="brd-status-pill ${urgent ? "brd-status-red" : "brd-status-blue"}" title="${title}">${urgent ? "🔴" : "🔵"} ${label}</span>`;
 }
 
 // ── ROUNDING: largest-remainder method ──────────────────────────────────────
@@ -1527,9 +1567,11 @@ function brdKpiRow(lines) {
 
   setKpis("brd-kpis", [
     ["Lines Shown", lines.length.toLocaleString(), "material × branch pairs", "blue"],
-    // Explicit Target MOS band, per file header: floor at REQUEST_ELIGIBILITY_MOS
-    // (a branch may request below this), ceiling at TARGET_MOS (fill target).
-    ["Target MOS Band", `${REQUEST_ELIGIBILITY_MOS}–${TARGET_MOS}`, `request below ${REQUEST_ELIGIBILITY_MOS}, fill to ${TARGET_MOS}`, "purple"],
+    // Explicit Target MOS band, per file header: below REQUEST_ELIGIBILITY_MOS
+    // is a "Needed" (urgent shortage) request, REQUEST_ELIGIBILITY_MOS up to
+    // TARGET_MOS is a "To reach target" (top-up) request — both are now
+    // requestable, just labeled differently (see brdRequestUrgencyBadge()).
+    ["Target MOS Band", `0–${TARGET_MOS}`, `< ${REQUEST_ELIGIBILITY_MOS} = Needed, ${REQUEST_ELIGIBILITY_MOS}–${TARGET_MOS} = to reach target`, "purple"],
     ["Short / Zero Lines", partialCount.toLocaleString(), "HO01 couldn't fully cover", "red"],
     ["HO01 Stock in Quality Inspection", qcOnlyCount.toLocaleString(), "materials, not yet releasable", "amber"],
     ["No AMC", noAmcCount.toLocaleString(), "manual entry needed", "muted"],
@@ -1919,10 +1961,14 @@ function brdRenderTables(lines, canEdit) {
   // gets requested, editable in place exactly like Analysis's Allocated
   // column (same class, same delegated listener — see wireBrdModule).
   // Request Form only offers lines that meet REQUEST ELIGIBILITY (see file
-  // header): branch MOS < REQUEST_ELIGIBILITY_MOS AND HO01 actually has
-  // stock to give. Lines a supervisor already approved or hand-edited stay
-  // visible even if they've since fallen outside that window, so nothing
-  // in progress silently vanishes off the tab.
+  // header): branch MOS < TARGET_MOS (both the urgent Critical/High tiers
+  // AND the Medium top-up tier — see brdIsRequestEligible()) AND HO01
+  // actually has stock to give. Lines a supervisor already approved or
+  // hand-edited stay visible even if they've since fallen outside that
+  // window, so nothing in progress silently vanishes off the tab. The
+  // reqReason column (see reqCols below) distinguishes an urgent Needed
+  // line from a Medium-tier top-up line within this same list, rather than
+  // excluding the top-up lines from the tab the way it used to.
   //
   // FIX-BRD-NO-BLANK-REQUEST-ROWS: a line whose Purch. Group / Purch. Org
   // couldn't be resolved (brdMaterialScope came back unclassified — no
@@ -1975,6 +2021,14 @@ function brdRenderTables(lines, canEdit) {
       fmt: v => `<span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; max-width:220px;" title="${escHtml(String(v || ""))}">${escHtml(String(v || ""))}</span>` },
     { key: "plant", label: "Branch" },
     { key: "priorityTier", label: "Priority", raw: true, fmt: (v, r) => brdPriorityBadge(v) },
+    // Distinguishes an urgent shortage line (MOS < REQUEST_ELIGIBILITY_MOS
+    // — "Needed") from a Medium-tier top-up line (2 ≤ MOS < TARGET_MOS —
+    // "To reach target") now that both appear on this tab together (see
+    // brdIsRequestEligible() / brdRequestUrgencyBadge() above). Deliberately
+    // its own column rather than folded into Priority, since Priority is
+    // about fill ORDER (see file header PRIORITY TIERS) while this is about
+    // whether the request is urgent at all.
+    { key: "_reqReason", label: "Why", raw: true, fmt: (v, r) => brdRequestUrgencyBadge(r) },
     // Shown (and edited) in the REAL SOURCE PACK SIZE (reqSourceQty), not
     // raw mapped units — this now matches the Material Code column above it
     // and what actually lands in the SAP_Paste/Working export, instead of
