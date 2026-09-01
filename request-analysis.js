@@ -171,6 +171,13 @@
             return;
           }
           const get = (row, name) => row[colMap[name.toLowerCase()]];
+          // Optional columns (not in REQUIRED_COLS) — older exports won't have
+          // these yet, so look them up defensively instead of via get()/colMap,
+          // which assumes the column exists.
+          const getOpt = (row, name) => {
+            const key = colMap[name.toLowerCase()];
+            return key ? row[key] : "";
+          };
 
           const parsed = trimmed
             .map(row => ({
@@ -184,6 +191,10 @@
               createdBy: String(get(row, "Created By") ?? "").trim(),
               plant:     String(get(row, "Plant") ?? "").trim().toUpperCase(),
               location:  String(get(row, "Location") ?? "").trim().toUpperCase(),
+              // Optional — present on newer exports. Used only to cross-check
+              // against each material's Program Classification; see
+              // purchOrgFamily()/classFamily() below. Blank when absent.
+              purchasingOrg: String(getOpt(row, "Purchasing Org.") ?? "").trim().toUpperCase(),
             }))
             .filter(r => r.material);
 
@@ -503,6 +514,30 @@
     return (typeof buildCodeProgramClassMap === "function") ? buildCodeProgramClassMap() : new Map();
   }
 
+  // PURCH-ORG-CHECK: the request file's "Purchasing Org." column tells us
+  // which of the two funding streams a line was sourced under — same
+  // meaning as everywhere else in the app (Branch Demand, etc.): RD01 only
+  // ever sources RDF materials, HP02 only ever sources Program materials.
+  // We don't display the raw Classification value anymore (see PURCH-ORG-
+  // CHECK column below), but we still need the underlying map internally to
+  // catch requests where the typed Purchasing Org. doesn't match the family
+  // its resolved material actually belongs to (e.g. an RDF-only item
+  // requested under HP02) — that's a real data-quality problem worth
+  // flagging even though we're not showing the classification text itself.
+  const PURCH_ORG_FAMILY = { RD01: "RDF", HP02: "PROGRAM" };
+  function purchOrgFamily(purchasingOrg) {
+    return PURCH_ORG_FAMILY[String(purchasingOrg || "").trim().toUpperCase()] || "";
+  }
+  // Program Classification value -> broad family. "RDF-CDSS"/"RDF-NON-CDSS"
+  // collapse to "RDF"; "Program-Reportable"/"Program-Non-Reportable" collapse
+  // to "PROGRAM". Anything else (blank/unrecognized) is inconclusive.
+  function classFamily(programClass) {
+    const v = String(programClass || "").trim().toUpperCase();
+    if (v.startsWith("RDF")) return "RDF";
+    if (v.startsWith("PROGRAM")) return "PROGRAM";
+    return "";
+  }
+
   // ── CORE ANALYSIS ──────────────────────────────────────────────────────────
   function buildRequestAnalysis() {
     const hub    = (typeof HUB_PLANT === "function" || typeof HUB_PLANT !== "undefined") ? HUB_PLANT : "HO01";
@@ -543,6 +578,15 @@
       const programClass = canonical ? (clsMap.get(canonical) || "") : "";
       const materialType = canonical ? (matTypeMap.get(canonical) || "") : "";
       const materialGroup = canonical ? (matGroupMap.get(canonical) || "") : "";
+
+      // PURCH-ORG-CHECK: does the request line's own Purchasing Org. match
+      // the funding family (RDF vs Program) its resolved material actually
+      // belongs to? Inconclusive (not flagged) when either side is unknown —
+      // blank/unrecognized Purchasing Org., or the material has no
+      // Classification on file.
+      const purchOrgExpectedFamily = purchOrgFamily(r.purchasingOrg);
+      const purchOrgActualFamily = classFamily(programClass);
+      const purchOrgMismatch = !!(purchOrgExpectedFamily && purchOrgActualFamily && purchOrgExpectedFamily !== purchOrgActualFamily);
 
       // Storage Location cold/non-cold check: does the temperature zone of
       // the requesting plant's own Location (r.location, e.g. DEC1 = cold
@@ -594,6 +638,7 @@
       return {
         ...r,
         canonical, desc, status, person, programClass, materialType, materialGroup,
+        purchOrgExpectedFamily, purchOrgActualFamily, purchOrgMismatch,
         liveHo01, mappedDesc, qcHo01, liveReqPlant, sohMismatch,
         locationMismatch, storageCheckStatus: storageCheck.status,
         storageCheckHo01Locations: storageCheck.ho01Locations || "",
@@ -1115,7 +1160,16 @@
           : `<span class="col-mat-code">${escHtml(v)}</span>`,
         raw: true, cellClass: "col-mat-code-wrap" },
       { key: "desc", label: "Description", cellClass: "col-mat-desc-wrap" },
-      { key: "programClass", label: "Classification", fmt: v => (typeof programClassBadge === "function" ? programClassBadge(v) : (v || "—")), raw: true },
+      { key: "purchasingOrg", label: "Purchasing Org.",
+        fmt: (v, r) => {
+          if (!v) return "—";
+          if (r.purchOrgMismatch) {
+            const title = `Classification on file is ${r.programClass || "unclassified"} (${r.purchOrgActualFamily} family), but Purchasing Org. ${escHtml(v)} expects ${r.purchOrgExpectedFamily}`;
+            return `<span style="display:inline-block;padding:0.15rem 0.55rem;border-radius:999px;font-size:0.72rem;font-weight:700;white-space:nowrap;background:rgba(220,38,38,0.14);color:var(--red)" title="${title}">⚠ ${escHtml(v)} — class mismatch</span>`;
+          }
+          return escHtml(v);
+        },
+        raw: true },
       { key: "reqQty", label: "Requested Qty", fmt: v => fmtQty(v), cellClass: "col-qty" },
       { key: "reqSoh", label: "SOH (per Request File)", fmt: v => fmtQty(v), cellClass: "col-qty" },
       { key: "liveHo01", label: "SOH (HO01)",
@@ -1150,7 +1204,7 @@
     );
     wireTableExport("reqan-export-all", filteredRows.map(r => ({
       prNum: r.prNum, poste: r.poste, createdBy: r.createdBy, material: r.material, canonical: r.canonical, desc: r.desc,
-      programClass: (typeof PROGRAM_CLASS_LABELS !== "undefined" && PROGRAM_CLASS_LABELS[r.programClass]) || r.programClass || "",
+      purchasingOrg: r.purchasingOrg || "", purchOrgMismatch: r.purchOrgMismatch ? "Yes" : "No",
       reqQty: r.reqQty, reqSoh: r.reqSoh, liveHo01: r.liveHo01, liveReqPlant: r.liveReqPlant,
       location: r.location, locationMismatch: r.locationMismatch ? "Yes" : "No",
       storageCheckStatus: r.storageCheckStatus, storageCheckHo01Locations: r.storageCheckHo01Locations,
@@ -1162,7 +1216,9 @@
       { key: "prNum", label: "Purchase Req Num" }, { key: "poste", label: "Poste" },
       { key: "createdBy", label: "Created By" },
       { key: "material", label: "Requested Code" }, { key: "canonical", label: "Resolved SAP Code" },
-      { key: "desc", label: "Description" }, { key: "programClass", label: "Classification (CDSS/Reportable)" },
+      { key: "desc", label: "Description" },
+      { key: "purchasingOrg", label: "Purchasing Org." },
+      { key: "purchOrgMismatch", label: "Purchasing Org. vs Classification Mismatch?" },
       { key: "reqQty", label: "Requested Quantity" },
       { key: "reqSoh", label: "Stock on Hand (Request File)" }, { key: "liveHo01", label: "Stock on Hand (HO01)" },
       { key: "liveReqPlant", label: `Stock on Hand (${reqPlant || "Requesting Plant"})` },
@@ -1195,7 +1251,16 @@
         }).join(' <span style="opacity:0.6">or</span> '),
         raw: true, cellClass: "col-mat-code-wrap" },
       { key: "suggestedDesc", label: "Description" },
-      { key: "programClass", label: "Classification", fmt: v => (typeof programClassBadge === "function" ? programClassBadge(v) : (v || "—")), raw: true },
+      { key: "purchasingOrg", label: "Purchasing Org.",
+        fmt: (v, r) => {
+          if (!v) return "—";
+          if (r.purchOrgMismatch) {
+            const title = `Classification on file is ${r.programClass || "unclassified"} (${r.purchOrgActualFamily} family), but Purchasing Org. ${escHtml(v)} expects ${r.purchOrgExpectedFamily}`;
+            return `<span style="display:inline-block;padding:0.15rem 0.55rem;border-radius:999px;font-size:0.72rem;font-weight:700;white-space:nowrap;background:rgba(220,38,38,0.14);color:var(--red)" title="${title}">⚠ ${escHtml(v)} — class mismatch</span>`;
+          }
+          return escHtml(v);
+        },
+        raw: true },
       { key: "suggestedTotal", label: "Combined HO01 Stock (Suggested Codes)", fmt: v => fmtQty(v), cellClass: "col-qty" },
       { key: "reqQty", label: "Requested Qty", fmt: v => fmtQty(v), cellClass: "col-qty" },
     ];
@@ -1205,12 +1270,14 @@
     wireTableExport("reqan-export-suggest", suggestionRows.map(r => ({
       prNum: r.prNum, material: r.material, shortText: r.shortText,
       suggestedCode: r.suggestedCode, suggestedDesc: r.suggestedDesc,
-      programClass: (typeof PROGRAM_CLASS_LABELS !== "undefined" && PROGRAM_CLASS_LABELS[r.programClass]) || r.programClass || "",
+      purchasingOrg: r.purchasingOrg || "", purchOrgMismatch: r.purchOrgMismatch ? "Yes" : "No",
       suggestedTotal: r.suggestedTotal, reqQty: r.reqQty,
     })), [
       { key: "prNum", label: "Purchase Req Num" }, { key: "material", label: "Code As Requested" },
       { key: "shortText", label: "Description (as requested)" }, { key: "suggestedCode", label: "Request Under This SAP Code Instead" },
-      { key: "suggestedDesc", label: "Description" }, { key: "programClass", label: "Classification (CDSS/Reportable)" },
+      { key: "suggestedDesc", label: "Description" },
+      { key: "purchasingOrg", label: "Purchasing Org." },
+      { key: "purchOrgMismatch", label: "Purchasing Org. vs Classification Mismatch?" },
       { key: "suggestedTotal", label: "Combined HO01 Stock (Suggested Codes)" },
       { key: "reqQty", label: "Requested Qty" },
     ], "request_analysis_suggested_codes");
@@ -1221,7 +1288,16 @@
       { key: "poste", label: "Poste" },
       { key: "canonical", label: "Material Code", cellClass: "col-mat-code-wrap" },
       { key: "desc", label: "Description" },
-      { key: "programClass", label: "Classification", fmt: v => (typeof programClassBadge === "function" ? programClassBadge(v) : (v || "—")), raw: true },
+      { key: "purchasingOrg", label: "Purchasing Org.",
+        fmt: (v, r) => {
+          if (!v) return "—";
+          if (r.purchOrgMismatch) {
+            const title = `Classification on file is ${r.programClass || "unclassified"} (${r.purchOrgActualFamily} family), but Purchasing Org. ${escHtml(v)} expects ${r.purchOrgExpectedFamily}`;
+            return `<span style="display:inline-block;padding:0.15rem 0.55rem;border-radius:999px;font-size:0.72rem;font-weight:700;white-space:nowrap;background:rgba(220,38,38,0.14);color:var(--red)" title="${title}">⚠ ${escHtml(v)} — class mismatch</span>`;
+          }
+          return escHtml(v);
+        },
+        raw: true },
       { key: "reqQty", label: "Requested Qty", fmt: v => fmtQty(v), cellClass: "col-qty" },
       { key: "deliveryDate", label: "Delivery Date", fmt: v => fmtReqDate(v) },
     ];
@@ -1230,12 +1306,13 @@
     );
     wireTableExport("reqan-export-stockout", stockoutRows.map(r => ({
       prNum: r.prNum, poste: r.poste, canonical: r.canonical, desc: r.desc,
-      programClass: (typeof PROGRAM_CLASS_LABELS !== "undefined" && PROGRAM_CLASS_LABELS[r.programClass]) || r.programClass || "",
+      purchasingOrg: r.purchasingOrg || "", purchOrgMismatch: r.purchOrgMismatch ? "Yes" : "No",
       reqQty: r.reqQty, deliveryDate: fmtReqDate(r.deliveryDate),
     })), [
       { key: "prNum", label: "Purchase Req Num" }, { key: "poste", label: "Poste" },
       { key: "canonical", label: "Material Code" }, { key: "desc", label: "Description" },
-      { key: "programClass", label: "Classification (CDSS/Reportable)" },
+      { key: "purchasingOrg", label: "Purchasing Org." },
+      { key: "purchOrgMismatch", label: "Purchasing Org. vs Classification Mismatch?" },
       { key: "reqQty", label: "Requested Qty" }, { key: "deliveryDate", label: "Delivery Date" },
     ], "request_analysis_ho01_stockout");
 
@@ -1247,7 +1324,6 @@
       const cols4 = [
         { key: "code", label: "Material Code", cellClass: "col-mat-code-wrap" },
         { key: "desc", label: "Description" },
-        { key: "programClass", label: "Classification", fmt: v => (typeof programClassBadge === "function" ? programClassBadge(v) : (v || "—")), raw: true },
         { key: "qty", label: "HO01 Stock on Hand", fmt: v => fmtQty(v), cellClass: "col-qty" },
         { key: "criticalBranches", label: "Critical At (Branch MOS < 1mo)",
           fmt: v => v.map(c => `<span style="display:inline-block;margin:1px 3px 1px 0;padding:0.1rem 0.4rem;border-radius:999px;font-size:0.7rem;font-weight:700;background:rgba(220,38,38,0.14);color:var(--red)">${escHtml(c.plant)} · ${c.mos === Infinity ? "∞" : Number(c.mos).toFixed(1)}mo</span>`).join(""),
@@ -1258,12 +1334,10 @@
       );
       wireTableExport("reqan-export-notreq", notRequested.map(r => ({
         code: r.code, desc: r.desc,
-        programClass: (typeof PROGRAM_CLASS_LABELS !== "undefined" && PROGRAM_CLASS_LABELS[r.programClass]) || r.programClass || "",
         qty: r.qty,
         criticalBranches: r.criticalBranches.map(c => `${c.plant} (${c.mos === Infinity ? "Infinite" : Number(c.mos).toFixed(2)}mo)`).join("; "),
       })), [
         { key: "code", label: "Material Code" }, { key: "desc", label: "Description" },
-        { key: "programClass", label: "Classification (CDSS/Reportable)" },
         { key: "qty", label: "HO01 Stock on Hand" },
         { key: "criticalBranches", label: "Critical At (Branch MOS < 1mo)" },
       ], "request_analysis_ho01_not_requested");
