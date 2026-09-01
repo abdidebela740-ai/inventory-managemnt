@@ -1818,7 +1818,6 @@ function renderBranchDemand() {
   }
 
   const canEdit = brdCanEdit();
-  document.getElementById("brd-deselect-all").style.display = canEdit ? "" : "none";
   document.getElementById("brd-export").style.display = canEdit ? "" : "none";
 
   // ── Codes chips ────────────────────────────────────────────────────────
@@ -2310,22 +2309,10 @@ function brdExportTemplate() {
     // "Select All Visible" control (see selectBar in brdRenderTables /
     // request-form rendering) and per-row via the individual checkboxes.
 
-    // Counterpart to the old shared "Approve Visible" — clears the checkbox/approved state
-    // on every row currently on screen (both tabs, same rationale as
-    // above), so a user can back out of a bulk-select without unchecking
-    // rows one at a time. Same brdCanEdit() gate as Approve Visible /
-    // Export Template — only shown to roles that can edit this page.
-    const deselectAllBtn = document.getElementById("brd-deselect-all");
-    if (deselectAllBtn) deselectAllBtn.addEventListener("click", () => {
-      document.querySelectorAll("#brd-table .brd-approve-cb, #brd-request-table .brd-approve-cb").forEach(cb => {
-        const key = brdDraftKey(cb.dataset.plant, cb.dataset.code);
-        const d = brdDraft.get(key) || {};
-        d.approved = false;
-        brdDraft.set(key, d);
-        brdSaveDraftRow(cb.dataset.plant, cb.dataset.code);
-      });
-      renderBranchDemand();
-    });
+    // REMOVED-BRD-DESELECT-ALL: the shared toolbar "Deselect All" button
+    // (#brd-deselect-all) was removed per request. Bulk-deselect is still
+    // available scoped per-tab via each tab's own "Deselect All Visible"
+    // control and per-row via the individual checkboxes.
 
     const exportBtn = document.getElementById("brd-export");
     if (exportBtn) exportBtn.addEventListener("click", brdExportTemplate);
