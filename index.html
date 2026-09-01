@@ -868,6 +868,19 @@
     <div class="nav-group-title"><span class="nav-group-icon">🔍</span> Quick Lookup</div>
   </div>
 
+  <!-- Unmapped Materials — Admin-only data-quality tool, same treatment as
+       the Data Upload / Material Standardization mapping section itself
+       (see permissions.js canAccessModule "unmapped-materials" — hard-gated
+       to computeIsAdmin(), no sidebar_permissions checkbox for it). No
+       special JS wiring needed here: the generic canAccessModule() loop in
+       auth.js (applyRoleToUI) already shows/hides every .nav-btn[data-page]
+       for us, same as any Head-Office-only nav-btn. -->
+  <div class="nav-group expanded" style="margin-bottom:0">
+    <button class="nav-btn" data-page="unmapped-materials">
+      <span class="nav-icon">🧩</span> Unmapped Materials
+    </button>
+  </div>
+
   <!-- User Management — Admin/Director/Deputy Director only; hidden via
        applyRoleToUI() in auth.js using canManageRoles() from permissions.js.
        No data-page attribute picked up by the generic canAccessModule()
@@ -1714,6 +1727,50 @@
     </div>
   </section>
 
+  <!-- ── UNMAPPED MATERIALS (Admin-only) ── -->
+  <section id="page-unmapped-materials" class="page" style="display:none">
+    <div class="page-header-row">
+      <div>
+        <div class="page-title">🧩 Unmapped Materials</div>
+        <div class="page-subtitle">Distinct material codes in the uploaded inventory file that the Material Standardization mapping file could not match — candidates that may still need a mapping entry</div>
+      </div>
+    </div>
+    <div id="unmapped-no-data" class="alert-info" style="margin-bottom:1rem;display:none">⚠️ This data is currently unavailable. Please contact your administrator.</div>
+    <div id="unmapped-no-mapping" class="alert-info" style="margin-bottom:1rem;display:none">⚗️ No Material Standardization mapping file is loaded this session — upload one from 📁 Data Source → Material Standardization to see which codes still need a mapping entry.</div>
+    <div id="unmapped-content" style="display:none">
+      <div class="filter-bar" style="gap:0.6rem;flex-wrap:wrap;align-items:center">
+        <input
+          type="text"
+          id="unmapped-search"
+          placeholder="Material code or name…"
+          autocomplete="off"
+          spellcheck="false"
+          class="filter-input"
+        />
+        <select id="unmapped-stock-type" class="filter-select">
+          <option value="">All Stock Types</option>
+          <option value="RDF">RDF</option>
+          <option value="Health Program (Q)">Health Program (Q)</option>
+        </select>
+        <select id="unmapped-val-type" class="filter-select">
+          <option value="">All Valuation Types</option>
+          <option value="ZME">ZME (Medicine)</option>
+          <option value="ZMS">ZMS (Medical Supply)</option>
+          <option value="ZLC">ZLC (Laboratory)</option>
+          <option value="ZMD">ZMD (Medical Device)</option>
+          <option value="(None)">(None)</option>
+        </select>
+        <select id="unmapped-plant" class="filter-select">
+          <option value="">All Plants</option>
+        </select>
+        <button class="apply-btn small" id="unmapped-apply">Apply</button>
+        <button class="apply-btn secondary small" id="unmapped-clear">Clear</button>
+      </div>
+      <div class="kpi-row" id="unmapped-kpis" style="margin:1rem 0"></div>
+      <div id="unmapped-table-wrap"></div>
+    </div>
+  </section>
+
   <!-- ── STOCKOUT RISK (national only) ── -->
   <section id="page-stockout-risk" class="page" style="display:none">
     <style>
@@ -2293,6 +2350,7 @@ document.querySelectorAll('.overview-card[data-goto]').forEach(card => {
 <script src="expiry-risk.js" defer></script>
 <script src="stockout-risk.js" defer></script>
 <script src="who-responsible.js" defer></script>
+<script src="unmapped-materials.js" defer></script>
 <script src="shelf-life.js" defer></script>
 <script>
 // ── TAB SWITCHING (Transit + QC + Overstock & Expiry Risk) ──
