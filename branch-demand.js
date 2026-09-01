@@ -902,31 +902,54 @@ function brdRowExpiryDate(row) {
   }
   return null;
 }
+// FIX-BRD-EXPIRY-QTY: previously returned the nearest expiry Date alone,
+// which told a branch/HO01 planner *when* the soonest batch expires but not
+// *how much* of it — a supervisor deciding whether that's worth worrying
+// about has to know the quantity riding on that date. Now returns
+// { date, qty }, where qty is the stock (Unrestricted + Quality Inspection)
+// summed across every matching row that shares that exact soonest date
+// (there can be more than one batch expiring on the same day), so nothing
+// is undercounted. brdFmtExpiry renders qty in brackets next to the date;
+// callers that only need the date can still read `.date`.
 function brdNearestExpiryForBranch(mappedCode, plant, scopeCode) {
   const wantPrefix = scopeCode ? (scopeCode.startsWith("Q_") ? "Q" : "R") : null;
   const src  = brdPrimarySource(mappedCode, wantPrefix);
   const base = (mappingTable && mappingTable.size > 0 ? mappedDf : rawDf) || [];
   let nearest = null;
+  let qtyAtNearest = 0;
   base.forEach(r => {
     if (String(r["Plant"] || "").trim().toUpperCase() !== plant) return;
     if (!src.allSourceCodes.includes(String(r["Material"] || "").trim().toUpperCase())) return;
     const qty = (Number(r["Unrestricted Stock"]) || 0) + (Number(r["Stock in Quality Inspection"]) || 0);
     if (qty <= 0) return; // only batches actually holding stock
     const d = brdRowExpiryDate(r);
-    if (d && (!nearest || d < nearest)) nearest = d;
+    if (!d) return;
+    if (!nearest || d < nearest) {
+      nearest = d;
+      qtyAtNearest = qty;
+    } else if (d.getTime() === nearest.getTime()) {
+      qtyAtNearest += qty; // another batch sharing the same soonest date
+    }
   });
-  return nearest;
+  if (!nearest) return null;
+  return { date: nearest, qty: qtyAtNearest };
 }
 // Compact pill for the Nearest Expiry column — colour flags urgency the
 // same way the rest of the app does (red = critical, amber = watch).
-function brdFmtExpiry(d) {
+// Accepts either the new { date, qty } shape or a bare Date (defensive,
+// in case any caller still passes one), and shows the quantity applying
+// to that nearest-expiry date in brackets after it, e.g. "12 Jun 2026 (150)".
+function brdFmtExpiry(v) {
+  const d   = v instanceof Date ? v : (v && v.date instanceof Date ? v.date : null);
+  const qty = v instanceof Date ? null : (v && typeof v.qty === "number" ? v.qty : null);
   if (!d) return `<span class="brd-status-pill brd-status-muted">—</span>`;
   const days = Math.round((d - new Date()) / 86400000);
   let cls = "brd-status-green";
   if (days <= 90) cls = "brd-status-red";
   else if (days <= 180) cls = "brd-status-amber";
   const label = d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
-  return `<span class="brd-status-pill ${cls}" title="${days} day(s) from today">${escHtml(label)}</span>`;
+  const qtyLabel = qty !== null ? ` (${fmtQty(qty)})` : "";
+  return `<span class="brd-status-pill ${cls}" title="${days} day(s) from today">${escHtml(label)}${escHtml(qtyLabel)}</span>`;
 }
 
 // ── REQUEST ELIGIBILITY (see file header) ───────────────────────────────────
@@ -1556,14 +1579,12 @@ function brdStatusBadge(status) {
 
 function brdKpiRow(lines) {
   const partialCount = lines.filter(l => l.status === "partial" || l.status === "none").length;
-  const noAmcCount  = lines.filter(l => l.status === "no-amc").length;
-  const approvedCount = lines.filter(l => l.approved).length;
   const qcOnlyCount = new Set(lines.filter(l => l.qcOnly).map(l => l.code)).size;
-  const hiddenNoStock = lines.hiddenNoStockCount || 0;
-  // Proactive warning for the export hard-block (see brdExportTemplate) —
-  // surfaced here so a supervisor sees the problem while still working the
-  // list, not only after clicking Export and getting bounced.
-  const approvedMissingStorage = lines.filter(l => l.approved && !l.storageLoc).length;
+  // REMOVED-BRD-KPIS: "No AMC", "Approved", "Hidden — No HO01 Stock", and
+  // "Approved — Missing Storage Loc." KPI cards were dropped per request —
+  // no longer shown in the KPI row. Their underlying counts (noAmcCount,
+  // approvedCount, hiddenNoStock, approvedMissingStorage) are no longer
+  // computed here since nothing else in this file reads them.
 
   setKpis("brd-kpis", [
     ["Lines Shown", lines.length.toLocaleString(), "material × branch pairs", "blue"],
@@ -1574,10 +1595,6 @@ function brdKpiRow(lines) {
     ["Target MOS Band", `0–${TARGET_MOS}`, `< ${REQUEST_ELIGIBILITY_MOS} = Needed, ${REQUEST_ELIGIBILITY_MOS}–${TARGET_MOS} = to reach target`, "purple"],
     ["Short / Zero Lines", partialCount.toLocaleString(), "HO01 couldn't fully cover", "red"],
     ["HO01 Stock in Quality Inspection", qcOnlyCount.toLocaleString(), "materials, not yet releasable", "amber"],
-    ["No AMC", noAmcCount.toLocaleString(), "manual entry needed", "muted"],
-    ["Approved", approvedCount.toLocaleString(), `of ${lines.length.toLocaleString()} shown`, "purple"],
-    ["Hidden — No HO01 Stock", hiddenNoStock.toLocaleString(), "materials with nothing at HO01", "muted"],
-    ["Approved — Missing Storage Loc.", approvedMissingStorage.toLocaleString(), approvedMissingStorage ? "will block export — fix on Request Form tab" : "export not blocked", approvedMissingStorage ? "red" : "muted"],
   ]);
 }
 
@@ -1801,7 +1818,6 @@ function renderBranchDemand() {
   }
 
   const canEdit = brdCanEdit();
-  document.getElementById("brd-approve-selected").style.display = canEdit ? "" : "none";
   document.getElementById("brd-deselect-all").style.display = canEdit ? "" : "none";
   document.getElementById("brd-export").style.display = canEdit ? "" : "none";
 
@@ -2288,23 +2304,13 @@ function brdExportTemplate() {
       renderBranchDemand();
     });
 
-    const approveSelBtn = document.getElementById("brd-approve-selected");
-    if (approveSelBtn) approveSelBtn.addEventListener("click", () => {
-      // Scoped to both tabs' tables (not just whichever is currently
-      // visible) — Analysis and Request Form show the same underlying
-      // lines, just with different columns, so "Approve Visible" should
-      // approve every row currently on screen either way.
-      document.querySelectorAll("#brd-table .brd-approve-cb, #brd-request-table .brd-approve-cb").forEach(cb => {
-        const key = brdDraftKey(cb.dataset.plant, cb.dataset.code);
-        const d = brdDraft.get(key) || {};
-        d.approved = true;
-        brdDraft.set(key, d);
-        brdSaveDraftRow(cb.dataset.plant, cb.dataset.code);
-      });
-      renderBranchDemand();
-    });
+    // REMOVED-BRD-APPROVE-VISIBLE: the shared toolbar "Approve Visible
+    // (Select All)" button (#brd-approve-selected) was removed per request.
+    // Bulk-approve is still available scoped per-tab via each tab's own
+    // "Select All Visible" control (see selectBar in brdRenderTables /
+    // request-form rendering) and per-row via the individual checkboxes.
 
-    // Counterpart to "Approve Visible" — clears the checkbox/approved state
+    // Counterpart to the old shared "Approve Visible" — clears the checkbox/approved state
     // on every row currently on screen (both tabs, same rationale as
     // above), so a user can back out of a bulk-select without unchecking
     // rows one at a time. Same brdCanEdit() gate as Approve Visible /
