@@ -122,6 +122,7 @@ function buildNatlTableRows(typeFilter, searchQ, clsFilter) {
 
     return { sn: i + 1, code: r.code, desc: r.desc, type: r.type, programClass: r.programClass,
              isMerged: r.isMerged, origCodes: r.origCodes, personClsConflict: r.personClsConflict,
+             streamAmbiguous: r.streamAmbiguous,
              soh, amc, mos, shelf, excludedQty, adjSoh, adjMos };
   });
 }
@@ -207,6 +208,15 @@ function renderNatlTable() {
         // Person/RDF-CDSS classification came from disagreeing AMC entries
         // (see buildMosMerged() in mos.js) — the classification shown may
         // not be the one that actually belongs to the assigned Person.
+        // streamAmbiguous (separate flag, see buildAmcClassIndex() in
+        // mos.js): this code appears under BOTH RDF and Q with no
+        // mapping-file rule to say which is correct — the Type/
+        // Classification themselves may be fine individually, but Purch.
+        // Group/Org derived from them (Branch Demand) cannot be trusted
+        // until this is resolved in AMC.xlsx or the mapping file.
+        if (r && r.streamAmbiguous) {
+          return `${badge} <span title="This code is classified as BOTH RDF and Health Program (Q) in AMC.xlsx with no Mapping Stock Type rule to disambiguate — check for a duplicate AMC row on this code. Purch. Group/Org in Branch Demand is withheld for it until resolved." style="cursor:help">⚠️</span>`;
+        }
         return r && r.personClsConflict
           ? `${badge} <span title="Person and RDF-CDSS classification for this merged code come from disagreeing AMC entries — check AMC.xlsx" style="cursor:help">⚠️</span>`
           : badge;
