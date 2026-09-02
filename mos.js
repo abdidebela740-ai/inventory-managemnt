@@ -157,28 +157,32 @@ function buildInventoryStreamMap() {
 // For one raw AMC row (source code + its own resolved stream), decides the
 // CANONICAL code that row's classification/person should be filed under —
 // applying the mapping file's Stock-Type-matching rule exactly as
-// specified. Returns { canonical, targetDesc, usable }:
+// specified. Returns { canonical, targetDesc, usable, mappingConfirmed }:
 //   - No mapping entry at all for this source code → usable under its own
 //     code as-is (mapping "does not exist" is an accepted state).
+//     mappingConfirmed: false — nothing in the mapping file actually
+//     corroborated this row's stream, it's simply unopposed.
 //   - A mapping entry exists for THIS row's stream → use its target code
-//     (this is the normal / common case).
+//     (this is the normal / common case). mappingConfirmed: true — the
+//     mapping file explicitly agrees this source code is this stream.
 //   - A mapping entry exists ONLY for the OTHER stream → this row is not
 //     usable (the mapping file explicitly ties this source code to the
 //     other stock type; using it here would mix the two streams).
 function resolveAmcRowCanonical(srcCode, stream) {
   const src = String(srcCode || "").trim().toUpperCase();
-  if (!mappingTable || mappingTable.size === 0) return { canonical: src, usable: true };
+  if (!mappingTable || mappingTable.size === 0) return { canonical: src, usable: true, mappingConfirmed: false };
   const stypeMap = mappingTable.get(src);
-  if (!stypeMap || !stypeMap.size) return { canonical: src, usable: true };
+  if (!stypeMap || !stypeMap.size) return { canonical: src, usable: true, mappingConfirmed: false };
   const entry = stypeMap.get(stream);
   if (entry) {
     return {
       canonical: String(entry.targetCode || "").trim().toUpperCase() || src,
       targetDesc: entry.targetDesc || "",
       usable: true,
+      mappingConfirmed: true,
     };
   }
-  return { canonical: src, usable: false };
+  return { canonical: src, usable: false, mappingConfirmed: false };
 }
 
 // Builds the AMC index: "CANONICAL_CODE⟨sep⟩STREAM" → the single AMC row
@@ -192,15 +196,40 @@ function resolveAmcRowCanonical(srcCode, stream) {
 // exact same row that supplied the classification. `conflict` is set when
 // a later duplicate row disagrees with the first on classification or
 // person, purely so the UI can flag it (see PROGRAM_CLASS_LABELS callers).
+//
+// STREAM-AMBIGUITY DETECTION (RD/HP DOESN'T TRULY DIFFERENTIATE Q VS RDF):
+// A canonical code CAN legitimately carry both an RDF row and a Q row at
+// once (see file header's "Important Business Rule") — but only when the
+// mapping file actually corroborates each side's stock type independently.
+// The failure mode reported in practice: AMC.xlsx itself contains a
+// straight-up DUPLICATE entry for the same source code — once tagged RDF,
+// once tagged PROGRAM (same/near-identical description, different casing) —
+// with no mapping-file rule to arbitrate either way. Nothing in the old
+// logic distinguished that from a genuinely dual-stream material, so both
+// copies passed through as "usable" and produced two normal-looking
+// mosMerged rows for the identical code — which is exactly what surfaces in
+// Branch Demand as the same material showing BOTH RD4 and HP4 with no way
+// to tell which is correct. We now track, per canonical code, whether EVERY
+// row contributing to it arrived via an actual mapping-file confirmation
+// (mappingConfirmed). If a code ends up with both an RDF and a Q entry and
+// NONE of the contributing raw rows were mapping-confirmed on their own
+// stream, the pairing is unresolved AMC duplication, not deliberate
+// dual-stream data — flagged via `streamAmbiguous` on both resulting rows.
 function buildAmcClassIndex() {
   const idx = new Map();
+  const confirmedStreams = new Map(); // canonical code -> Set of streams that were mapping-confirmed
   mosAmcRaw.forEach(row => {
     const stream = normalizeAmcStockType(row.stockType);
     if (!stream) return; // AMC Stock Type not RDF/Program — row not usable
     const cls = normalizeAmcClassification(row.classification, stream);
     if (!cls) return; // invalid classification for this stock type — row not usable
-    const { canonical, targetDesc, usable } = resolveAmcRowCanonical(row.code, stream);
+    const { canonical, targetDesc, usable, mappingConfirmed } = resolveAmcRowCanonical(row.code, stream);
     if (!usable) return; // mapping only defines the OTHER stock type — discard
+
+    if (mappingConfirmed) {
+      if (!confirmedStreams.has(canonical)) confirmedStreams.set(canonical, new Set());
+      confirmedStreams.get(canonical).add(stream);
+    }
 
     const key = canonical + MOS_KEY_SEP + stream;
     const desc = row.desc || targetDesc || "";
@@ -225,8 +254,32 @@ function buildAmcClassIndex() {
       if (v !== null && v !== undefined) e.amcs[p] = (e.amcs[p] || 0) + v;
     }
   });
+
+  // Second pass: flag any canonical code that has BOTH an RDF and a Q key in
+  // the index, where the mapping file confirmed NEITHER stream for it — pure
+  // unresolved AMC duplication, per the note above.
+  const byCanonical = new Map(); // canonical -> Set of streams present in idx
+  idx.forEach((_v, key) => {
+    const sepIdx = key.lastIndexOf(MOS_KEY_SEP);
+    const canonical = key.slice(0, sepIdx);
+    const stream = key.slice(sepIdx + MOS_KEY_SEP.length);
+    if (!byCanonical.has(canonical)) byCanonical.set(canonical, new Set());
+    byCanonical.get(canonical).add(stream);
+  });
+  byCanonical.forEach((streams, canonical) => {
+    if (streams.size < 2) return; // only one stream present — nothing to disambiguate
+    const confirmed = confirmedStreams.get(canonical) || new Set();
+    if (confirmed.size > 0) return; // at least one side is mapping-confirmed — treat as legitimate dual-stream
+    streams.forEach(stream => {
+      const e = idx.get(canonical + MOS_KEY_SEP + stream);
+      if (e) e.streamAmbiguous = true;
+    });
+  });
+
   return idx;
 }
+
+
 
 // ── MOS STATE ────────────────────────────────────────────────────────────────
 let mosAmcRaw    = [];          // parsed rows from AMC.xlsx: { code, desc, rawProgramType, person, amcs:{plant:val} }
@@ -475,6 +528,13 @@ function buildMosMerged() {
       amcs: hit ? hit.amcs : Object.fromEntries(mosPlants.map(p => [p, null])),
       isMerged: hit ? hit.origCodes.size > 1 : false,
       personClsConflict: hit ? hit.conflict : false,
+      // See buildAmcClassIndex()'s second pass above — true when this code
+      // shows up in BOTH streams purely from unresolved/duplicate AMC rows
+      // with no mapping-file corroboration on either side. Purch. Group/Org
+      // (RD4 vs HP4, etc. — see branch-demand.js) cannot be trusted for a
+      // row flagged this way; it needs a human to check AMC.xlsx and, where
+      // relevant, add a Mapping Stock Type rule to disambiguate.
+      streamAmbiguous: hit ? !!hit.streamAmbiguous : false,
       type: stream,
       programClass: resolveFinalClass(stream, hit),
     });
