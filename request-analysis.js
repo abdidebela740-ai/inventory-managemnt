@@ -1069,7 +1069,17 @@
     if (mosDataLoaded) {
       ho01NotRequested = ho01NotRequestedAll
         .map(r => {
-          const amcRow = mosMerged.find(m => m.code === r.code);
+          // STREAM-AWARE-AMC: was previously mosMerged.find(m => m.code ===
+          // r.code) — unscoped, so a dual-stream material (RDF AND
+          // Program(Q) both on file) could silently grab whichever
+          // stream's row happened to come first, computing "not critical"
+          // (or the wrong critical branch) off the WRONG stream's AMC —
+          // same class of bug already fixed for request lines' own MOS
+          // Evaluation. There's no per-row Purchasing Org. here (there's
+          // no request line at all for these items), so use the file's
+          // own reqRequestType (RD01-majority file → RDF, HP02-majority →
+          // Program) as the stream hint instead.
+          const amcRow = findAmcRowForCanonical(r.code, reqRequestType, reqPlant);
           // No AMC commitment data at all for this material -> can't confirm
           // it's critical anywhere, so don't flag it (avoids false positives).
           const criticalBranches = amcRow
