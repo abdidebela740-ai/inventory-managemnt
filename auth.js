@@ -84,10 +84,10 @@ function injectAuthOverlay() {
 
             <form id="auth-form">
               <label class="auth-field-label" for="auth-email">Email Address</label>
-              <input type="email" id="auth-email" placeholder="you@epss.gov.et" autocomplete="off" required />
+              <input type="email" id="auth-email" placeholder="you@epss.gov.et" autocomplete="email" required />
 
               <label class="auth-field-label" for="auth-password">Password</label>
-              <input type="password" id="auth-password" placeholder="••••••••" autocomplete="off" required />
+              <input type="password" id="auth-password" placeholder="••••••••" autocomplete="current-password" required />
 
               <label class="auth-remember-row">
                 <input type="checkbox" id="auth-remember" checked />
@@ -294,6 +294,20 @@ function injectAuthOverlay() {
   document.getElementById("auth-nav-login-btn").addEventListener("click", focusLogin);
   document.getElementById("auth-hero-signin-btn").addEventListener("click", focusLogin);
   document.getElementById("auth-about-signin-btn").addEventListener("click", focusLogin);
+
+  // ── "Remember Me" — restore a previously-saved email into the field.
+  // (Only the email is ever remembered, never the password.)
+  try {
+    const savedEmail = localStorage.getItem("epss-remember-email");
+    if (savedEmail) {
+      const emailEl = document.getElementById("auth-email");
+      if (emailEl) emailEl.value = savedEmail;
+    } else {
+      // Nothing saved (or user previously unchecked it) — reflect that in the checkbox.
+      const rememberEl = document.getElementById("auth-remember");
+      if (rememberEl) rememberEl.checked = false;
+    }
+  } catch (e) { /* localStorage unavailable (private mode) — ignore, no autofill */ }
 
   // Smooth-scroll the in-page nav anchors
   el.querySelectorAll('a[href^="#"]').forEach(a => {
@@ -703,6 +717,29 @@ async function initAuth() {
       errEl.textContent = error.message;
       return;
     }
+
+    // ── "Remember Me" — save/clear the email per the checkbox state.
+    try {
+      const remember = document.getElementById("auth-remember").checked;
+      if (remember) {
+        localStorage.setItem("epss-remember-email", email);
+      } else {
+        localStorage.removeItem("epss-remember-email");
+      }
+    } catch (e) { /* private mode / quota — ignore, non-critical */ }
+
+    // FIX-FIRST-LOGIN-LOGOUT: idle-logout.js persists a "last activity"
+    // timestamp in localStorage that survives across sessions/tabs. If the
+    // user's PREVIOUS session went idle (or it's just been a while since
+    // they last touched the app on this device), that stale timestamp is
+    // still sitting there. Without this reset, idle-logout's start() reads
+    // it on the very first "epss-auth-ready" event after this fresh login,
+    // sees it's already older than the idle limit, and immediately signs
+    // the user back out — before they ever get to use the app. Stamping
+    // "now" here, right at the moment of a real explicit login, guarantees
+    // the idle clock always starts fresh regardless of what happened before.
+    try { localStorage.setItem("epss-last-activity", String(Date.now())); } catch (e) { /* ignore */ }
+
     await loadProfileAndUnlock(data.session);
   });
 
