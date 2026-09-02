@@ -307,21 +307,47 @@ function injectAuthOverlay() {
 
   // Forgot password — instead of emailing a Supabase reset link, send the
   // user to WhatsApp with a pre-filled message containing their email, so
-  // an admin can verify them and issue a new password manually.
+  // an admin can verify them and issue a new password manually. Before
+  // that, check-email (Edge Function) confirms the email actually belongs
+  // to an account, so a mistyped/unregistered email gets told so instead
+  // of being sent to WhatsApp.
   const SUPPORT_WHATSAPP_NUMBER = "251951112131"; // +251 95 111 2131, no leading 0/+ for wa.me links
-  document.getElementById("auth-forgot-btn").addEventListener("click", () => {
+  document.getElementById("auth-forgot-btn").addEventListener("click", async () => {
     const errEl = document.getElementById("auth-error");
+    const btn = document.getElementById("auth-forgot-btn");
     const email = document.getElementById("auth-email").value.trim();
     if (!email) {
       errEl.style.color = "var(--red, #e04545)";
       errEl.textContent = "Enter your email above first, then click \"Forgot Your Password?\"";
       return;
     }
-    const message = `Hi, I forgot my password for EPSS Stock-Multiple. My login email is: ${email}`;
-    const waUrl = `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
+
+    btn.disabled = true;
     errEl.style.color = "var(--muted, #7a9ab8)";
-    errEl.textContent = "Opening WhatsApp…";
-    window.open(waUrl, "_blank", "noopener");
+    errEl.textContent = "Checking your email…";
+
+    try {
+      const { data, error } = await supabaseClient.functions.invoke("check-email", { body: { email } });
+
+      if (error) {
+        errEl.style.color = "var(--red, #e04545)";
+        errEl.textContent = "Could not check that email right now. Please try again in a moment.";
+        return;
+      }
+      if (!data?.registered) {
+        errEl.style.color = "var(--red, #e04545)";
+        errEl.textContent = "This email is not registered. Double-check it, or contact an admin to get an account.";
+        return;
+      }
+
+      const message = `Hi, I forgot my password for EPSS Stock-Multiple. My login email is: ${email}`;
+      const waUrl = `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
+      errEl.style.color = "var(--muted, #7a9ab8)";
+      errEl.textContent = "Opening WhatsApp…";
+      window.open(waUrl, "_blank", "noopener");
+    } finally {
+      btn.disabled = false;
+    }
   });
 
   // Submit new password (shown after the user clicks the emailed reset link)
