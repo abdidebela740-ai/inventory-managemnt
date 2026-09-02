@@ -72,6 +72,18 @@
 //    ZERO stock at HO01 right now.
 // 4. HO01 Stock Not Requested — every material with stock at HO01 that does
 //    NOT appear anywhere in the uploaded request file at all.
+// 5. MOS Evaluation (2–4 Month Window) — judges the REQUESTED QUANTITY on
+//    each line against the same TARGET_MOS(4)/REQUEST_ELIGIBILITY_MOS(2)
+//    fill window Branch Demand uses (branch-demand.js), using the
+//    requesting plant's own live SOH + AMC, netted against anything already
+//    in transit to it (Open Outbound / pending-dispatch.js). Every line is
+//    tagged "Justified" (lands within the 2–4 month window), "Over-
+//    Requested" (would push the branch above 4 months), "Under-Requested"
+//    (still leaves the branch short of 4 months — flagged more strongly if
+//    still below 2 after the request), "Not Eligible — Overstocked" (branch
+//    is already at/above 4 months; shouldn't have requested at all), or
+//    "No AMC Data" (no basis to judge — AMC file not loaded or this
+//    material/branch has no commitment on file). See classifyMosVerdict().
 //
 // MATERIAL CODE MATCHING
 // -----------------------
@@ -100,8 +112,12 @@
 //           wireTableExport, downloadCSV, downloadExcel, parseExpiryDate,
 //           fmtLocalDate, getReconciledBase, PAGE_RENDERERS, renderPage, currentPage,
 //           buildMultiSelect)
-//           mos.js (HUB_PLANT, buildMosSohMap)
-// Must be loaded AFTER both script.js and mos.js.
+//           mos.js (HUB_PLANT, buildMosSohMap, mosMerged, fmtMosVal, mosNABadge)
+//           branch-demand.js (TARGET_MOS, REQUEST_ELIGIBILITY_MOS — Tab 5 falls
+//           back to literal 4/2 if unavailable, see REQAN_TARGET_MOS below)
+//           pending-dispatch.js (getOpenOutboundRowsNational / getOpenOutboundRows
+//           — Tab 5 degrades to "no outbound data" if neither is available)
+// Must be loaded AFTER script.js, mos.js, branch-demand.js, and pending-dispatch.js.
 // =============================================================================
 
 (function requestAnalysisModule() {
@@ -138,6 +154,125 @@
     "Requested Quantity", "Stock on hand", "Delivery date",
     "Created By", "Plant", "Location",
   ];
+
+  // ── MOS EVALUATION (2–4 MONTH WINDOW) ───────────────────────────────────────
+  // TAB 5 — evaluates every request line against the SAME target-fill window
+  // Branch Demand uses (see branch-demand.js: TARGET_MOS=4, REQUEST_ELIGIBILITY_
+  // MOS=2), so a request can be reconciled not just against "does HO01 have
+  // stock" (Tabs 1/3) but against "SHOULD this branch be requesting this much,
+  // right now, given its own current stock + AMC + anything already in
+  // transit." Falls back to these literal values if branch-demand.js hasn't
+  // loaded yet (script.js load order should prevent that in practice — see
+  // file header — but this keeps the tab from throwing rather than degrading
+  // silently to wrong numbers).
+  const REQAN_TARGET_MOS      = (typeof TARGET_MOS !== "undefined") ? TARGET_MOS : 4;
+  const REQAN_ELIGIBILITY_MOS = (typeof REQUEST_ELIGIBILITY_MOS !== "undefined") ? REQUEST_ELIGIBILITY_MOS : 2;
+
+  // Open Outbound already committed to THIS requesting plant, keyed by
+  // canonical code — mirrors brdBuildOpenOutboundMap() in branch-demand.js
+  // (same source data, same national/unscoped read via
+  // getOpenOutboundRowsNational so the number doesn't depend on who's
+  // logged in), just narrowed to byPlant only since HO01's own available
+  // pool isn't this tab's concern (Tabs 1/3 already show live HO01 SOH).
+  function buildReqOpenOutboundMap() {
+    const byPlant = new Map();
+    const getRows = (typeof window.getOpenOutboundRowsNational === "function")
+      ? window.getOpenOutboundRowsNational
+      : window.getOpenOutboundRows;
+    if (typeof getRows !== "function") return byPlant;
+    let rowsOut;
+    try { rowsOut = getRows(); } catch (e) { return byPlant; }
+    if (!Array.isArray(rowsOut) || !rowsOut.length) return byPlant;
+    rowsOut.forEach(r => {
+      const plant = String(r.shipToParty || "").trim().slice(0, 4).toUpperCase();
+      let code = String(r.material || "").trim().toUpperCase();
+      if (!code || !plant) return;
+      if (typeof mappingTable !== "undefined" && mappingTable.size > 0) {
+        const entry = mappingTable.get(code);
+        if (entry) code = entry.targetCode;
+      }
+      const qty = Number(r.qty) || 0;
+      const key = `${plant}::${code}`;
+      byPlant.set(key, (byPlant.get(key) || 0) + qty);
+    });
+    return byPlant;
+  }
+
+  // mosMerged (mos.js) can carry TWO rows for the same code — one per stream
+  // (RDF / Q) — when a material is committed under both (see mos.js file
+  // header, "Important Business Rule"). Pick the row matching this request
+  // line's own funding family when we can tell; otherwise fall back to
+  // whichever single row exists.
+  function findAmcRowForCanonical(canonical, familyHint) {
+    if (!canonical || typeof mosMerged === "undefined" || !mosMerged.length) return null;
+    const candidates = mosMerged.filter(m => m.code === canonical);
+    if (!candidates.length) return null;
+    if (candidates.length === 1) return candidates[0];
+    const wantType = familyHint === "PROGRAM" ? "Q" : (familyHint === "RDF" ? "RDF" : null);
+    if (wantType) {
+      const match = candidates.find(m => m.type === wantType);
+      if (match) return match;
+    }
+    return candidates[0];
+  }
+
+  // Classifies one request line's quantity against the 2–4 month window.
+  //   "no-amc"      — branch has no AMC commitment for this material at all;
+  //                    there's no basis to judge the request either way.
+  //   "overstocked" — branch's CURRENT MOS is already >= TARGET_MOS (4); this
+  //                    material shouldn't have been requested at all.
+  //   "over"        — requested qty exceeds target need by more than
+  //                    tolerance; would push the branch above 4 months.
+  //   "under"       — requested qty falls short of target need by more than
+  //                    tolerance; branch will still be below 4 months (and
+  //                    flagged more strongly if still below 2 after this
+  //                    request goes through).
+  //   "justified"   — requested qty lands within tolerance of target need —
+  //                    brings the branch to (approximately) the 4-month
+  //                    target without overshooting.
+  // Tolerance is 10% of target need (min 1 unit) so rounding in the
+  // requester's own math doesn't get flagged as a false positive.
+  function classifyMosVerdict({ hasAmc, mosNow, targetNeed, reqQty, projectedMos, outboundToBranch }) {
+    const fmtMos = v => (v === null || v === undefined) ? "—" : (v === Infinity ? "∞" : v.toFixed(1));
+    if (!hasAmc) {
+      return { key: "no-amc", label: "No AMC Data",
+        detail: `No AMC commitment on file for ${reqPlant || "this branch"} — can't evaluate the ${REQAN_ELIGIBILITY_MOS}–${REQAN_TARGET_MOS} month window without it.` };
+    }
+    if (mosNow !== null && mosNow !== undefined && mosNow >= REQAN_TARGET_MOS) {
+      return { key: "overstocked", label: "Not Eligible — Overstocked",
+        detail: `${reqPlant || "This branch"} is already at ${fmtMos(mosNow)} months — at/above the ${REQAN_TARGET_MOS}-month target, this line should not have been requested.` };
+    }
+    const tol = Math.max(1, targetNeed * 0.1);
+    const diff = reqQty - targetNeed;
+    if (targetNeed <= 0 && reqQty > 0) {
+      return { key: "over", label: "Over-Requested",
+        detail: `Target need is already 0 (current stock${outboundToBranch > 0 ? " + open outbound" : ""} already covers the ${REQAN_TARGET_MOS}-month target) — the full ${fmtQty(reqQty)} requested appears unnecessary.` };
+    }
+    if (diff > tol) {
+      return { key: "over", label: "Over-Requested",
+        detail: `Requesting ${fmtQty(reqQty)} vs a target need of ${fmtQty(targetNeed)} would push ${reqPlant || "this branch"} to ${fmtMos(projectedMos)} months — above the ${REQAN_TARGET_MOS}-month target.` };
+    }
+    if (diff < -tol) {
+      const stillCritical = projectedMos !== null && projectedMos !== Infinity && projectedMos < REQAN_ELIGIBILITY_MOS;
+      return { key: "under", label: stillCritical ? "Under-Requested — Still Critical" : "Under-Requested",
+        detail: `Requesting ${fmtQty(reqQty)} vs a target need of ${fmtQty(targetNeed)} leaves ${reqPlant || "this branch"} at ${fmtMos(projectedMos)} months` +
+          (stillCritical ? ` — still below the ${REQAN_ELIGIBILITY_MOS}-month floor. Consider requesting more.` : `, short of the ${REQAN_TARGET_MOS}-month target.`) };
+    }
+    return { key: "justified", label: "Justified",
+      detail: `Requested quantity brings ${reqPlant || "this branch"} to ${fmtMos(projectedMos)} months — within the ${REQAN_ELIGIBILITY_MOS}–${REQAN_TARGET_MOS} month target window.` };
+  }
+
+  function reqMosVerdictBadge(r) {
+    const M = {
+      "justified":   { bg: "rgba(48,168,95,0.14)",   color: "var(--green,#30a85f)", icon: "✓" },
+      "over":        { bg: "rgba(217,119,6,0.14)",   color: "var(--amber,#d97706)", icon: "⬆" },
+      "under":       { bg: "rgba(37,99,235,0.14)",   color: "var(--blue)",          icon: "⬇" },
+      "overstocked": { bg: "rgba(220,38,38,0.14)",   color: "var(--red)",           icon: "🚫" },
+      "no-amc":      { bg: "rgba(120,120,120,0.14)", color: "var(--muted)",         icon: "❓" },
+    };
+    const s = M[r.mosVerdictKey] || M["no-amc"];
+    return `<span style="display:inline-block;padding:0.15rem 0.55rem;border-radius:999px;font-size:0.72rem;font-weight:700;white-space:nowrap;background:${s.bg};color:${s.color}" title="${escHtml(r.mosVerdictDetail || "")}">${s.icon} ${escHtml(r.mosVerdictLabel)}</span>`;
+  }
 
   // ── FILE PARSING ───────────────────────────────────────────────────────────
   function loadRequestFile(file) {
@@ -553,6 +688,11 @@
 
     const requestedCanonical = new Set();
 
+    // MOS EVALUATION inputs — built once, used per-row below. See "MOS
+    // EVALUATION (2–4 MONTH WINDOW)" section near the top of this file.
+    const mosEvalAvailable = typeof mosMerged !== "undefined" && mosMerged.length > 0;
+    const openOutboundMap = buildReqOpenOutboundMap();
+
     const rows = reqRows.map(r => {
       const resolved   = resolveRequestMaterial(r.material);
       const canonical  = resolved.canonical;
@@ -595,6 +735,33 @@
       // inventory data)? See classifyStorageMismatch() for the full rule.
       const storageCheck = classifyStorageMismatch({ location: r.location, plant: r.plant, canonical }, ho01LocMap);
       const locationMismatch = storageCheck.status === "mismatch";
+
+      // ── MOS EVALUATION (2–4 month window) ─────────────────────────────
+      // Judges the REQUESTED QUANTITY itself — not just whether HO01 has
+      // stock (that's Tabs 1/3) — against the same TARGET_MOS(4)/
+      // REQUEST_ELIGIBILITY_MOS(2) window Branch Demand fills to. Uses this
+      // request line's own requesting plant (reqPlant) and its live AMC/SOH,
+      // netted against anything already in transit to it (Open Outbound).
+      const familyHint = purchOrgActualFamily || classFamily(programClass);
+      const amcRow = mosEvalAvailable ? findAmcRowForCanonical(canonical, familyHint) : null;
+      const branchAmc = amcRow ? amcRow.amcs[reqPlant] : null;
+      const hasAmc = branchAmc !== null && branchAmc !== undefined;
+      const mosNow = hasAmc
+        ? (branchAmc > 0 ? liveReqPlant / branchAmc : (liveReqPlant > 0 ? Infinity : null))
+        : null;
+      const outboundToBranch = (reqPlant && canonical)
+        ? (openOutboundMap.get(`${reqPlant}::${canonical}`) || 0)
+        : 0;
+      const targetNeed = hasAmc
+        ? Math.max(0, REQAN_TARGET_MOS * branchAmc - liveReqPlant - outboundToBranch)
+        : null;
+      const projectedSoh = liveReqPlant + outboundToBranch + (r.reqQty || 0);
+      const projectedMos = hasAmc
+        ? (branchAmc > 0 ? projectedSoh / branchAmc : (projectedSoh > 0 ? Infinity : null))
+        : null;
+      const mosVerdict = classifyMosVerdict({
+        hasAmc, mosNow, targetNeed: targetNeed || 0, reqQty: r.reqQty || 0, projectedMos, outboundToBranch,
+      });
 
       let status;
       if (!canonical || !inInventory) status = "no-match";
@@ -643,6 +810,8 @@
         locationMismatch, storageCheckStatus: storageCheck.status,
         storageCheckHo01Locations: storageCheck.ho01Locations || "",
         storageCheckReason: storageCheck.reason || "",
+        branchAmc, hasAmc, mosNow, outboundToBranch, targetNeed, projectedMos,
+        mosVerdictKey: mosVerdict.key, mosVerdictLabel: mosVerdict.label, mosVerdictDetail: mosVerdict.detail,
         hasSuggestion,
         suggestedCode: hasSuggestion
           ? suggestionCandidates.map(c => `${c.code} (${fmtQty(c.qty)})`).join(" or ")
@@ -772,6 +941,7 @@
       rows, ho01NotRequested, ho01NotRequestedAll, ho01NotRequestedAllCount: ho01NotRequestedAll.length, mosDataLoaded,
       availableMatTypes, matTypeDataAvailable,
       availableMatGroups, matGroupDataAvailable,
+      mosEvalAvailable,
     };
   }
 
@@ -925,7 +1095,7 @@
   // (tracked in reqCodeCopySelection by code text, not DOM identity or tab),
   // so you can pick codes from more than one tab and copy them together —
   // every tab's toolbar shows the same live count.
-  const REQ_CODE_TABLE_IDS = ["reqan-table-all", "reqan-table-suggest", "reqan-table-stockout", "reqan-table-notreq"];
+  const REQ_CODE_TABLE_IDS = ["reqan-table-all", "reqan-table-suggest", "reqan-table-stockout", "reqan-table-notreq", "reqan-table-mos"];
 
   function renderCopyCodesToolbars() {
     REQ_CODE_TABLE_IDS.forEach(id => {
@@ -1060,6 +1230,7 @@
       rows, ho01NotRequested, ho01NotRequestedAll, mosDataLoaded,
       availableMatTypes, matTypeDataAvailable,
       availableMatGroups, matGroupDataAvailable,
+      mosEvalAvailable,
     } = buildRequestAnalysis();
 
     renderMatTypeFilterBar(availableMatTypes, matTypeDataAvailable);
@@ -1105,6 +1276,12 @@
       (!searchQ || r.code.toLowerCase().includes(searchQ) || (r.desc || "").toLowerCase().includes(searchQ))
       && personMatches(r) && matTypeMatches(r) && matGroupMatches(r) && clsMatches(r)
     );
+    // TAB 5: MOS Evaluation — same base filter set as Tabs 2/3 (search,
+    // person, Material Type/Group, Program Classification), deliberately NOT
+    // gated by the HO01 status filter (statusF) — a line can be over- or
+    // under-requested regardless of whether HO01 happens to have stock for
+    // it right now.
+    const mosEvalRows = rows.filter(r => matches(r) && personMatches(r) && matTypeMatches(r) && matGroupMatches(r) && clsMatches(r));
 
     // ── KPIs (PERSON-SCOPED DASHBOARD KPIS) ────────────────────────────────
     // These 6 cards used to be built off the raw, unfiltered `rows` /
@@ -1343,9 +1520,78 @@
       ], "request_analysis_ho01_not_requested");
     }
 
+    // ── TAB 5: MOS Evaluation (2–4 Month Window) ────────────────────────────
+    // Judges each request line's QUANTITY — not just whether HO01 has stock
+    // for it — against the same TARGET_MOS(4)/REQUEST_ELIGIBILITY_MOS(2)
+    // window Branch Demand fills branches to, netting out anything already
+    // in transit (Open Outbound) exactly the way brdComputeMaterialAllocation()
+    // does. See classifyMosVerdict() near the top of this file for the
+    // verdict rules.
+    if (!mosEvalAvailable) {
+      document.getElementById("reqan-table-mos").innerHTML =
+        `<div class="alert-warning" style="margin:0.8rem 0;font-size:0.8rem">⚠️ No AMC file is loaded, so branch consumption (MOS) can't be computed. Load an AMC file on the "📐 MOS by Plant" page, then come back here to evaluate whether each requested quantity fits the ${REQAN_ELIGIBILITY_MOS}–${REQAN_TARGET_MOS} month target window.</div>`;
+      const mosKpiEl = document.getElementById("reqan-mos-kpis");
+      if (mosKpiEl) mosKpiEl.innerHTML = "";
+    } else {
+      const countBy = key => mosEvalRows.filter(r => r.mosVerdictKey === key).length;
+      const mosKpiEl = document.getElementById("reqan-mos-kpis");
+      if (mosKpiEl) {
+        mosKpiEl.innerHTML = [
+          reqKpi("Justified", countBy("justified").toLocaleString(), `Within the ${REQAN_ELIGIBILITY_MOS}–${REQAN_TARGET_MOS} month target window`, "green"),
+          reqKpi("Over-Requested", countBy("over").toLocaleString(), `Would push branch above ${REQAN_TARGET_MOS} months`, "amber"),
+          reqKpi("Under-Requested", countBy("under").toLocaleString(), `Leaves branch short of the ${REQAN_TARGET_MOS}-month target`, "blue"),
+          reqKpi("Not Eligible — Overstocked", countBy("overstocked").toLocaleString(), `Branch already at/above ${REQAN_TARGET_MOS} months`, "red"),
+          reqKpi("No AMC Data", countBy("no-amc").toLocaleString(), "Can't evaluate — no branch AMC commitment on file", "purple"),
+        ].join("");
+      }
+
+      const cols5 = [
+        { key: "prNum", label: "PR Num" },
+        { key: "canonical", label: "Material Code", cellClass: "col-mat-code-wrap" },
+        { key: "desc", label: "Description" },
+        { key: "reqQty", label: "Requested Qty", fmt: v => fmtQty(v), cellClass: "col-qty" },
+        { key: "liveReqPlant", label: `${reqPlant || "Branch"} SOH (Now)`, fmt: v => fmtQty(v), cellClass: "col-qty" },
+        { key: "branchAmc", label: "Branch AMC",
+          fmt: (v, r) => r.hasAmc ? fmtQty(v) : mosNABadge(), raw: true, cellClass: "col-qty" },
+        { key: "mosNow", label: "Current MOS",
+          fmt: (v, r) => r.hasAmc ? fmtMosVal(v) : mosNABadge(), raw: true, cellClass: "col-qty" },
+        { key: "outboundToBranch", label: "Already In Transit (Open Outbound)",
+          fmt: v => v > 0 ? fmtQty(v) : "—", cellClass: "col-qty" },
+        { key: "targetNeed", label: `Target Need (to ${REQAN_TARGET_MOS}mo)`,
+          fmt: (v, r) => r.hasAmc ? fmtQty(v) : "—", cellClass: "col-qty" },
+        { key: "projectedMos", label: "Projected MOS After Request",
+          fmt: (v, r) => r.hasAmc ? fmtMosVal(v) : mosNABadge(), raw: true, cellClass: "col-qty" },
+        { key: "mosVerdictLabel", label: "Verdict",
+          fmt: (v, r) => reqMosVerdictBadge(r), raw: true },
+      ];
+      document.getElementById("reqan-table-mos").innerHTML = buildTable(
+        mosEvalRows, cols5,
+        (row) => row.mosVerdictKey === "overstocked" ? "row-red" : (row.mosVerdictKey === "over" ? "row-amber" : (row.mosVerdictKey === "under" ? "row-blue" : "")),
+        "", { id: "reqan-export-mos", title: "" }
+      );
+      wireTableExport("reqan-export-mos", mosEvalRows.map(r => ({
+        prNum: r.prNum, canonical: r.canonical, desc: r.desc, reqQty: r.reqQty,
+        branchSoh: r.liveReqPlant, branchAmc: r.hasAmc ? r.branchAmc : "N/A",
+        mosNow: r.hasAmc ? (r.mosNow === Infinity ? "Infinite" : Number(r.mosNow).toFixed(2)) : "N/A",
+        outboundToBranch: r.outboundToBranch,
+        targetNeed: r.hasAmc ? r.targetNeed : "N/A",
+        projectedMos: r.hasAmc ? (r.projectedMos === Infinity ? "Infinite" : Number(r.projectedMos).toFixed(2)) : "N/A",
+        verdict: r.mosVerdictLabel, verdictDetail: r.mosVerdictDetail,
+      })), [
+        { key: "prNum", label: "Purchase Req Num" }, { key: "canonical", label: "Material Code" },
+        { key: "desc", label: "Description" }, { key: "reqQty", label: "Requested Qty" },
+        { key: "branchSoh", label: `${reqPlant || "Branch"} SOH (Now)` }, { key: "branchAmc", label: "Branch AMC" },
+        { key: "mosNow", label: "Current MOS" },
+        { key: "outboundToBranch", label: "Already In Transit (Open Outbound)" },
+        { key: "targetNeed", label: `Target Need (to ${REQAN_TARGET_MOS}mo)` },
+        { key: "projectedMos", label: "Projected MOS After Request" },
+        { key: "verdict", label: "Verdict" }, { key: "verdictDetail", label: "Verdict Detail" },
+      ], "request_analysis_mos_evaluation");
+    }
+
     // FEAT-COPY-CODES: (re)build the toolbar for every tab that has a code
     // column and re-apply highlighting, since buildTable() just replaced
-    // each table's DOM. Done once here (not per-tab above) since all 4
+    // each table's DOM. Done once here (not per-tab above) since all 5
     // table elements exist by this point in the render.
     renderCopyCodesToolbars();
     applyCopySelectionHighlight();
@@ -1355,6 +1601,7 @@
     setTabCount("reqan-tab-count-suggest", suggestionRows.length);
     setTabCount("reqan-tab-count-stockout", stockoutRows.length);
     setTabCount("reqan-tab-count-notreq", mosDataLoaded ? notRequested.length : 0);
+    setTabCount("reqan-tab-count-mos", mosEvalAvailable ? mosEvalRows.length : 0);
   }
 
   function setTabCount(id, n) {
