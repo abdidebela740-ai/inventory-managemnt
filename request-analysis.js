@@ -467,13 +467,41 @@
   // the existing Material Standardization mapping table. Falls back to the
   // raw code (uppercased) when no mapping entry exists, in case the request
   // already used a real SAP code.
-  function resolveRequestMaterial(rawCode) {
+  function resolveRequestMaterial(rawCode, purchasingOrg) {
     const raw = String(rawCode || "").trim();
     if (!raw) return { canonical: "", desc: "", viaMapping: false, raw };
     const rawUpper = raw.toUpperCase();
     if (typeof mappingTable !== "undefined" && mappingTable.has(rawUpper)) {
-      const entry = mappingTable.get(rawUpper);
-      return { canonical: entry.targetCode, desc: entry.targetDesc || "", viaMapping: true, raw };
+      const stypeMap = mappingTable.get(rawUpper);
+      // STOCK-TYPE-MAP BUGFIX: mappingTable is
+      // Map<sourceCode -> Map<stockType("RDF"|"Q") -> {targetCode, targetDesc, factor}>>
+      // (see loadMappingFile()/applyMaterialMapping() in script.js) —
+      // mappingTable.get(code) returns that INNER Map, never the entry
+      // object itself. This used to read `.targetCode`/`.targetDesc`
+      // straight off that inner Map, which is always undefined (a Map
+      // instance has no such properties) — silently producing an
+      // undefined `canonical` for EVERY request line whose typed code had
+      // ANY rule in the mapping file at all (the overwhelming majority
+      // once a mapping file is loaded). That cascaded into a blank
+      // Material Code cell, "0 in stock", and "Branch AMC Not Committed"
+      // across the page for those lines — while lines whose code had NO
+      // mapping-file rule (falling through to the raw-code branch below)
+      // displayed correctly, exactly the pattern reported.
+      //
+      // Pick the sub-entry matching this request line's own funding
+      // stream (RD01 -> RDF, HP02 -> Program/Q) when we can tell;
+      // otherwise, if the code only has ONE stock-type rule on file, use
+      // it (nothing to disambiguate) — same convention
+      // applyMaterialMapping() already uses for inventory rows.
+      const family = purchOrgFamily(purchasingOrg);
+      const wantType = family === "PROGRAM" ? "Q" : (family === "RDF" ? "RDF" : null);
+      const entry = (wantType && stypeMap.get(wantType))
+        || (stypeMap.size === 1 ? [...stypeMap.values()][0] : null);
+      if (entry) {
+        return { canonical: entry.targetCode, desc: entry.targetDesc || "", viaMapping: true, raw };
+      }
+      // Multiple stock-type rules exist but we can't tell which one this
+      // line is for — don't guess; fall through and treat as the raw code.
     }
     return { canonical: raw, desc: "", viaMapping: false, raw };
   }
@@ -786,6 +814,47 @@
     return out;
   }
 
+  // ── ROLE/SCOPE ACCESS FOR REQUEST LINES ────────────────────────────────────
+  // The main inventory upload is already scoped per-user via
+  // filterRowsByAccess() (permissions.js) — a role limited to certain
+  // Special-Stock-Type/Valuation-Type combos (e.g. only R_ZME, never
+  // Q_ZLC) never sees out-of-scope rows anywhere else in the app. The
+  // Request Excel upload, though, has no Special Stock Type / Inventory
+  // Valuation Type columns of its own to check directly — it's a PR/
+  // request file, not raw inventory — so without this, a single uploaded
+  // request file mixing ZME/ZLC/ZMS lines showed EVERY line regardless of
+  // the signed-in user's scope, silently leaking materials that role is
+  // not supposed to see (they'd just show up with a blank Material Type
+  // and "0 in stock", which looks like missing data rather than a scope
+  // restriction, and worse, still exposes the description/qty numbers).
+  //
+  // scopeExcludedMaterialCodes (script.js) already tracks every raw
+  // Material code from the CURRENTLY LOADED main inventory file that this
+  // user's role/data_scopes deny (as opposed to excludedMaterialCodes,
+  // which is universal — denied for everyone). We extend it to canonical
+  // codes too (via the mapping table, so a request line typed under a
+  // different raw SAP code for the same scope-denied item is still
+  // caught) and drop any request line whose resolved canonical falls in
+  // that set, the same way ZMD items are already dropped below.
+  function buildScopeExcludedCanonicalSet() {
+    const out = new Set();
+    if (typeof scopeExcludedMaterialCodes === "undefined") return out;
+    scopeExcludedMaterialCodes.forEach(rawCode => {
+      const code = String(rawCode || "").trim();
+      if (!code) return;
+      out.add(code);
+      if (typeof mappingTable !== "undefined" && mappingTable.size > 0) {
+        const stypeMap = mappingTable.get(code.toUpperCase());
+        if (stypeMap) {
+          stypeMap.forEach(entry => {
+            if (entry.targetCode) out.add(String(entry.targetCode).trim());
+          });
+        }
+      }
+    });
+    return out;
+  }
+
   // ── CORE ANALYSIS ──────────────────────────────────────────────────────────
   function buildRequestAnalysis() {
     const hub    = (typeof HUB_PLANT === "function" || typeof HUB_PLANT !== "undefined") ? HUB_PLANT : "HO01";
@@ -793,6 +862,7 @@
     const descMap = buildCanonicalDescMap();
     const rawCodeMap = buildHo01RawCodeMap(hub); // canonical -> [{code, qty}], live SAP codes only
     const qcMap = buildCanonicalQcMap(hub); // canonical -> stock currently in Quality Inspection at hub
+    const scopeExcludedCanonical = buildScopeExcludedCanonicalSet(); // codes this role is denied
     const personMap = buildPersonMap();
     const clsMap = classificationMap(); // canonical -> Program Classification
     const matTypeMap = buildMaterialTypeMap(); // canonical -> "ZME"/"ZMS"/…
@@ -807,8 +877,21 @@
     const openOutboundMap = buildReqOpenOutboundMap();
 
     const rows = reqRows.map(r => {
-      const resolved   = resolveRequestMaterial(r.material);
+      const resolved   = resolveRequestMaterial(r.material, r.purchasingOrg);
       const canonical  = resolved.canonical;
+
+      // SCOPE-EXCLUDE-REQUEST-LINES: same role-scope enforcement the main
+      // inventory upload already gets via filterRowsByAccess() — a
+      // request file can freely mix ZME/ZLC/ZMS/etc lines even though the
+      // signed-in user's role may only be scoped to some of them. Also
+      // check the raw typed code directly (not just its resolved
+      // canonical) in case it isn't recognized by the mapping table at
+      // all, so a scope-denied raw code can't slip through unresolved.
+      if (
+        (canonical && scopeExcludedCanonical.has(canonical)) ||
+        scopeExcludedCanonical.has(String(r.material || "").trim())
+      ) return null;
+
       const inInventory = !!canonical && sohMap.has(canonical);
       // "Total" / status figures stay STANDARDIZED (converted, summed across
       // every raw code for this material) — this is unchanged and intentional.
