@@ -318,6 +318,10 @@
     reader.onload = e => {
       setTimeout(() => {
         try {
+          if (typeof XLSX === "undefined") {
+            showReqError("Excel library failed to load (network/firewall likely blocked the CDN). Please check your connection and reload the page.");
+            return;
+          }
           const wb   = XLSX.read(new Uint8Array(e.target.result), { type: "array", cellDates: true });
           const ws   = wb.Sheets[wb.SheetNames[0]];
           const data = XLSX.utils.sheet_to_json(ws, { defval: "" });
