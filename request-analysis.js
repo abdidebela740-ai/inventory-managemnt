@@ -49,6 +49,23 @@
 // "Created By" is carried through purely for visibility (shown as a column
 // in the main Request vs Stock table) — it has no effect on the analysis.
 //
+// REQUEST TYPE SCOPING (RDF vs PROGRAM/Q)
+// -----------------------------------------
+// Every material can carry an RDF record, a Program(Q) record, or both (see
+// PURCH-ORG-CHECK below). Per request line, the stream is resolved from
+// that line's own "Purchasing Org." column: RD01 = RDF, HP02 = Program.
+// This governs Tabs 1–3 and Tab 5, all of which are built per request line.
+// Tab 4 ("HO01 Stock Not Requested") has no request line of its own to read
+// a Purchasing Org. from — by definition, these are materials that never
+// appear in the file at all. It's instead scoped by a single file-level
+// Request Type, derived the same way reqPlant is: the most frequent
+// resolvable Purchasing Org. family across every row in the file (majority
+// RD01 -> RDF file, majority HP02 -> Program file; a warning is shown if
+// both appear roughly evenly). Only HO01 stock carrying a record in that
+// same stream is shown in Tab 4. If the file has no usable Purchasing Org.
+// data at all, this is inconclusive and Tab 4 is left unscoped (unchanged
+// from prior behavior).
+//
 // WHAT THIS ANALYSIS SHOWS
 // -------------------------
 // 1. Request vs Stock (side-by-side) — every request line, with the request
@@ -71,7 +88,9 @@
 // 3. HO01 Stockout but Requested — request lines whose resolved material has
 //    ZERO stock at HO01 right now.
 // 4. HO01 Stock Not Requested — every material with stock at HO01 that does
-//    NOT appear anywhere in the uploaded request file at all.
+//    NOT appear anywhere in the uploaded request file at all, scoped to the
+//    file's own Request Type (RDF vs Program) — see REQUEST TYPE SCOPING
+//    above.
 // 5. MOS Evaluation (2–4 Month Window) — judges the REQUESTED QUANTITY on
 //    each line against the same TARGET_MOS(4)/REQUEST_ELIGIBILITY_MOS(2)
 //    fill window Branch Demand uses (branch-demand.js), using the
@@ -129,6 +148,18 @@
   let reqFileName = "";
   let reqPlant  = "";   // the (single) requesting plant this file is for
   let reqPlantMismatch = false; // true if the file had more than one distinct Plant value
+
+  // REQUEST-TYPE-SCOPE: the file-level Request Type ("RDF" or "PROGRAM"),
+  // derived the same way reqPlant is — from the most frequent resolvable
+  // Purchasing Org. family (RD01 -> RDF, HP02 -> PROGRAM) across every row
+  // in the uploaded file. Rows with no Purchasing Org., or an org other
+  // than RD01/HP02, don't count toward this. Stays "" (inconclusive) when
+  // the file has no usable Purchasing Org. data at all — in that case
+  // nothing is scoped by request type and behavior is unchanged.
+  // Used to scope Tab 4 ("HO01 Stock Not Requested"), since those rows have
+  // no request line / Purchasing Org. of their own to read a stream from.
+  let reqRequestType = "";
+  let reqRequestTypeMismatch = false; // true if RD01 and HP02 both appear, roughly evenly
 
   // Material Type filter (e.g. ZME, ZMS…) — multi-select. Empty set = no
   // filter applied (show everything). Populated from the "Material Type"
@@ -345,6 +376,19 @@
 
           if (!reqPlant) { showReqError("No Plant value found — every row is missing a Plant."); return; }
 
+          // REQUEST-TYPE-SCOPE: same "most frequent wins" pattern as Plant
+          // above, but over the resolvable Purchasing Org. family per row
+          // (RD01 -> RDF, HP02 -> PROGRAM). Rows with a blank or
+          // unrecognized Purchasing Org. don't count toward either side.
+          const typeCounts = new Map();
+          parsed.forEach(r => {
+            const fam = purchOrgFamily(r.purchasingOrg);
+            if (fam) typeCounts.set(fam, (typeCounts.get(fam) || 0) + 1);
+          });
+          const typeEntries = [...typeCounts.entries()].sort((a, b) => b[1] - a[1]);
+          reqRequestType = typeEntries.length ? typeEntries[0][0] : "";
+          reqRequestTypeMismatch = typeEntries.length > 1;
+
           reqRows = parsed;
           reqFileName = file.name;
 
@@ -352,10 +396,16 @@
             const mismatchNote = reqPlantMismatch
               ? `<div class="status-name" style="color:var(--amber,#d97706)">⚠ Multiple Plant values found — using ${escHtml(reqPlant)} (most common) for scoping</div>`
               : "";
+            const typeMismatchNote = reqRequestTypeMismatch
+              ? `<div class="status-name" style="color:var(--amber,#d97706)">⚠ Both RD01 (RDF) and HP02 (Program) found — using ${escHtml(reqRequestType)} (most common) to scope "HO01 Stock Not Requested"</div>`
+              : "";
+            const typeLabel = reqRequestType
+              ? ` · Request Type ${reqRequestType === "PROGRAM" ? "Program (Q)" : "RDF"}`
+              : "";
             statusEl.innerHTML =
               `<div class="status-ok">✓ FILE LOADED</div>` +
-              `<div class="status-name">${escHtml(file.name)} (${parsed.length.toLocaleString()} lines) · Plant ${escHtml(reqPlant)}</div>` +
-              mismatchNote;
+              `<div class="status-name">${escHtml(file.name)} (${parsed.length.toLocaleString()} lines) · Plant ${escHtml(reqPlant)}${typeLabel}</div>` +
+              mismatchNote + typeMismatchNote;
           }
           if (btnEl) btnEl.textContent = "📥 Change Request File";
 
@@ -384,6 +434,8 @@
     reqFileName = "";
     reqPlant = "";
     reqPlantMismatch = false;
+    reqRequestType = "";
+    reqRequestTypeMismatch = false;
     const statusEl = document.getElementById("reqan-file-status");
     if (statusEl) { statusEl.style.display = "none"; statusEl.innerHTML = ""; }
     const btnEl = document.getElementById("reqan-upload-btn-text");
@@ -941,6 +993,22 @@
       // — ZMD items don't belong in Request Analysis at all, including this
       // "idle at HO01" list.
       if ((matTypeMap.get(code) || "") === "ZMD") return;
+
+      // REQUEST-TYPE-SCOPE: this list has no per-row Purchasing Org. to
+      // resolve a stream from (there's no request line at all — that's the
+      // whole point of this tab), so it's scoped by the file-level
+      // reqRequestType derived in loadRequestFile() instead: RD01-majority
+      // files ("RDF") only see items with an RDF record; HP02-majority
+      // files ("PROGRAM") only see items with a Program(Q) record. A
+      // material split across both streams still only counts if the
+      // in-scope stream is one of them. When reqRequestType is unknown
+      // (file has no usable Purchasing Org. data at all), this check is
+      // inconclusive and every item is left in, same as before.
+      if (reqRequestType) {
+        const codeFamilies = classFamiliesForCode(clsMap, code);
+        if (!codeFamilies.has(reqRequestType)) return;
+      }
+
       const qty = plantMap[hub] || 0;
       if (qty > 0 && !requestedCanonical.has(code)) {
         ho01NotRequestedAll.push({ code, desc: descMap.get(code) || "", qty, person: personMap.get(code) || "", programClass: clsMap.get(code) || "", materialType: matTypeMap.get(code) || "", materialGroup: matGroupMap.get(code) || "" });
