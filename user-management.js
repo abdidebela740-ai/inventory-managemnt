@@ -234,6 +234,10 @@ function openModal(mode, user) {
   // vice versa) immediately sees the affected modules lock/unlock, rather
   // than only finding out on save.
   const plantEl = document.getElementById("um-f-plant");
+  // Admin-only "Reset Password" control, edit mode only.
+  const resetPwBtn = document.getElementById("um-reset-password-btn");
+  if (resetPwBtn) resetPwBtn.addEventListener("click", () => resetUserPassword(user));
+
   if (plantEl && fullEdit) {
     plantEl.addEventListener("change", () => applyPlantGatingToPermCheckboxes(plantEl.value));
     applyPlantGatingToPermCheckboxes(plantEl.value);
@@ -348,6 +352,16 @@ function modalBodyHtml(mode, user) {
         <div style="font-weight:700;">${escapeHtml(user.full_name || "(no name)")}</div>
         <div class="um-email">${escapeHtml(user.email)}</div>
       </div>
+      ${fullEdit ? `
+      <div class="field">
+        <label for="um-f-new-password">Reset Password (Admin)</label>
+        <div style="display:flex; gap:8px; align-items:flex-start;">
+          <input type="password" id="um-f-new-password" placeholder="New password, at least 8 characters" style="flex:1;" />
+          <button type="button" id="um-reset-password-btn" class="btn btn-sm">Set Password</button>
+        </div>
+        <div class="field-hint">Sets this user's password immediately — share it with them directly.</div>
+      </div>
+      ` : ""}
     `}
 
     <div class="field">
@@ -487,6 +501,42 @@ async function updateUser() {
   showAlert("success", `${user.full_name || user.email} was updated.`);
   closeModal();
   await loadUsers();
+}
+
+// Admin-only: set a new password for another user directly, without
+// touching role/plant/scopes. Separate from saveModal()/updateUser() on
+// purpose — this is a distinct, immediately-effective action (calls
+// admin-reset-password, which needs the service-role key server-side),
+// not part of the "Save" diff.
+async function resetUserPassword(user) {
+  const pwInput = document.getElementById("um-f-new-password");
+  const btn = document.getElementById("um-reset-password-btn");
+  if (!pwInput || !btn) return;
+
+  const password = pwInput.value;
+  if (!password || password.length < 8) {
+    showAlert("error", "New password must be at least 8 characters.");
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "Setting…";
+  try {
+    const { data, error } = await window.supabaseClient.functions.invoke("admin-reset-password", {
+      body: { user_id: user.id, new_password: password },
+    });
+
+    if (error || (data && data.error)) {
+      showAlert("error", "Could not set password: " + (data?.error || error.message));
+      return;
+    }
+
+    showAlert("success", `Password updated for ${user.full_name || user.email}.`);
+    pwInput.value = "";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Set Password";
+  }
 }
 
 // ── Alerts ────────────────────────────────────────────────────
