@@ -274,9 +274,22 @@
   //   "justified"   — requested qty lands within tolerance of target need —
   //                    brings the branch to (approximately) the 4-month
   //                    target without overshooting.
+  //   "constrained" — FULL-ALIGN-BRD: the requested qty is CORRECTLY sized
+  //                    for the branch's own need (i.e. would otherwise be
+  //                    "justified" or "under"), but Branch Demand's own
+  //                    priority-tier allocation (brdComputeMaterialAllocation,
+  //                    called with identical inputs — see brdAllocAvailable
+  //                    above) shows HO01 cannot actually supply that much
+  //                    once every other branch's competing need for this
+  //                    material is served in priority order first. Replaces
+  //                    what would otherwise show as a plain "Justified" or
+  //                    "Under-Requested" verdict whenever the two tabs would
+  //                    disagree, so this tab can never show a line as fully
+  //                    fine when Branch Demand would actually give it 0 or a
+  //                    partial amount.
   // Tolerance is 10% of target need (min 1 unit) so rounding in the
   // requester's own math doesn't get flagged as a false positive.
-  function classifyMosVerdict({ hasAmc, mosNow, targetNeed, reqQty, projectedMos, outboundToBranch }) {
+  function classifyMosVerdict({ hasAmc, mosNow, targetNeed, reqQty, projectedMos, outboundToBranch, allocInfo }) {
     const fmtMos = v => (v === null || v === undefined) ? "—" : (v === Infinity ? "∞" : v.toFixed(1));
     if (!hasAmc) {
       return { key: "no-amc", label: "No AMC Data",
@@ -286,6 +299,26 @@
       return { key: "overstocked", label: "Not Eligible — Overstocked",
         detail: `${reqPlant || "This branch"} is already at ${fmtMos(mosNow)} months — at/above the ${REQAN_TARGET_MOS}-month target, this line should not have been requested.` };
     }
+
+    // ── FULL-ALIGN-BRD: can HO01 actually supply this, given every other
+    // branch's competing priority-tier need for the same material right
+    // now? Checked BEFORE the sizing verdict below so a shortfall always
+    // wins over "the number itself was well-chosen" — a branch doesn't
+    // benefit from a mathematically correct request HO01 can't fill.
+    // allocInfo is null whenever brdAllocAvailable is false (branch-demand.js
+    // not loaded / no AMC file) or this branch isn't in mosPlants — in
+    // either case this check is silently skipped and behavior is unchanged
+    // from before FULL-ALIGN-BRD.
+    if (allocInfo && reqQty > 0) {
+      const tol2 = Math.max(1, reqQty * 0.05);
+      const shortBy = reqQty - allocInfo.allocQty;
+      if (shortBy > tol2) {
+        return { key: "constrained",
+          label: allocInfo.allocQty <= 0.0001 ? "Needed — HO01 Has None to Give" : "Needed — HO01 Can Only Partly Supply",
+          detail: allocInfo.explanation };
+      }
+    }
+
     const tol = Math.max(1, targetNeed * 0.1);
     const diff = reqQty - targetNeed;
     if (targetNeed <= 0 && reqQty > 0) {
@@ -300,10 +333,12 @@
       const stillCritical = projectedMos !== null && projectedMos !== Infinity && projectedMos < REQAN_ELIGIBILITY_MOS;
       return { key: "under", label: stillCritical ? "Under-Requested — Still Critical" : "Under-Requested",
         detail: `Requesting ${fmtQty(reqQty)} vs a target need of ${fmtQty(targetNeed)} leaves ${reqPlant || "this branch"} at ${fmtMos(projectedMos)} months` +
-          (stillCritical ? ` — still below the ${REQAN_ELIGIBILITY_MOS}-month floor. Consider requesting more.` : `, short of the ${REQAN_TARGET_MOS}-month target.`) };
+          (stillCritical ? ` — still below the ${REQAN_ELIGIBILITY_MOS}-month floor. Consider requesting more.` : `, short of the ${REQAN_TARGET_MOS}-month target.`)
+          + (allocInfo ? ` HO01 can currently supply the full amount requested (${fmtQty(allocInfo.allocQty)} available at ${reqPlant || "this branch"}'s ${allocInfo.tierLabel} priority tier), so this is purely a request-sizing issue, not a stock-availability one.` : "") };
     }
     return { key: "justified", label: "Justified",
-      detail: `Requested quantity brings ${reqPlant || "this branch"} to ${fmtMos(projectedMos)} months — within the ${REQAN_ELIGIBILITY_MOS}–${REQAN_TARGET_MOS} month target window.` };
+      detail: `Requested quantity brings ${reqPlant || "this branch"} to ${fmtMos(projectedMos)} months — within the ${REQAN_ELIGIBILITY_MOS}–${REQAN_TARGET_MOS} month target window.`
+        + (allocInfo ? ` HO01 can currently supply it in full (${allocInfo.tierLabel} priority tier).` : "") };
   }
 
   function reqMosVerdictBadge(r) {
@@ -312,6 +347,11 @@
       "over":        { bg: "rgba(217,119,6,0.14)",   color: "var(--amber,#d97706)", icon: "⬆" },
       "under":       { bg: "rgba(37,99,235,0.14)",   color: "var(--blue)",          icon: "⬇" },
       "overstocked": { bg: "rgba(220,38,38,0.14)",   color: "var(--red)",           icon: "🚫" },
+      // FULL-ALIGN-BRD: request is correctly SIZED but Branch Demand's own
+      // priority allocation can't (fully) SUPPLY it right now — distinct
+      // amber/red pairing from "over"/"overstocked" so it reads as a
+      // stock-availability problem, not a request-quality one.
+      "constrained": { bg: "rgba(220,38,38,0.14)",   color: "var(--red)",           icon: "⚖️" },
       "no-amc":      { bg: "rgba(120,120,120,0.14)", color: "var(--muted)",         icon: "❓" },
     };
     const s = M[r.mosVerdictKey] || M["no-amc"];
@@ -876,6 +916,94 @@
     const mosEvalAvailable = typeof mosMerged !== "undefined" && mosMerged.length > 0;
     const openOutboundMap = buildReqOpenOutboundMap();
 
+    // ── FULL ALIGNMENT WITH BRANCH DEMAND'S PRIORITY ALLOCATION ─────────────
+    // FULL-ALIGN-BRD: previously this tab only judged whether the REQUESTED
+    // QUANTITY was the right size for the branch's own MOS gap, in isolation
+    // — it never checked whether HO01 actually has enough stock to give the
+    // branch that amount once every OTHER branch's competing need for the
+    // same material is weighed in priority order (Critical > High > Medium,
+    // see branch-demand.js file header "PRIORITY ALLOCATION"). That meant a
+    // line could show "Justified" here while Branch Demand's own allocation
+    // gave the branch 0 or a partial amount for the exact same material,
+    // because a more urgent branch used up HO01's available stock first.
+    //
+    // Rather than re-deriving that allocation math a second time (and
+    // risking the two tabs drifting apart again), this calls Branch
+    // Demand's OWN brdComputeMaterialAllocation() directly — the identical
+    // function, with the identical inputs (sohMap, HO01 unrestricted/QC
+    // breakdown, national open-outbound map, buffer) it uses on its own
+    // page — so a "would HO01 actually give this branch the stock" verdict
+    // here can never disagree with what Branch Demand itself would show for
+    // that branch/material. Only degrades gracefully (brdAllocAvailable =
+    // false) if branch-demand.js hasn't loaded yet or the AMC file isn't
+    // uploaded — script.js load order (script.js → mos.js → branch-demand.js
+    // → request-analysis.js) should prevent that in practice.
+    const brdAllocAvailable = mosEvalAvailable
+      && typeof brdComputeMaterialAllocation === "function"
+      && typeof brdBuildHo01Breakdown === "function"
+      && typeof brdBuildOpenOutboundMap === "function"
+      && typeof mosPlants !== "undefined" && mosPlants.length > 0;
+    // ho01BreakdownForAlloc / brdOpenOutboundForAlloc / brdBufferForAlloc are
+    // the EXACT SAME three inputs brdComputeMaterialAllocation() is called
+    // with on the Branch Demand page itself (see renderBranchDemand() there)
+    // — not Request Analysis's own qcMap/openOutboundMap (buildReqOpenOutboundMap
+    // above), which are shaped differently and used for other tabs.
+    const ho01BreakdownForAlloc   = brdAllocAvailable ? brdBuildHo01Breakdown() : new Map();
+    const brdOpenOutboundForAlloc = brdAllocAvailable ? brdBuildOpenOutboundMap() : { byPlant: new Map(), byCode: new Map() };
+    // brdBufferMos is Branch Demand's own shared (Supabase-synced) buffer
+    // setting — use it as-is so both tabs reserve the exact same HO01
+    // buffer quantity; falls back to 0 (no reserve) if that page's setting
+    // hasn't loaded in this session yet.
+    const brdBufferForAlloc = (typeof brdBufferMos === "number" && !isNaN(brdBufferMos)) ? brdBufferMos : 0;
+    // One allocation run per DISTINCT material (canonical+stream), not per
+    // request line — brdComputeMaterialAllocation() computes every branch's
+    // share for that material at once, so multiple request lines for the
+    // same material (different branches, or duplicate lines) reuse one
+    // cached result instead of re-running the tier waterfall repeatedly.
+    const brdAllocCache = new Map(); // "CODE\u241FTYPE" -> brdComputeMaterialAllocation() result
+    function getBrdAllocationForAmcRow(amcRow) {
+      if (!brdAllocAvailable || !amcRow) return null;
+      const key = `${amcRow.code}\u241F${amcRow.type || ""}`;
+      if (brdAllocCache.has(key)) return brdAllocCache.get(key);
+      let calc = null;
+      try {
+        calc = brdComputeMaterialAllocation(amcRow, sohMap, brdBufferForAlloc, ho01BreakdownForAlloc, brdOpenOutboundForAlloc);
+      } catch (e) {
+        calc = null; // never let an allocation edge case break the whole tab
+      }
+      brdAllocCache.set(key, calc);
+      return calc;
+    }
+    // Given the AMC row and a requesting branch, returns everything
+    // classifyMosVerdict() needs to judge stock AVAILABILITY (as opposed to
+    // request SIZE): what that branch would actually be allocated for this
+    // material under Branch Demand's own tier waterfall right now, plus a
+    // human-readable explanation. Reuses branch-demand.js's OWN
+    // brdPriorityExplanation() — same "line" object shape it builds for
+    // itself (see brdBuildLines()) — so the wording matches Branch Demand's
+    // own equity-audit tooltip exactly, not a re-paraphrased version of it.
+    function getBrdAllocInfoForRow(amcRow, plantCode) {
+      if (!brdAllocAvailable || !amcRow || !plantCode) return null;
+      const calc = getBrdAllocationForAmcRow(amcRow);
+      if (!calc) return null;
+      const b = calc.perBranch.find(x => x.plant === plantCode);
+      if (!b) return null; // plantCode not a recognized branch plant in mosPlants
+      const lineForExplanation = {
+        hasAmc: b.hasAmc, priorityTier: b.tier, priorityLabel: b.tierLabel,
+        need: b.need, alloc: b.allocComputed, fillPct: b.fillPct,
+        tierBreakdown: calc.tierBreakdown, availableHo: calc.availableHo,
+        sohHo: calc.sohHo, outboundTotal: calc.outboundTotal, bufferQty: calc.bufferQty,
+      };
+      const explanation = (typeof brdPriorityExplanation === "function")
+        ? brdPriorityExplanation(lineForExplanation)
+        : `Priority tier: ${b.tierLabel}. HO01 available for this material: ${fmtQty(calc.availableHo)}.`;
+      return {
+        allocQty: b.allocComputed, tierKey: b.tier, tierLabel: b.tierLabel,
+        availableHo: calc.availableHo, totalNeed: calc.totalNeed, isPartial: calc.isPartial,
+        fillPct: b.fillPct, explanation,
+      };
+    }
+
     const rows = reqRows.map(r => {
       const resolved   = resolveRequestMaterial(r.material, r.purchasingOrg);
       const canonical  = resolved.canonical;
@@ -1010,8 +1138,15 @@
       const projectedMos = hasAmc
         ? (branchAmc > 0 ? projectedSoh / branchAmc : (projectedSoh > 0 ? Infinity : null))
         : null;
+      // FULL-ALIGN-BRD: this branch's actual share of HO01's priority-tier
+      // allocation for this exact material right now — null whenever
+      // brdAllocAvailable is false or reqPlant isn't a recognized branch
+      // plant, in which case classifyMosVerdict() skips the availability
+      // check entirely and behaves exactly as before FULL-ALIGN-BRD.
+      const brdAllocInfo = hasAmc ? getBrdAllocInfoForRow(amcRow, reqPlant) : null;
       const mosVerdict = classifyMosVerdict({
         hasAmc, mosNow, targetNeed: targetNeed || 0, reqQty: r.reqQty || 0, projectedMos, outboundToBranch,
+        allocInfo: brdAllocInfo,
       });
 
       let status;
