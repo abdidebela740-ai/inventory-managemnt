@@ -851,18 +851,26 @@
       // ever for one of them).
       //
       // resolvedType decides which single stream this line belongs to:
-      //   1. Trust the line's own typed Purchasing Org. when it's valid FOR
-      //      THIS MATERIAL (i.e. the material actually has a record in that
-      //      family) — this is the strongest, most specific signal we have.
-      //   2. Otherwise, if the material only has ONE stream on file at all,
-      //      use that (nothing to disambiguate).
+      //   1. TRUST-PURCH-ORG: if the line has a typed Purchasing Org.,
+      //      that's authoritative — RD01 always means RDF, HP02 always
+      //      means Program(Q). Used directly, not gated behind whether
+      //      the classification map (clsMap) happens to also carry an
+      //      entry for that stream — clsMap and the AMC file (mosMerged)
+      //      are built from the same source but can drift in edge cases,
+      //      and gating here was silently blocking a correct RD01→RDF /
+      //      HP02→Program lookup whenever that happened, making AMC data
+      //      that genuinely exists on file show as "not committed".
+      //   2. Otherwise (no usable Purchasing Org.), if the material only
+      //      has ONE stream on file at all, use that (nothing to
+      //      disambiguate).
       //   3. Otherwise (no usable Purchasing Org., material is dual-stream)
       //      stays unresolved — we genuinely don't know which side this
-      //      line is, so we don't guess.
+      //      line is, so we don't guess (see findAmcRowForCanonical's own
+      //      fallback for that case).
       const purchOrgExpectedFamily = purchOrgFamily(r.purchasingOrg);
       const knownFamilies = classFamiliesForCode(clsMap, canonical);
       let resolvedFamily = "";
-      if (purchOrgExpectedFamily && knownFamilies.has(purchOrgExpectedFamily)) {
+      if (purchOrgExpectedFamily) {
         resolvedFamily = purchOrgExpectedFamily;
       } else if (knownFamilies.size === 1) {
         resolvedFamily = [...knownFamilies][0];
