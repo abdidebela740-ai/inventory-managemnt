@@ -1472,6 +1472,12 @@ function brdBuildLines(sohMap) {
     // stream from raw inventory qty alone and risk disagreeing with it (see
     // brdMaterialScope's own header comment).
     const matScope = brdMaterialScope(row.code, row.type);
+    // ZMD-EXCLUDE: Branch Demand is scoped to ZME/ZMS/ZLC valuation-type
+    // materials only, per explicit instruction — ZMD (RD4/HP4) items are
+    // dropped here, before they can even populate the Material Type filter
+    // option list, so they never appear anywhere on this page (list,
+    // filters, KPIs, or exports).
+    if (matScope.suffix === "ZMD") return;
     if (matScope.suffix) availableMatTypesSet.add(matScope.suffix);
     if (brdStockType && matScope.prefix !== brdStockType) return;
     // Material Type filter (ZME/ZMS/ZLC/ZMD — see brdMatTypeFilter above).
