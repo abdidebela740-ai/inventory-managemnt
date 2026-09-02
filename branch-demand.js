@@ -1479,8 +1479,19 @@ function brdBuildLines(sohMap) {
     // once a filter is active, same as any other filter here — there's
     // nothing to match it against.
     if (brdMatTypeFilter.size > 0 && !brdMatTypeFilter.has(matScope.suffix)) return;
-    const purchGroup = matScope.scope ? (PURCHASING_GROUP_MAP[matScope.scope] || "") : "";
-    const purchOrg   = matScope.prefix ? (PURCH_ORG_MAP[matScope.prefix] || "") : "";
+    // STREAM-AMBIGUOUS GUARD: row.streamAmbiguous (set in mos.js's
+    // buildAmcClassIndex — see its header comment) means this exact code
+    // shows up as BOTH an RDF row and a Q row purely from unresolved/
+    // duplicate AMC entries, with no mapping-file rule to say which is
+    // real. RD4 vs HP4 (or any Purch. Group/Org pair) genuinely can't be
+    // trusted here — showing either one as if it were settled would just
+    // relocate the ambiguity instead of surfacing it. Blank the purchasing
+    // fields and rely on the existing "unclassified, held back" mechanism
+    // (see brdIsRequestEligible below) so these lines can't be silently
+    // approved/exported until a human resolves AMC.xlsx / adds a mapping
+    // rule.
+    const purchGroup = (!row.streamAmbiguous && matScope.scope) ? (PURCHASING_GROUP_MAP[matScope.scope] || "") : "";
+    const purchOrg   = (!row.streamAmbiguous && matScope.prefix) ? (PURCH_ORG_MAP[matScope.prefix] || "") : "";
     const stockTypeLabel = matScope.prefix ? (STOCK_TYPE_LABEL[matScope.prefix] || matScope.prefix) : "";
 
     const calc = brdComputeMaterialAllocation(row, sohMap, brdBufferMos, ho01Breakdown, openOutboundMap);
@@ -1590,6 +1601,7 @@ function brdBuildLines(sohMap) {
         approved: !!draft.approved, manual: hasManual,
         surplusPlants, outboundQty: b.outboundQty,
         stockPrefix: matScope.prefix, stockTypeLabel, matType: matScope.suffix || "", purchGroup, purchOrg,
+        streamAmbiguous: !!row.streamAmbiguous,
         storageLoc: effectiveStorageLoc,
         storageLocInferred: hasManualStorageLoc ? false : storageInfo.inferred,
         storageLocManual: hasManualStorageLoc,
@@ -2146,8 +2158,18 @@ function brdRenderTables(lines, canEdit) {
           ? `<input type="text" maxlength="10" class="brd-storageloc-input ${cls}" title="${title}" data-plant="${escHtml(r.plant)}" data-code="${escHtml(r.code)}" value="${escHtml(v || "")}" placeholder="— none found —" />`
           : (v ? `<span class="${cls}" title="${title}">${escHtml(v)}</span>` : `<span class="brd-note-scale" title="${title}">— none found</span>`);
       } },
-    { key: "purchGroup", label: "Purch. Group", fmt: v => v ? escHtml(v) : "—", raw: true },
-    { key: "purchOrg", label: "Purch. Org", fmt: v => v ? escHtml(v) : "—", raw: true },
+    { key: "purchGroup", label: "Purch. Group", raw: true,
+      fmt: (v, r) => v
+        ? escHtml(v)
+        : (r.streamAmbiguous
+            ? `— <span title="This material's own AMC.xlsx entries classify it as BOTH RDF and Health Program (Q) with no Mapping Stock Type rule to say which is correct — Purch. Group/Org withheld until resolved. Check AMC.xlsx for a duplicate row on this code, or add a Mapping Stock Type entry to disambiguate." style="cursor:help">⚠️</span>`
+            : "—") },
+    { key: "purchOrg", label: "Purch. Org", raw: true,
+      fmt: (v, r) => v
+        ? escHtml(v)
+        : (r.streamAmbiguous
+            ? `— <span title="This material's own AMC.xlsx entries classify it as BOTH RDF and Health Program (Q) with no Mapping Stock Type rule to say which is correct — Purch. Group/Org withheld until resolved. Check AMC.xlsx for a duplicate row on this code, or add a Mapping Stock Type entry to disambiguate." style="cursor:help">⚠️</span>`
+            : "—") },
     { key: "status", label: "Status", fmt: v => brdStatusBadge(v), raw: true },
   );
 
@@ -2160,7 +2182,7 @@ function brdRenderTables(lines, canEdit) {
     // material — its Notes/Stock Type columns show the underlying rows a
     // classification would need).
     const heldBackBanner = unclassifiedHeldBack
-      ? `<div class="alert-info" style="margin:0 0 0.5rem 0">${unclassifiedHeldBack} otherwise-eligible line${unclassifiedHeldBack === 1 ? "" : "s"} held back from this tab because Purch. Group / Purch. Org couldn't be classified (no Special Stock Type / Inventory Valuation Type found on any live row for the material) — check the Analysis tab for those materials, or approve/hand-edit a line to force it into view here.</div>`
+      ? `<div class="alert-info" style="margin:0 0 0.5rem 0">${unclassifiedHeldBack} otherwise-eligible line${unclassifiedHeldBack === 1 ? "" : "s"} held back from this tab because Purch. Group / Purch. Org couldn't be classified — either no Special Stock Type / Inventory Valuation Type was found on any live row for the material, or (⚠️ icon on the Analysis tab) AMC.xlsx classifies the same code as BOTH RDF and Health Program with no Mapping Stock Type rule to disambiguate — check the Analysis tab for those materials, or approve/hand-edit a line to force it into view here.</div>`
       : "";
     reqTableEl.innerHTML = heldBackBanner + (requestLines.length
       ? buildTable(requestLines, reqCols, (row) => row.status === "none" ? "row-critical" : (row.qcOnly ? "row-qc" : ""))
@@ -2296,7 +2318,11 @@ function brdExportTemplate() {
   if (!approved.length && typeof showError === "function") {
     showError("Exported — but both sheets are empty because no lines are checked/approved yet. Check the boxes for the lines you want, then re-export.");
   } else if (unclassified.length && typeof showError === "function") {
-    showError(`Exported — but ${unclassified.length} approved line(s) couldn't be classified as RDF or Health Program (Purchasing Group / Purch. Organization left blank for those rows). Check the Stock Type column on the Working sheet before submitting.`);
+    const ambiguousCount = unclassified.filter(l => l.streamAmbiguous).length;
+    const extra = ambiguousCount
+      ? ` ${ambiguousCount} of these are classified as BOTH RDF and Health Program in AMC.xlsx with no Mapping Stock Type rule to tell them apart — fix AMC.xlsx or the mapping file, don't guess which one to submit as.`
+      : "";
+    showError(`Exported — but ${unclassified.length} approved line(s) couldn't be classified as RDF or Health Program (Purchasing Group / Purch. Organization left blank for those rows). Check the Stock Type column on the Working sheet before submitting.${extra}`);
   }
 }
 
