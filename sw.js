@@ -13,7 +13,7 @@
 // file. This is what forces old clients to pick up new files.
 // ════════════════════════════════════════════════════════════════
 
-const CACHE_VERSION   = "v1.4.0";                 // ⬅ bump this on every release
+const CACHE_VERSION   = "v1.4.1";                 // ⬅ bump this on every release
 const STATIC_CACHE    = `epss-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE   = `epss-runtime-${CACHE_VERSION}`;
 const CDN_CACHE        = `epss-cdn-${CACHE_VERSION}`;
@@ -96,7 +96,14 @@ self.addEventListener("install", (event) => {
       const cache = await caches.open(STATIC_CACHE);
       await Promise.all(
         APP_SHELL.map((url) =>
-          cache.add(url).catch((err) => {
+          // FIX-HARD-REFRESH: cache.add(url) uses a plain fetch(), which the
+          // BROWSER's own HTTP disk cache can satisfy without hitting the
+          // network at all. That means bumping CACHE_VERSION could still
+          // silently repopulate the new SW cache with stale bytes, and only
+          // a hard refresh (which bypasses HTTP cache too) actually picked
+          // up the new file. { cache: "reload" } forces a real network
+          // fetch here, so a version bump reliably gets fresh files.
+          cache.add(new Request(url, { cache: "reload" })).catch((err) => {
             console.warn("[sw] skip pre-cache (not found yet):", url, err.message);
           })
         )
@@ -182,7 +189,10 @@ async function cacheFirst(request, cacheName) {
   const cached = await cache.match(request);
   if (cached) return cached;
   try {
-    const networkResponse = await fetch(request);
+    // FIX-HARD-REFRESH: same reasoning as the install-step precache above —
+    // force a real network round-trip on cache miss instead of letting the
+    // browser's HTTP cache quietly hand back a stale copy.
+    const networkResponse = await fetch(request, { cache: "reload" });
     if (networkResponse && networkResponse.ok) {
       cache.put(request, networkResponse.clone());
     }
