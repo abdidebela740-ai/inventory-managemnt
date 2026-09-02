@@ -274,7 +274,9 @@
   //   "justified"   — requested qty lands within tolerance of target need —
   //                    brings the branch to (approximately) the 4-month
   //                    target without overshooting.
-  //   "constrained" — FULL-ALIGN-BRD: the requested qty is CORRECTLY sized
+  //   "constrained" — shown as "Priority-Blocked — HO01 Allocates 0 of X" (or
+  //                    "Priority-Limited — HO01 Allocates Y of X"). FULL-
+  //                    ALIGN-BRD: the requested qty is CORRECTLY sized
   //                    for the branch's own need (i.e. would otherwise be
   //                    "justified" or "under"), but Branch Demand's own
   //                    priority-tier allocation (brdComputeMaterialAllocation,
@@ -313,9 +315,15 @@
       const tol2 = Math.max(1, reqQty * 0.05);
       const shortBy = reqQty - allocInfo.allocQty;
       if (shortBy > tol2) {
+        const fullyOut = allocInfo.allocQty <= 0.0001;
         return { key: "constrained",
-          label: allocInfo.allocQty <= 0.0001 ? "Needed — HO01 Has None to Give" : "Needed — HO01 Can Only Partly Supply",
-          detail: allocInfo.explanation };
+          label: fullyOut
+            ? `Priority-Blocked — HO01 Allocates 0 of ${fmtQty(reqQty)}`
+            : `Priority-Limited — HO01 Allocates ${fmtQty(allocInfo.allocQty)} of ${fmtQty(reqQty)}`,
+          detail: (fullyOut
+            ? `${reqPlant || "This branch"} requested ${fmtQty(reqQty)}, which matches its own AMC-based need — but HO01's priority-tier allocation gives it 0, because every unit is already committed to higher-priority branches. `
+            : `${reqPlant || "This branch"} requested ${fmtQty(reqQty)}, which matches its own AMC-based need — but HO01's priority-tier allocation only grants it ${fmtQty(allocInfo.allocQty)}; the rest is already committed to higher-priority branches. `)
+            + allocInfo.explanation };
       }
     }
 
