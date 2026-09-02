@@ -550,16 +550,31 @@
   // export). This previously read row["Material Type"] directly, which was
   // always blank/undefined, so this map came back empty regardless of what
   // was loaded — the filter looked "connected" but could never resolve a
-  // single type. Keyed the same way as buildCanonicalDescMap (first
-  // non-blank value wins). Used to power the Material Type filter bar.
+  // single type. Used to power the Material Type filter bar AND the
+  // ZMD-EXCLUDE check below.
+  //
+  // ZMD-PRIORITY FIX: a canonical/mapped code can be an umbrella over
+  // several raw SAP codes (that's the whole point of the mapping table).
+  // If those raw codes carry DIFFERENT valuation types — one ZME, another
+  // genuinely ZMD — a plain "first non-blank wins" pick is order-dependent:
+  // whichever row happens to be encountered first in the loaded inventory
+  // decides the type for the WHOLE canonical group. If a non-ZMD row won
+  // that race, the group's ZMD raw code(s) become invisible to the
+  // ZMD-EXCLUDE check everywhere in this file (Tabs 1–5, including MOS
+  // Evaluation), since the check only ever sees the winning type. Since the
+  // rule is "ZMD must not be seen at all," we instead let ZMD win no matter
+  // what order rows are encountered in — a mixed group is excluded, not
+  // shown under whichever other type happened to load first.
   function buildMaterialTypeMap() {
     const out = new Map();
     const base = (typeof getReconciledBase === "function") ? getReconciledBase() : (typeof rawDf !== "undefined" ? rawDf : []);
     base.forEach(row => {
       const code = String(row._mappedMaterial || row["Material"] || "").trim();
-      if (!code || out.has(code)) return;
+      if (!code) return;
+      if (out.get(code) === "ZMD") return; // already flagged ZMD for this canonical — that wins, stop overwriting
       const type = (typeof getValuationType === "function" ? String(getValuationType(row) || "") : "").trim().toUpperCase();
-      if (type && type !== "(NONE)") out.set(code, type);
+      if (!type || type === "(NONE)") return;
+      if (type === "ZMD" || !out.has(code)) out.set(code, type);
     });
     return out;
   }
