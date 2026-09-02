@@ -586,6 +586,18 @@ function filterMosMergedByAccess(rows) {
 // way request-analysis.js's buildMaterialTypeMap() does (getValuationType()
 // from filters.js, over the mapping-reconciled base), just exposed globally
 // so any page can use it.
+//
+// ZMD-PRIORITY FIX: same order-dependence issue as
+// request-analysis.js's buildMaterialTypeMap() — a canonical code can
+// umbrella several raw SAP codes with different valuation types. Plain
+// first-non-blank-wins meant whichever row loaded first decided the type
+// for the whole group; a non-ZMD row winning that race made the group's
+// ZMD raw code(s) invisible to every ZMD-EXCLUDE check and Type filter
+// downstream (Overstock/Expiry Risk, Stockout Risk, MOS scope access via
+// filterMosMergedByAccess above). Since the rule is "ZMD must not be seen
+// at all," ZMD wins no matter what order rows are encountered in — a
+// mixed group is excluded, not shown under whichever other type happened
+// to load first.
 function buildCodeMaterialTypeMap() {
   const out = new Map();
   // FIX-CLS-PERSON-LEAK: was getReconciledBase() — see
@@ -606,9 +618,11 @@ function buildCodeMaterialTypeMap() {
     // then hard-denies that row for EVERY non-admin user — regardless of
     // their data_scopes — because Admin alone bypasses that function.
     const code = String(row._mappedMaterial || row["Material"] || "").trim().toUpperCase();
-    if (!code || out.has(code)) return;
+    if (!code) return;
+    if (out.get(code) === "ZMD") return; // already flagged ZMD for this canonical — that wins, stop overwriting
     const type = (typeof getValuationType === "function" ? String(getValuationType(row) || "") : "").trim().toUpperCase();
-    if (type && type !== "(NONE)") out.set(code, type);
+    if (!type || type === "(NONE)") return;
+    if (type === "ZMD" || !out.has(code)) out.set(code, type);
   });
   return out;
 }
