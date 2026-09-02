@@ -1980,6 +1980,7 @@
         <button class="reqan-tab-btn" data-tab="suggest">🗺️ Suggested Code Corrections <span class="reqan-tab-count" id="reqan-tab-count-suggest">0</span></button>
         <button class="reqan-tab-btn" data-tab="stockout">🚫 HO01 Stockout but Requested <span class="reqan-tab-count" id="reqan-tab-count-stockout">0</span></button>
         <button class="reqan-tab-btn" data-tab="notreq">📦 HO01 Stock Not Requested <span class="reqan-tab-count" id="reqan-tab-count-notreq">0</span></button>
+        <button class="reqan-tab-btn" data-tab="mos">🎯 MOS Evaluation (2–4 mo) <span class="reqan-tab-count" id="reqan-tab-count-mos">0</span></button>
       </div>
 
       <div id="reqan-tab-all" class="reqan-tab-panel" style="display:block;padding-top:1rem">
@@ -1993,6 +1994,13 @@
       </div>
       <div id="reqan-tab-notreq" class="reqan-tab-panel" style="display:none;padding-top:1rem">
         <div id="reqan-table-notreq"></div>
+      </div>
+      <div id="reqan-tab-mos" class="reqan-tab-panel" style="display:none;padding-top:1rem">
+        <div class="alert-info" style="margin-bottom:0.8rem;font-size:0.78rem">
+          🎯 Evaluates each requested QUANTITY against the same 2–4 month target-fill window Branch Demand uses — not just whether HO01 has stock for it. Nets out anything already in transit (Open Outbound) before judging the request.
+        </div>
+        <div class="kpi-row" id="reqan-mos-kpis" style="margin:0 0 1rem"></div>
+        <div id="reqan-table-mos"></div>
       </div>
     </div>
   </section>
