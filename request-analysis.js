@@ -673,6 +673,35 @@
     return "";
   }
 
+  // PURCH-ORG-CHECK / DUAL-STREAM-FIX: a canonical code can legitimately
+  // carry BOTH an RDF record and a separate Program(Q) record (see the LAW
+  // comment on buildMosMerged in mos.js) — a material isn't "RDF" or
+  // "Program", it can be both at once, each with its own AMC/classification
+  // row. clsMap.get(canonical) alone only ever returns the FIRST-SEEN
+  // classification for that code (see buildCodeProgramClassMap's own header
+  // comment), so for a dual-stream code it silently picks one stream and
+  // compares every request line for that material against only that one —
+  // producing a false "mismatch" on the other stream's correctly-typed
+  // lines. buildCodeProgramClassMap() also stores a TYPE-AWARE key
+  // ("CODE\u241FRDF" / "CODE\u241FQ") for exactly this reason; this helper
+  // checks both and returns every family the code is actually known to
+  // belong to, falling back to the plain-code key only when neither
+  // type-aware entry exists (single-stream / older-data case).
+  function classFamiliesForCode(clsMap, canonical) {
+    const out = new Set();
+    if (!canonical || !clsMap) return out;
+    const rdfCls = clsMap.get(canonical + "\u241F" + "RDF");
+    const qCls   = clsMap.get(canonical + "\u241F" + "Q");
+    if (rdfCls) out.add(classFamily(rdfCls));
+    if (qCls)   out.add(classFamily(qCls));
+    out.delete("");
+    if (out.size === 0) {
+      const plain = classFamily(clsMap.get(canonical));
+      if (plain) out.add(plain);
+    }
+    return out;
+  }
+
   // ── CORE ANALYSIS ──────────────────────────────────────────────────────────
   function buildRequestAnalysis() {
     const hub    = (typeof HUB_PLANT === "function" || typeof HUB_PLANT !== "undefined") ? HUB_PLANT : "HO01";
@@ -715,18 +744,62 @@
       // now for comparison against what the request file claims.
       const liveReqPlant = (canonical && reqPlant && sohMap.has(canonical)) ? (sohMap.get(canonical)[reqPlant] || 0) : 0;
       const person     = canonical ? (personMap.get(canonical) || "") : "";
-      const programClass = canonical ? (clsMap.get(canonical) || "") : "";
       const materialType = canonical ? (matTypeMap.get(canonical) || "") : "";
       const materialGroup = canonical ? (matGroupMap.get(canonical) || "") : "";
 
-      // PURCH-ORG-CHECK: does the request line's own Purchasing Org. match
-      // the funding family (RDF vs Program) its resolved material actually
-      // belongs to? Inconclusive (not flagged) when either side is unknown —
-      // blank/unrecognized Purchasing Org., or the material has no
-      // Classification on file.
+      // ZMD-EXCLUDE: per explicit scope, Request Analysis (same as Branch
+      // Demand) only covers ZME/ZMS/ZLC valuation-type materials. A ZMD
+      // item is dropped from the analysis entirely at this point — no row,
+      // no mismatch check, no MOS eval, nothing — rather than being shown
+      // with a warning. Filtered out of the final `rows` array below with
+      // `.filter(Boolean)`.
+      if (materialType === "ZMD") return null;
+
+      // PURCH-ORG-CHECK / SINGLE-STREAM-SCOPE: once we know which stream a
+      // line is FOR, everything shown/evaluated for that line should stay
+      // inside that one stream — an RD01 line reports RDF only, an HP02
+      // line reports Program only. Neither should surface, mix in, or get
+      // compared against the material's OTHER stream at all.
+      //
+      // knownFamilies = every family this canonical code actually has an
+      // AMC/classification record for (a code can genuinely have both —
+      // see classFamiliesForCode above — but any ONE request line is only
+      // ever for one of them).
+      //
+      // resolvedType decides which single stream this line belongs to:
+      //   1. Trust the line's own typed Purchasing Org. when it's valid FOR
+      //      THIS MATERIAL (i.e. the material actually has a record in that
+      //      family) — this is the strongest, most specific signal we have.
+      //   2. Otherwise, if the material only has ONE stream on file at all,
+      //      use that (nothing to disambiguate).
+      //   3. Otherwise (no usable Purchasing Org., material is dual-stream)
+      //      stays unresolved — we genuinely don't know which side this
+      //      line is, so we don't guess.
       const purchOrgExpectedFamily = purchOrgFamily(r.purchasingOrg);
-      const purchOrgActualFamily = classFamily(programClass);
-      const purchOrgMismatch = !!(purchOrgExpectedFamily && purchOrgActualFamily && purchOrgExpectedFamily !== purchOrgActualFamily);
+      const knownFamilies = classFamiliesForCode(clsMap, canonical);
+      let resolvedFamily = "";
+      if (purchOrgExpectedFamily && knownFamilies.has(purchOrgExpectedFamily)) {
+        resolvedFamily = purchOrgExpectedFamily;
+      } else if (knownFamilies.size === 1) {
+        resolvedFamily = [...knownFamilies][0];
+      }
+      const resolvedType = resolvedFamily === "PROGRAM" ? "Q" : (resolvedFamily === "RDF" ? "RDF" : "");
+
+      // programClass now reflects ONLY the resolved stream — an RD01 line
+      // never shows/carries the material's Program classification text (or
+      // vice versa), even when the material has both on file.
+      const programClass = resolvedType
+        ? (clsMap.get(canonical + "\u241F" + resolvedType) || "")
+        : (canonical ? (clsMap.get(canonical) || "") : "");
+
+      // purchOrgActualFamily mirrors resolvedFamily now that programClass is
+      // already single-stream — kept as its own variable for readability
+      // and because downstream code/exports already expect this name.
+      const purchOrgActualFamily = resolvedFamily;
+      // A real mismatch: the typed Purchasing Org. doesn't correspond to
+      // ANY family the material actually carries (e.g. RD01 typed on a
+      // Program-only item). Inconclusive when either side is unknown.
+      const purchOrgMismatch = !!(purchOrgExpectedFamily && knownFamilies.size > 0 && !knownFamilies.has(purchOrgExpectedFamily));
 
       // Storage Location cold/non-cold check: does the temperature zone of
       // the requesting plant's own Location (r.location, e.g. DEC1 = cold
@@ -742,7 +815,10 @@
       // REQUEST_ELIGIBILITY_MOS(2) window Branch Demand fills to. Uses this
       // request line's own requesting plant (reqPlant) and its live AMC/SOH,
       // netted against anything already in transit to it (Open Outbound).
-      const familyHint = purchOrgActualFamily || classFamily(programClass);
+      // SINGLE-STREAM-SCOPE: use the same resolvedFamily as everything else
+      // for this line, so the AMC row pulled for MOS eval is from the same
+      // stream as the classification/Purch Org check above — never a mix.
+      const familyHint = resolvedFamily;
       const amcRow = mosEvalAvailable ? findAmcRowForCanonical(canonical, familyHint) : null;
       const branchAmc = amcRow ? amcRow.amcs[reqPlant] : null;
       const hasAmc = branchAmc !== null && branchAmc !== undefined;
@@ -819,7 +895,7 @@
         suggestedDesc: hasSuggestion ? (resolved.desc || descMap.get(canonical) || "") : null,
         suggestedTotal: hasSuggestion ? suggestionCandidates.reduce((s, c) => s + c.qty, 0) : 0,
       };
-    });
+    }).filter(Boolean); // drops the ZMD-EXCLUDE `null`s above
 
     // ── DOUBLE REQUEST DETECTION ─────────────────────────────────────────────
     // Same physical item requested more than once in THIS file — same or
@@ -861,6 +937,10 @@
     const ho01NotRequestedAll = [];
     sohMap.forEach((plantMap, code) => {
       if (code.includes("\u241F")) return;
+      // ZMD-EXCLUDE: same scope restriction as the request-line rows above
+      // — ZMD items don't belong in Request Analysis at all, including this
+      // "idle at HO01" list.
+      if ((matTypeMap.get(code) || "") === "ZMD") return;
       const qty = plantMap[hub] || 0;
       if (qty > 0 && !requestedCanonical.has(code)) {
         ho01NotRequestedAll.push({ code, desc: descMap.get(code) || "", qty, person: personMap.get(code) || "", programClass: clsMap.get(code) || "", materialType: matTypeMap.get(code) || "", materialGroup: matGroupMap.get(code) || "" });
