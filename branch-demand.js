@@ -635,12 +635,27 @@ function brdScopeCodeForRow(row) {
 // classifiable row can be found (e.g. code not present in the current
 // upload), in which case callers should treat the line as unclassified
 // rather than silently guessing RD01/HP02.
-function brdMaterialScope(mappedCode) {
-  // Can't pass a preferred stock type here — determining it IS the point of
-  // this function — so gather every candidate source code regardless of
-  // type (see BUGFIX-MAPPING-SHAPE note on brdAllCandidateSources above;
-  // this used to go through brdPrimarySource(), which always came back
-  // empty and silently left most mapped materials "Unclassified").
+// preferredStockType: "RDF" or "Q" — the stream this specific demand line is
+// ALREADY known to belong to (row.type from mosMerged, itself resolved by
+// triangulating Inventory Special Stock Type + AMC Stock Type/Classification
+// + Mapping Stock Type in mos.js's truth table). A material code can
+// legitimately carry live stock in BOTH streams at once (see mos.js file
+// header) — e.g. Adrenaline may have an RDF-tagged batch AND a Q-tagged
+// batch sitting at HO01 simultaneously. Previously this function had no way
+// to know which stream a given demand line was for, so it always picked
+// whichever stream's inventory row held the most quantity at HO01,
+// regardless of type — meaning an RDF-CDSS demand line (per AMC) could
+// silently be assigned Health-Program Purchasing Group/Org just because the
+// Q-tagged batch happened to be bigger. When preferredStockType is given and
+// at least one candidate row matches it, we now restrict the qty tie-break
+// to ONLY that stream's rows, so Purch. Group/Org always agrees with the
+// AMC/mapping-derived classification instead of independently re-guessing
+// from raw inventory alone. Falls back to the old "most stock wins across
+// all streams" behavior when no preferred type is given, or none of the
+// candidates match it (so a material with e.g. only a Q batch on file still
+// resolves even if the demand line's own classification says RDF — better a
+// flagged best-effort answer than a hard "Unclassified").
+function brdMaterialScope(mappedCode, preferredStockType) {
   const allSrc = brdAllCandidateSources(mappedCode);
   // FIX-BRD-TARGET-OWN-STOCK: mappedCode may itself carry live inventory
   // rows even when it's ALSO the target of a reverse mapping rule (e.g. an
@@ -681,8 +696,18 @@ function brdMaterialScope(mappedCode) {
     // valuation type) even though the source code we were originally asked
     // about has none. Check for that before giving up on Purch. Group too.
     const stypeMap = mappingTable && mappingTable.get(String(mappedCode || "").trim().toUpperCase());
-    if (stypeMap && stypeMap.size === 1) {
-      const stype  = stypeMap.has("Q") ? "Q" : "RDF";
+    // When the mapping file has rows for BOTH stock types for this code and
+    // we know which stream this demand line is for, use that to pick the
+    // right one instead of giving up — same triangulation principle as the
+    // live-inventory branch below.
+    const wantedStype = preferredStockType === "Q" ? "Q" : (preferredStockType === "RDF" ? "RDF" : null);
+    const usableStype = stypeMap && (stypeMap.size === 1
+      ? true
+      : (wantedStype && stypeMap.has(wantedStype)));
+    if (stypeMap && usableStype) {
+      const stype  = (stypeMap.size === 1)
+        ? (stypeMap.has("Q") ? "Q" : "RDF")
+        : wantedStype;
       const prefix = stype === "Q" ? "Q" : "R";
       const entry  = stypeMap.get(stype);
       const targetCode = String((entry && entry.targetCode) || "").trim().toUpperCase();
@@ -698,8 +723,22 @@ function brdMaterialScope(mappedCode) {
     }
     return { scope: null, prefix: null, suffix: null };
   }
-  let best = rows[0], bestQty = -1;
-  rows.forEach(r => {
+  // TRIANGULATE-WITH-KNOWN-STREAM: restrict the tie-break pool to rows whose
+  // OWN Special Stock Type already matches the stream this demand line is
+  // known to be (preferredStockType), when any such row exists — see the
+  // function-header note above for why "most stock at HO01 wins" alone isn't
+  // safe once a code has live batches in both streams at once.
+  let pool = rows;
+  if (preferredStockType) {
+    const wantSst = preferredStockType === "Q" ? "Q" : "R";
+    const matching = rows.filter(r => {
+      const rowScope = brdScopeCodeForRow(r);
+      return rowScope && rowScope.split("_")[0] === wantSst;
+    });
+    if (matching.length) pool = matching;
+  }
+  let best = pool[0], bestQty = -1;
+  pool.forEach(r => {
     const qty = (Number(r["Unrestricted Stock"]) || 0) + (Number(r["Stock in Transit"]) || 0) + (Number(r["Stock in Quality Inspection"]) || 0);
     if (qty > bestQty) { bestQty = qty; best = r; }
   });
@@ -1426,7 +1465,13 @@ function brdBuildLines(sohMap) {
     // filter, RDF and Health Program need different Purchasing Group /
     // Purch. Organization codes so they shouldn't be mixed on one screen
     // or one export.
-    const matScope = brdMaterialScope(row.code);
+    // row.type ("RDF"/"Q") is this exact demand line's own stream, already
+    // triangulated from AMC Stock Type + Classification + Mapping Stock Type
+    // + live Inventory Special Stock Type by mos.js's buildMosMerged() — pass
+    // it through so brdMaterialScope() doesn't independently re-derive the
+    // stream from raw inventory qty alone and risk disagreeing with it (see
+    // brdMaterialScope's own header comment).
+    const matScope = brdMaterialScope(row.code, row.type);
     if (matScope.suffix) availableMatTypesSet.add(matScope.suffix);
     if (brdStockType && matScope.prefix !== brdStockType) return;
     // Material Type filter (ZME/ZMS/ZLC/ZMD — see brdMatTypeFilter above).
