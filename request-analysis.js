@@ -234,7 +234,7 @@
   // header, "Important Business Rule"). Pick the row matching this request
   // line's own funding family when we can tell; otherwise fall back to
   // whichever single row exists.
-  function findAmcRowForCanonical(canonical, familyHint) {
+  function findAmcRowForCanonical(canonical, familyHint, reqPlantCode) {
     if (!canonical || typeof mosMerged === "undefined" || !mosMerged.length) return null;
     const candidates = mosMerged.filter(m => m.code === canonical);
     if (!candidates.length) return null;
@@ -243,6 +243,19 @@
     if (wantType) {
       const match = candidates.find(m => m.type === wantType);
       if (match) return match;
+    }
+    // UNRESOLVED-STREAM-AMC-FALLBACK: we couldn't tell which stream this
+    // request line belongs to (blank/invalid Purchasing Org. on a
+    // dual-stream material — RDF AND Program both have a record for this
+    // code). Blindly picking candidates[0] here used to silently report
+    // "No AMC Data" whenever the AMC commitment for this branch actually
+    // lived on the OTHER stream, even though the branch genuinely has an
+    // AMC on file. Instead, prefer whichever stream actually carries a
+    // real (non-null) AMC value for the requesting plant; only fall back
+    // to candidates[0] when neither stream (or both, ambiguously) do.
+    if (reqPlantCode) {
+      const withAmc = candidates.filter(m => m.amcs && m.amcs[reqPlantCode] !== null && m.amcs[reqPlantCode] !== undefined);
+      if (withAmc.length === 1) return withAmc[0];
     }
     return candidates[0];
   }
@@ -890,7 +903,7 @@
       // for this line, so the AMC row pulled for MOS eval is from the same
       // stream as the classification/Purch Org check above — never a mix.
       const familyHint = resolvedFamily;
-      const amcRow = mosEvalAvailable ? findAmcRowForCanonical(canonical, familyHint) : null;
+      const amcRow = mosEvalAvailable ? findAmcRowForCanonical(canonical, familyHint, reqPlant) : null;
       const branchAmc = amcRow ? amcRow.amcs[reqPlant] : null;
       const hasAmc = branchAmc !== null && branchAmc !== undefined;
       const mosNow = hasAmc
